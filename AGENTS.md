@@ -1,6 +1,6 @@
 # agentqueue-v2
 
-Centralized agent job queue for orchestrating AI agent workloads. Successor to the original agentqueue.
+Centralized agent orchestrater for AI agent workloads.
 
 ## Architecture
 

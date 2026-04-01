@@ -15,11 +15,6 @@
       source = "skills/code-review/"
       path = ".pi/skills/code-review"
       hash = "d5a9bb533be802279c134a556abfeffc7a4e2c7b1a5e197cae78e2d4226e0fe7"
-    [deployed.skills.git-workflow]
-      store = "work"
-      source = "skills/git-workflow/"
-      path = ".pi/skills/git-workflow"
-      hash = "47f6a9c389203995ebe9c3eeff31fbb567c69cb494d5069c048e380ac975b3d3"
     [deployed.skills.pr-review-comments]
       store = "work"
       source = "skills/pr-review-comments/"
