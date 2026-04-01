@@ -1,0 +1,161 @@
+import * as cron from 'node-cron';
+import { CronSchedulerService } from './cron-scheduler.service.js';
+import type { TriggerConfigService } from './trigger-config.service.js';
+import type { ExecuteRunUseCase } from '../runs/application/execute-run.use-case.js';
+import type { CronTrigger } from './trigger-config.interface.js';
+
+jest.mock('node-cron');
+
+describe('CronSchedulerService', () => {
+  let scheduler: CronSchedulerService;
+  let triggerConfigService: jest.Mocked<TriggerConfigService>;
+  let executeRunUseCase: jest.Mocked<ExecuteRunUseCase>;
+  let mockTask: { stop: jest.Mock };
+
+  beforeEach(() => {
+    jest.restoreAllMocks();
+    jest.clearAllMocks();
+
+    mockTask = { stop: jest.fn() };
+
+    triggerConfigService = {
+      getCronTriggers: jest.fn().mockReturnValue([]),
+      getConfigPath: jest.fn(),
+    } as unknown as jest.Mocked<TriggerConfigService>;
+
+    executeRunUseCase = {
+      execute: jest.fn().mockResolvedValue({ success: true }),
+    } as unknown as jest.Mocked<ExecuteRunUseCase>;
+
+    scheduler = new CronSchedulerService(
+      triggerConfigService,
+      executeRunUseCase,
+    );
+  });
+
+  function makeTrigger(overrides: Partial<CronTrigger> = {}): CronTrigger {
+    return {
+      name: 'test-trigger',
+      schedule: '0 8 * * *',
+      target: 'assistant',
+      prompt: 'Run test',
+      ...overrides,
+    };
+  }
+
+  describe('onModuleInit', () => {
+    it('should register cron tasks for valid triggers', () => {
+      triggerConfigService.getCronTriggers.mockReturnValue([makeTrigger()]);
+      (cron.validate as jest.Mock).mockReturnValue(true);
+      (cron.schedule as jest.Mock).mockReturnValue(mockTask);
+
+      scheduler.onModuleInit();
+
+      expect(cron.schedule).toHaveBeenCalledWith(
+        '0 8 * * *',
+        expect.any(Function),
+      );
+    });
+
+    it('should skip triggers with invalid cron schedules', () => {
+      triggerConfigService.getCronTriggers.mockReturnValue([
+        makeTrigger({ schedule: 'not-a-cron' }),
+      ]);
+      (cron.validate as jest.Mock).mockReturnValue(false);
+
+      scheduler.onModuleInit();
+
+      expect(cron.schedule).not.toHaveBeenCalled();
+    });
+
+    it('should register multiple triggers', () => {
+      triggerConfigService.getCronTriggers.mockReturnValue([
+        makeTrigger({ name: 'first' }),
+        makeTrigger({ name: 'second', schedule: '*/5 * * * *' }),
+      ]);
+      (cron.validate as jest.Mock).mockReturnValue(true);
+      (cron.schedule as jest.Mock).mockReturnValue(mockTask);
+
+      scheduler.onModuleInit();
+
+      expect(cron.schedule).toHaveBeenCalledTimes(2);
+    });
+
+    it('should handle no triggers gracefully', () => {
+      triggerConfigService.getCronTriggers.mockReturnValue([]);
+
+      scheduler.onModuleInit();
+
+      expect(cron.schedule).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('onModuleDestroy', () => {
+    it('should stop all registered tasks', () => {
+      triggerConfigService.getCronTriggers.mockReturnValue([
+        makeTrigger(),
+        makeTrigger({ name: 'second' }),
+      ]);
+      (cron.validate as jest.Mock).mockReturnValue(true);
+
+      const task1 = { stop: jest.fn() };
+      const task2 = { stop: jest.fn() };
+      (cron.schedule as jest.Mock)
+        .mockReturnValueOnce(task1)
+        .mockReturnValueOnce(task2);
+
+      scheduler.onModuleInit();
+      scheduler.onModuleDestroy();
+
+      expect(task1.stop).toHaveBeenCalled();
+      expect(task2.stop).toHaveBeenCalled();
+    });
+
+    it('should handle destroy with no tasks', () => {
+      expect(() => scheduler.onModuleDestroy()).not.toThrow();
+    });
+  });
+
+  describe('cron tick handler', () => {
+    it('should call executeRunUseCase when cron fires', async () => {
+      triggerConfigService.getCronTriggers.mockReturnValue([
+        makeTrigger({ target: 'myrepo', prompt: 'Do something' }),
+      ]);
+      (cron.validate as jest.Mock).mockReturnValue(true);
+
+      let tickHandler: () => Promise<void>;
+      (cron.schedule as jest.Mock).mockImplementation((_schedule, handler) => {
+        tickHandler = handler as () => Promise<void>;
+        return mockTask;
+      });
+
+      scheduler.onModuleInit();
+
+      await tickHandler!();
+
+      expect(executeRunUseCase.execute).toHaveBeenCalledWith({
+        repo: 'myrepo',
+        prompt: 'Do something',
+      });
+    });
+
+    it('should not throw when executeRunUseCase fails', async () => {
+      triggerConfigService.getCronTriggers.mockReturnValue([makeTrigger()]);
+      (cron.validate as jest.Mock).mockReturnValue(true);
+      executeRunUseCase.execute.mockRejectedValue(new Error('Run failed'));
+
+      let tickHandler: () => Promise<void>;
+      (cron.schedule as jest.Mock).mockImplementation((_schedule, handler) => {
+        tickHandler = handler as () => Promise<void>;
+        return mockTask;
+      });
+
+      scheduler.onModuleInit();
+      // Should not throw — errors are caught and logged internally
+
+      await tickHandler!();
+
+      expect(executeRunUseCase.execute).toHaveBeenCalled();
+    });
+  });
+});

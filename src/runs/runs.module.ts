@@ -7,5 +7,6 @@ import { ExecuteRunUseCase } from './application/execute-run.use-case.js';
   imports: [CallbacksModule],
   controllers: [RunsController],
   providers: [ExecuteRunUseCase],
+  exports: [ExecuteRunUseCase],
 })
 export class RunsModule {}
