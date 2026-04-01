@@ -1,0 +1,45 @@
+# Only generated for medium/high tiers
+name: Dependency Check
+
+on:
+  pull_request:
+    paths:
+      - './src/**/*.ts'
+      - './.dependency-cruiser.cjs'
+      - '.github/workflows/dependency-check.yml'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+          cache-dependency-path: ./package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run dependency check
+        run: npm run deps:check
+
+      - name: Generate violation report (on failure)
+        if: failure()
+        run: |
+          npm run deps:check -- --output-type err-html > dependency-violations.html || true
+
+      - name: Upload violation report
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: dependency-violations
+          path: ./dependency-violations.html
+          retention-days: 7

@@ -1,0 +1,42 @@
+[deployed]
+  [deployed.instructions]
+    store = "work"
+    source = "instructions/agentqueue-v2.md"
+    path = "AGENTS.md"
+    hash = "79f8f90ca2435627f289dba6929390843dec2fe502c00c8605b5326b63b3eb34"
+  [deployed.skills]
+    [deployed.skills.backend-debugging]
+      store = "work"
+      source = "skills/backend-debugging/"
+      path = ".pi/skills/backend-debugging"
+      hash = "1f3aa7a336ab759203336879f2dfb4e3caf942b56503855a24aeddb97bc1414a"
+    [deployed.skills.code-review]
+      store = "work"
+      source = "skills/code-review/"
+      path = ".pi/skills/code-review"
+      hash = "d5a9bb533be802279c134a556abfeffc7a4e2c7b1a5e197cae78e2d4226e0fe7"
+    [deployed.skills.git-workflow]
+      store = "work"
+      source = "skills/git-workflow/"
+      path = ".pi/skills/git-workflow"
+      hash = "47f6a9c389203995ebe9c3eeff31fbb567c69cb494d5069c048e380ac975b3d3"
+    [deployed.skills.pr-review-comments]
+      store = "work"
+      source = "skills/pr-review-comments/"
+      path = ".pi/skills/pr-review-comments"
+      hash = "48512c3a2783c3eb413504f4a9e93cd013b18a37f06c23a54233a00575c57b7d"
+    [deployed.skills.rebase]
+      store = "work"
+      source = "skills/rebase/"
+      path = ".pi/skills/rebase"
+      hash = "32951f47853c1a7e582eca26579ef12571b2c4c6f9185c7cedbd372c2345b603"
+    [deployed.skills.use-case-reference]
+      store = "work"
+      source = "skills/use-case-reference/"
+      path = ".pi/skills/use-case-reference"
+      hash = "d5076514b087c5039f31b1c6351c1a75cd21a3787f306c644e7538d91f3455ec"
+    [deployed.skills.worktree]
+      store = "work"
+      source = "skills/worktree/"
+      path = ".pi/skills/worktree"
+      hash = "52476e931af0660789fba04feebc1e50965c57c4ce50ff8f6c486a8b7a42d0ca"
