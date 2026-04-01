@@ -24,6 +24,11 @@ agentqueue-v2/
 └── AGENTS.md               # Agent guidelines
 ```
 
+## Config Files
+
+- **Agentfiles config** (`~/.config/agentfiles/config.toml`): Defines repos (name → local path), stores, bundles. Parsed by `AgentfilesConfigService`.
+- **Triggers config** (`~/.agentqueue/triggers.yaml`): Defines cron triggers and webhook trigger settings (e.g. Linear). Parsed by `TriggerConfigService`.
+
 ## Dev Environment
 
 ```bash
