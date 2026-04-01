@@ -1,0 +1,1 @@
+export const CALLBACK_HANDLERS = Symbol('CALLBACK_HANDLERS');

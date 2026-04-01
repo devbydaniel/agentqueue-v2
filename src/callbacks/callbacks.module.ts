@@ -1,8 +1,5 @@
 import { Module } from '@nestjs/common';
-import {
-  CallbackManager,
-  CALLBACK_HANDLERS,
-} from './callback-manager.service.js';
+import { CALLBACK_HANDLERS } from './constants.js';
 import { LoggerCallbackHandler } from './handlers/logger.callback-handler.js';
 
 @Module({
@@ -13,8 +10,7 @@ import { LoggerCallbackHandler } from './handlers/logger.callback-handler.js';
       useFactory: (logger: LoggerCallbackHandler) => [logger],
       inject: [LoggerCallbackHandler],
     },
-    CallbackManager,
   ],
-  exports: [CallbackManager],
+  exports: [CALLBACK_HANDLERS],
 })
 export class CallbacksModule {}

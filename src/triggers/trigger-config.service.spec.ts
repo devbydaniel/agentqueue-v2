@@ -174,4 +174,169 @@ describe('TriggerConfigService', () => {
 
     expect(fs.existsSync).toHaveBeenCalledWith(configPath);
   });
+
+  // --- Linear trigger tests ---
+
+  it('should load a linear trigger when present', () => {
+    mockConfigFile({
+      triggers: [
+        {
+          name: 'linear',
+          type: 'linear',
+          signing_secret: 'secret123',
+          api_key: 'lin_api_abc',
+        },
+      ],
+    });
+
+    service = createService();
+    const linear = service.getLinearTrigger();
+
+    expect(linear).toBeDefined();
+    expect(linear!.name).toBe('linear');
+    expect(linear!.type).toBe('linear');
+    expect(linear!.signing_secret).toBe('secret123');
+    expect(linear!.api_key).toBe('lin_api_abc');
+  });
+
+  it('should return undefined when no linear trigger in config', () => {
+    mockConfigFile({
+      triggers: [
+        {
+          name: 'cron-only',
+          schedule: '0 8 * * *',
+          target: 'assistant',
+          prompt: 'Hello',
+        },
+      ],
+    });
+
+    service = createService();
+    expect(service.getLinearTrigger()).toBeUndefined();
+  });
+
+  it('should return undefined for linear trigger when file does not exist', () => {
+    mockNoFile();
+    service = createService();
+    expect(service.getLinearTrigger()).toBeUndefined();
+  });
+
+  it('should exclude linear triggers from getCronTriggers()', () => {
+    mockConfigFile({
+      triggers: [
+        {
+          name: 'cron-job',
+          schedule: '0 8 * * *',
+          target: 'assistant',
+          prompt: 'Hello',
+        },
+        {
+          name: 'linear',
+          type: 'linear',
+          signing_secret: 'secret',
+          api_key: 'key',
+        },
+      ],
+    });
+
+    service = createService();
+    const cron = service.getCronTriggers();
+
+    expect(cron).toHaveLength(1);
+    expect(cron[0].name).toBe('cron-job');
+  });
+
+  it('should interpolate ${VAR} syntax in linear trigger secrets', () => {
+    process.env['TEST_LINEAR_SECRET'] = 'interpolated_secret';
+    process.env['TEST_LINEAR_KEY'] = 'interpolated_key';
+
+    mockConfigFile({
+      triggers: [
+        {
+          name: 'linear',
+          type: 'linear',
+          signing_secret: '${TEST_LINEAR_SECRET}',
+          api_key: '${TEST_LINEAR_KEY}',
+        },
+      ],
+    });
+
+    service = createService();
+    const linear = service.getLinearTrigger();
+
+    expect(linear!.signing_secret).toBe('interpolated_secret');
+    expect(linear!.api_key).toBe('interpolated_key');
+
+    delete process.env['TEST_LINEAR_SECRET'];
+    delete process.env['TEST_LINEAR_KEY'];
+  });
+
+  it('should keep ${VAR} as-is if env var is not set', () => {
+    delete process.env['NONEXISTENT_VAR'];
+
+    mockConfigFile({
+      triggers: [
+        {
+          name: 'linear',
+          type: 'linear',
+          signing_secret: '${NONEXISTENT_VAR}',
+          api_key: 'literal_key',
+        },
+      ],
+    });
+
+    service = createService();
+    const linear = service.getLinearTrigger();
+
+    expect(linear!.signing_secret).toBe('${NONEXISTENT_VAR}');
+    expect(linear!.api_key).toBe('literal_key');
+  });
+
+  it('should handle mixed cron and linear triggers correctly', () => {
+    mockConfigFile({
+      triggers: [
+        {
+          name: 'morning',
+          schedule: '0 8 * * *',
+          target: 'assistant',
+          prompt: 'Morning',
+        },
+        {
+          name: 'linear',
+          type: 'linear',
+          signing_secret: 'sec',
+          api_key: 'key',
+        },
+        {
+          name: 'evening',
+          schedule: '0 18 * * *',
+          target: 'clerk',
+          prompt: 'Evening',
+        },
+      ],
+    });
+
+    service = createService();
+
+    expect(service.getCronTriggers()).toHaveLength(2);
+    expect(service.getCronTriggers()[0].name).toBe('morning');
+    expect(service.getCronTriggers()[1].name).toBe('evening');
+    expect(service.getLinearTrigger()).toBeDefined();
+    expect(service.getLinearTrigger()!.name).toBe('linear');
+  });
+
+  it('should skip invalid linear trigger (missing signing_secret)', () => {
+    mockConfigFile({
+      triggers: [
+        {
+          name: 'linear',
+          type: 'linear',
+          api_key: 'key',
+        },
+      ],
+    });
+
+    service = createService();
+    expect(service.getLinearTrigger()).toBeUndefined();
+  });
 });

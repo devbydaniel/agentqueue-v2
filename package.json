@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "@iarna/toml": "2.2.5",
+    "@linear/sdk": "80.1.0",
     "@mariozechner/pi-coding-agent": "0.64.0",
     "@nestjs/common": "11.1.17",
     "@nestjs/core": "11.1.17",

@@ -1,12 +1,15 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ApplicationError } from '../../common/errors/base.error.js';
-import { CallbackManager } from '../../callbacks/callback-manager.service.js';
+import { CALLBACK_HANDLERS } from '../../callbacks/constants.js';
+import type { CallbackHandler } from '../../callbacks/callback-handler.interface.js';
 import { AgentfilesConfigService } from '../../config/agentfiles-config.service.js';
 import { UnexpectedRunError } from './runs.errors.js';
+import type { AgentSession } from '@mariozechner/pi-coding-agent';
 
 interface ExecuteRunCommand {
   repo: string;
   prompt: string;
+  additionalHandlers?: CallbackHandler[];
 }
 
 export interface ExecuteRunResult {
@@ -19,7 +22,8 @@ export class ExecuteRunUseCase {
 
   constructor(
     private readonly agentfilesConfigService: AgentfilesConfigService,
-    private readonly callbackManager: CallbackManager,
+    @Inject(CALLBACK_HANDLERS)
+    private readonly globalHandlers: CallbackHandler[],
   ) {}
 
   async execute(command: ExecuteRunCommand): Promise<ExecuteRunResult> {
@@ -56,8 +60,9 @@ export class ExecuteRunUseCase {
       settingsManager,
     });
 
-    const detachCallbacks = this.callbackManager.attachToSession(
+    const detachCallbacks = this.attachHandlers(
       session.session,
+      command.additionalHandlers,
     );
 
     try {
@@ -71,5 +76,39 @@ export class ExecuteRunUseCase {
       detachCallbacks();
       session.session.dispose();
     }
+  }
+
+  private attachHandlers(
+    session: AgentSession,
+    additionalHandlers?: CallbackHandler[],
+  ): () => void {
+    const handlers = [...this.globalHandlers, ...(additionalHandlers ?? [])];
+
+    const unsubscribe = session.subscribe((event) => {
+      for (const handler of handlers) {
+        try {
+          const result = handler.onEvent(event);
+          if (result instanceof Promise) {
+            result.catch((err) => {
+              this.logger.error(
+                `Async callback handler "${handler.name}" rejected`,
+                { error: err as Error, eventType: event.type },
+              );
+            });
+          }
+        } catch (error) {
+          this.logger.error(`Callback handler "${handler.name}" threw`, {
+            error: error as Error,
+            eventType: event.type,
+          });
+        }
+      }
+    });
+
+    this.logger.debug('Attached callback handlers to session', {
+      count: handlers.length,
+    });
+
+    return unsubscribe;
   }
 }

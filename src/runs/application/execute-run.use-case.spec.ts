@@ -1,15 +1,20 @@
 import { Test } from '@nestjs/testing';
 import { ExecuteRunUseCase } from './execute-run.use-case.js';
 import { AgentfilesConfigService } from '../../config/agentfiles-config.service.js';
-import { CallbackManager } from '../../callbacks/callback-manager.service.js';
+import { CALLBACK_HANDLERS } from '../../callbacks/constants.js';
+import type { CallbackHandler } from '../../callbacks/callback-handler.interface.js';
 import { UnexpectedRunError } from './runs.errors.js';
 import { RepoNotFoundError } from '../../config/config.errors.js';
 
 // Mock the pi SDK module
 const mockUnsubscribe = jest.fn();
+let subscribeFn: ((event: unknown) => void) | undefined;
 const mockSession = {
   prompt: jest.fn().mockResolvedValue(undefined),
-  subscribe: jest.fn().mockReturnValue(mockUnsubscribe),
+  subscribe: jest.fn().mockImplementation((fn: (event: unknown) => void) => {
+    subscribeFn = fn;
+    return mockUnsubscribe;
+  }),
   dispose: jest.fn(),
 };
 
@@ -43,9 +48,14 @@ jest.mock(
 describe('ExecuteRunUseCase', () => {
   let useCase: ExecuteRunUseCase;
   let configService: AgentfilesConfigService;
+  const mockGlobalHandler: CallbackHandler = {
+    name: 'test-global',
+    onEvent: jest.fn(),
+  };
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    subscribeFn = undefined;
 
     const module = await Test.createTestingModule({
       providers: [
@@ -57,10 +67,8 @@ describe('ExecuteRunUseCase', () => {
           },
         },
         {
-          provide: CallbackManager,
-          useValue: {
-            attachToSession: jest.fn().mockReturnValue(jest.fn()),
-          },
+          provide: CALLBACK_HANDLERS,
+          useValue: [mockGlobalHandler],
         },
       ],
     }).compile();
@@ -137,5 +145,77 @@ describe('ExecuteRunUseCase', () => {
     await expect(
       useCase.execute({ repo: 'core', prompt: 'hello' }),
     ).rejects.toThrow(UnexpectedRunError);
+  });
+
+  it('should call additionalHandlers on session events', async () => {
+    const additionalHandler: CallbackHandler = {
+      name: 'test-additional',
+      onEvent: jest.fn(),
+    };
+
+    // Make prompt emit an event before resolving
+    mockSession.prompt.mockImplementationOnce(async () => {
+      subscribeFn?.({ type: 'agent_start' });
+    });
+
+    await useCase.execute({
+      repo: 'core',
+      prompt: 'hello',
+      additionalHandlers: [additionalHandler],
+    });
+
+    expect(additionalHandler.onEvent).toHaveBeenCalledWith({
+      type: 'agent_start',
+    });
+    expect(mockGlobalHandler.onEvent).toHaveBeenCalledWith({
+      type: 'agent_start',
+    });
+  });
+
+  it('should not crash if an additional handler throws synchronously', async () => {
+    const throwingHandler: CallbackHandler = {
+      name: 'throwing-handler',
+      onEvent: jest.fn().mockImplementation(() => {
+        throw new Error('handler exploded');
+      }),
+    };
+
+    const safeHandler: CallbackHandler = {
+      name: 'safe-handler',
+      onEvent: jest.fn(),
+    };
+
+    mockSession.prompt.mockImplementationOnce(async () => {
+      subscribeFn?.({ type: 'agent_start' });
+    });
+
+    const result = await useCase.execute({
+      repo: 'core',
+      prompt: 'hello',
+      additionalHandlers: [throwingHandler, safeHandler],
+    });
+
+    expect(result).toEqual({ success: true });
+    // The safe handler should still have been called after the throwing one
+    expect(safeHandler.onEvent).toHaveBeenCalled();
+  });
+
+  it('should not crash if an additional handler rejects asynchronously', async () => {
+    const rejectingHandler: CallbackHandler = {
+      name: 'rejecting-handler',
+      onEvent: jest.fn().mockRejectedValue(new Error('async boom')),
+    };
+
+    mockSession.prompt.mockImplementationOnce(async () => {
+      subscribeFn?.({ type: 'agent_start' });
+    });
+
+    const result = await useCase.execute({
+      repo: 'core',
+      prompt: 'hello',
+      additionalHandlers: [rejectingHandler],
+    });
+
+    expect(result).toEqual({ success: true });
   });
 });

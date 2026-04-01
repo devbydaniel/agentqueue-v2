@@ -6,7 +6,7 @@ import { ApplicationErrorFilter } from './common/filters/index.js';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { rawBody: true });
 
   app.useGlobalFilters(new ApplicationErrorFilter());
 
