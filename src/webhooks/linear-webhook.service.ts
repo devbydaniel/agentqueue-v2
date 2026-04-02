@@ -9,6 +9,7 @@ export interface LinearWebhookPayload {
   promptContext?: string;
   agentActivityBody?: string;
   issueId?: string;
+  signal?: string;
 }
 
 @Injectable()
@@ -43,12 +44,19 @@ export class LinearWebhookService {
     const data = this.extractData(payload);
     const action = payload['action'] as 'created' | 'prompted';
 
+    // Extract signal from agentActivity (e.g. "stop")
+    const agentActivity = payload['agentActivity'] as
+      | Record<string, unknown>
+      | undefined;
+    const signal = agentActivity?.['signal'] as string | undefined;
+
     return {
       action,
       agentSessionId: data['id'] as string,
       promptContext: data['promptContext'] as string | undefined,
       agentActivityBody: data['agentActivityBody'] as string | undefined,
       issueId: data['issueId'] as string | undefined,
+      signal,
     };
   }
 
@@ -58,7 +66,7 @@ export class LinearWebhookService {
 
   private validateTypeAndAction(payload: Record<string, unknown>): void {
     const type = payload['type'];
-    if (type !== 'AgentSession') {
+    if (type !== 'AgentSession' && type !== 'AgentSessionEvent') {
       throw new WebhookPayloadError(
         `unsupported webhook type: ${String(type)}`,
       );
@@ -73,28 +81,61 @@ export class LinearWebhookService {
   private extractData(
     payload: Record<string, unknown>,
   ): Record<string, unknown> {
-    const data = payload['data'] as Record<string, unknown> | undefined;
+    // Linear sends session data under "agentSession" or "data"
+    const data = (payload['agentSession'] ?? payload['data']) as
+      | Record<string, unknown>
+      | undefined;
     if (!data) {
-      throw new WebhookPayloadError('missing data field');
+      throw new WebhookPayloadError('missing agentSession/data field');
     }
 
-    const agentSessionId = data['id'] as string | undefined;
-    if (!agentSessionId) {
+    if (!data['id']) {
       throw new WebhookPayloadError('missing data.id (agentSessionId)');
     }
 
     const action = payload['action'] as string;
-    if (action === 'created' && !data['promptContext']) {
-      throw new WebhookPayloadError(
-        'missing data.promptContext for created action',
-      );
-    }
-    if (action === 'prompted' && !data['agentActivityBody']) {
-      throw new WebhookPayloadError(
-        'missing data.agentActivityBody for prompted action',
-      );
+    if (action === 'created') {
+      this.extractCreatedFields(payload, data);
+    } else if (action === 'prompted') {
+      this.extractPromptedFields(payload, data);
     }
 
     return data;
+  }
+
+  private extractCreatedFields(
+    payload: Record<string, unknown>,
+    data: Record<string, unknown>,
+  ): void {
+    // promptContext can be at top level of the webhook payload or inside agentSession
+    const promptContext =
+      (data['promptContext'] as string | undefined) ??
+      (payload['promptContext'] as string | undefined);
+    if (!promptContext) {
+      throw new WebhookPayloadError(
+        'missing promptContext for created action',
+      );
+    }
+    data['promptContext'] = promptContext;
+  }
+
+  private extractPromptedFields(
+    payload: Record<string, unknown>,
+    data: Record<string, unknown>,
+  ): void {
+    // Body and signal come from agentActivity
+    // A stop signal may not include a body, so only require body for non-stop prompts
+    const agentActivity = payload['agentActivity'] as
+      | Record<string, unknown>
+      | undefined;
+    if (agentActivity?.['body']) {
+      data['agentActivityBody'] = agentActivity['body'];
+    }
+    const signal = agentActivity?.['signal'] as string | undefined;
+    if (!data['agentActivityBody'] && signal !== 'stop') {
+      throw new WebhookPayloadError(
+        'missing agentActivity.body for prompted action',
+      );
+    }
   }
 }

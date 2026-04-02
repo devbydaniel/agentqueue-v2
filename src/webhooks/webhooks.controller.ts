@@ -1,4 +1,12 @@
-import { Controller, HttpCode, Logger, Param, Post, Req } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  HttpCode,
+  Logger,
+  Param,
+  Post,
+  Req,
+} from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { TriggerConfigService } from '../triggers/trigger-config.service.js';
 import { AgentfilesConfigService } from '../config/agentfiles-config.service.js';
@@ -27,6 +35,14 @@ export class WebhooksController {
     private readonly linearWebhookService: LinearWebhookService,
     private readonly executeRunUseCase: ExecuteRunUseCase,
   ) {}
+
+  @Get('linear/:agentName')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Webhook URL verification' })
+  @ApiResponse({ status: 200, description: 'URL is valid' })
+  verifyLinearWebhook(): { ok: boolean } {
+    return { ok: true };
+  }
 
   @Post('linear/:agentName')
   @HttpCode(200)
@@ -72,9 +88,14 @@ export class WebhooksController {
       throw new WebhookSignatureError();
     }
 
-    // 3. Verify timestamp
+    // 3. Verify timestamp (from header or body)
     const body = req.body as Record<string, unknown>;
-    const webhookTimestamp = body['webhookTimestamp'] as number | undefined;
+    const timestampHeader = req.headers['linear-timestamp'] as
+      | string
+      | undefined;
+    const webhookTimestamp =
+      (timestampHeader ? Number(timestampHeader) : undefined) ??
+      (body['webhookTimestamp'] as number | undefined);
     if (
       !webhookTimestamp ||
       !this.linearWebhookService.verifyTimestamp(webhookTimestamp)
@@ -84,18 +105,54 @@ export class WebhooksController {
 
     // 4. Parse payload
     const payload = this.linearWebhookService.parsePayload(body);
+    this.logger.log('Linear webhook received', {
+      agentName,
+      action: payload.action,
+      agentSessionId: payload.agentSessionId,
+      signal: payload.signal ?? 'none',
+    });
 
-    // 5. Resolve repo from agentName
+    // 5. Handle stop signal — abort running session immediately
+    if (payload.signal === 'stop') {
+      this.logger.log('Received stop signal, aborting session', {
+        agentSessionId: payload.agentSessionId,
+      });
+      const linearClient = this.linearWebhookService.createLinearClient(
+        linearConfig.api_key,
+      );
+      const linearHandler = new LinearCallbackHandler(
+        payload.agentSessionId,
+        linearClient,
+      );
+
+      void this.executeRunUseCase
+        .abortSession(payload.agentSessionId)
+        .then(async (aborted) => {
+          const message = aborted
+            ? 'Agent stopped by user request.'
+            : 'No active session found to stop.';
+          await linearHandler.emitResponse(message);
+        })
+        .catch((error: unknown) => {
+          this.logger.error('Failed to abort session', {
+            error: error as Error,
+          });
+        });
+
+      return { accepted: true };
+    }
+
+    // 6. Resolve repo from agentName
     const repo = agentName;
     this.agentfilesConfigService.resolveRepo(repo); // throws RepoNotFoundError if not found
 
-    // 6. Build prompt
+    // 7. Build prompt
     const prompt =
       payload.action === 'created'
         ? payload.promptContext!
         : payload.agentActivityBody!;
 
-    // 7. Create LinearCallbackHandler
+    // 8. Create LinearCallbackHandler
     const linearClient = this.linearWebhookService.createLinearClient(
       linearConfig.api_key,
     );
@@ -104,7 +161,7 @@ export class WebhooksController {
       linearClient,
     );
 
-    // 8. Fire run in background
+    // 9. Fire run in background
     this.logger.log('Firing async agent run from Linear webhook', {
       agentName,
       action: payload.action,
@@ -115,7 +172,11 @@ export class WebhooksController {
       .execute({
         repo,
         prompt,
+        sessionKey: payload.agentSessionId,
         additionalHandlers: [linearHandler],
+      })
+      .then(async () => {
+        await linearHandler.emitResponse('Completed.');
       })
       .catch(async (error: unknown) => {
         this.logger.error('Agent run from Linear webhook failed', {
@@ -134,7 +195,7 @@ export class WebhooksController {
         }
       });
 
-    // 9. Return 200 immediately
+    // 10. Return 200 immediately
     return { accepted: true };
   }
 }

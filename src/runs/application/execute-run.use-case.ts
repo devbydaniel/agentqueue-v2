@@ -10,6 +10,8 @@ interface ExecuteRunCommand {
   repo: string;
   prompt: string;
   additionalHandlers?: CallbackHandler[];
+  /** Optional key to track the session for later cancellation (e.g. Linear agentSessionId) */
+  sessionKey?: string;
 }
 
 export interface ExecuteRunResult {
@@ -19,12 +21,28 @@ export interface ExecuteRunResult {
 @Injectable()
 export class ExecuteRunUseCase {
   private readonly logger = new Logger(ExecuteRunUseCase.name);
+  private readonly activeSessions = new Map<string, AgentSession>();
 
   constructor(
     private readonly agentfilesConfigService: AgentfilesConfigService,
     @Inject(CALLBACK_HANDLERS)
     private readonly globalHandlers: CallbackHandler[],
   ) {}
+
+  /**
+   * Abort a tracked session by its key (e.g. Linear agentSessionId).
+   * Returns true if the session was found and aborted.
+   */
+  async abortSession(sessionKey: string): Promise<boolean> {
+    const session = this.activeSessions.get(sessionKey);
+    if (!session) {
+      this.logger.warn(`No active session found for key: ${sessionKey}`);
+      return false;
+    }
+    this.logger.log(`Aborting session: ${sessionKey}`);
+    await session.abort();
+    return true;
+  }
 
   async execute(command: ExecuteRunCommand): Promise<ExecuteRunResult> {
     this.logger.log('Executing run', {
@@ -65,6 +83,10 @@ export class ExecuteRunUseCase {
       command.additionalHandlers,
     );
 
+    if (command.sessionKey) {
+      this.activeSessions.set(command.sessionKey, session.session);
+    }
+
     try {
       await session.session.prompt(command.prompt);
       return { success: true };
@@ -73,6 +95,9 @@ export class ExecuteRunUseCase {
       this.logger.error('Error executing run', { error: error as Error });
       throw new UnexpectedRunError(error);
     } finally {
+      if (command.sessionKey) {
+        this.activeSessions.delete(command.sessionKey);
+      }
       detachCallbacks();
       session.session.dispose();
     }

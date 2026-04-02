@@ -51,6 +51,14 @@ export class LinearCallbackHandler implements CallbackHandler {
     await this.postActivity({ type: 'error', body: message });
   }
 
+  /**
+   * Emit a response activity back to Linear.
+   * Called when the agent completes or is stopped.
+   */
+  async emitResponse(message: string): Promise<void> {
+    await this.postActivity({ type: 'response', body: message });
+  }
+
   private mapEventToActivity(
     event: AgentSessionEvent,
   ): { content: Record<string, unknown>; ephemeral: boolean } | null {
@@ -80,12 +88,8 @@ export class LinearCallbackHandler implements CallbackHandler {
         ephemeral: false,
       };
     }
-    if (event.type === 'agent_end') {
-      return {
-        content: { type: 'response', body: 'Completed.' },
-        ephemeral: false,
-      };
-    }
+    // agent_end completion is handled by the controller after execute() resolves,
+    // so we don't emit a response here to avoid duplicates.
     return null;
   }
 
