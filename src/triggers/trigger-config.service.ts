@@ -14,20 +14,24 @@ import { interpolateEnvVars } from './trigger-config.interface.js';
 export class TriggerConfigService {
   private readonly logger = new Logger(TriggerConfigService.name);
   private readonly cronTriggers: CronTrigger[];
-  private readonly linearTrigger: LinearTrigger | undefined;
+  private readonly linearTriggers: LinearTrigger[];
 
   constructor() {
     const result = this.loadTriggers();
     this.cronTriggers = result.cron;
-    this.linearTrigger = result.linear;
+    this.linearTriggers = result.linear;
   }
 
   getCronTriggers(): CronTrigger[] {
     return this.cronTriggers;
   }
 
-  getLinearTrigger(): LinearTrigger | undefined {
-    return this.linearTrigger;
+  getLinearTriggers(): LinearTrigger[] {
+    return this.linearTriggers;
+  }
+
+  getLinearTrigger(name: string): LinearTrigger | undefined {
+    return this.linearTriggers.find((t) => t.name === name);
   }
 
   getConfigPath(): string {
@@ -36,7 +40,7 @@ export class TriggerConfigService {
 
   private loadTriggers(): {
     cron: CronTrigger[];
-    linear: LinearTrigger | undefined;
+    linear: LinearTrigger[];
   } {
     const configPath = this.getConfigPath();
 
@@ -45,7 +49,7 @@ export class TriggerConfigService {
       this.logger.warn(
         `Triggers config not found at ${configPath}, no cron triggers will be registered`,
       );
-      return { cron: [], linear: undefined };
+      return { cron: [], linear: [] };
     }
 
     try {
@@ -54,7 +58,7 @@ export class TriggerConfigService {
       const parsed = yaml.load(content) as TriggersFile | null;
 
       if (!parsed?.triggers) {
-        return { cron: [], linear: undefined };
+        return { cron: [], linear: [] };
       }
 
       const raw = parsed.triggers as unknown as Record<string, unknown>[];
@@ -63,19 +67,25 @@ export class TriggerConfigService {
         .filter((t) => !t['type'] || t['type'] === 'cron')
         .filter((t) => this.validateCronTrigger(t));
 
-      const linearEntry = raw.find((t) => t['type'] === 'linear');
-      let linear: LinearTrigger | undefined;
+      const linearEntries = raw
+        .filter((t) => t['type'] === 'linear')
+        .filter((t) => this.validateLinearTrigger(t))
+        .map(
+          (entry): LinearTrigger => ({
+            name: entry['name'] as string,
+            type: 'linear',
+            target: entry['target'] as string,
+            signing_secret: interpolateEnvVars(
+              entry['signing_secret'] as string,
+            ),
+            api_key: interpolateEnvVars(entry['api_key'] as string),
+          }),
+        );
 
-      if (linearEntry && this.validateLinearTrigger(linearEntry)) {
-        linear = {
-          name: linearEntry['name'] as string,
-          type: 'linear',
-          signing_secret: interpolateEnvVars(
-            linearEntry['signing_secret'] as string,
-          ),
-          api_key: interpolateEnvVars(linearEntry['api_key'] as string),
-        };
-        this.logger.log('Loaded linear trigger config');
+      if (linearEntries.length > 0) {
+        this.logger.log(
+          `Loaded ${linearEntries.length} linear trigger(s) from ${configPath}`,
+        );
       }
 
       this.logger.log(
@@ -83,13 +93,13 @@ export class TriggerConfigService {
       );
       return {
         cron: cronEntries as unknown as CronTrigger[],
-        linear,
+        linear: linearEntries,
       };
     } catch (error) {
       this.logger.error(
         `Failed to load triggers config: ${error instanceof Error ? error.message : String(error)}`,
       );
-      return { cron: [], linear: undefined };
+      return { cron: [], linear: [] };
     }
   }
 
@@ -111,12 +121,13 @@ export class TriggerConfigService {
 
   private validateLinearTrigger(trigger: Record<string, unknown>): boolean {
     const name = trigger['name'] as string | undefined;
+    const target = trigger['target'] as string | undefined;
     const signingSecret = trigger['signing_secret'] as string | undefined;
     const apiKey = trigger['api_key'] as string | undefined;
 
-    if (!name || !signingSecret || !apiKey) {
+    if (!name || !target || !signingSecret || !apiKey) {
       this.logger.warn(
-        `Linear trigger missing required fields (name, signing_secret, api_key): ${JSON.stringify(trigger)}`,
+        `Linear trigger missing required fields (name, target, signing_secret, api_key): ${JSON.stringify(trigger)}`,
       );
       return false;
     }

@@ -65,10 +65,10 @@ export class WebhooksController {
     @Param('agentName') agentName: string,
     @Req() req: RawBodyRequest,
   ): { accepted: boolean } {
-    // 1. Get linear trigger config
-    const linearConfig = this.triggerConfigService.getLinearTrigger();
+    // 1. Get linear trigger config for this agent
+    const linearConfig = this.triggerConfigService.getLinearTrigger(agentName);
     if (!linearConfig) {
-      throw new WebhookNotEnabledError();
+      throw new WebhookNotEnabledError(agentName);
     }
 
     // 2. Verify signature
@@ -142,8 +142,8 @@ export class WebhooksController {
       return { accepted: true };
     }
 
-    // 6. Resolve repo from agentName
-    const repo = agentName;
+    // 6. Resolve repo from target
+    const repo = linearConfig.target;
     this.agentfilesConfigService.resolveRepo(repo); // throws RepoNotFoundError if not found
 
     // 7. Build prompt

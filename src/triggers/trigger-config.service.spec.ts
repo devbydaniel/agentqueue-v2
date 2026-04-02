@@ -177,12 +177,13 @@ describe('TriggerConfigService', () => {
 
   // --- Linear trigger tests ---
 
-  it('should load a linear trigger when present', () => {
+  it('should load a single linear trigger', () => {
     mockConfigFile({
       triggers: [
         {
-          name: 'linear',
+          name: 'coding-agent',
           type: 'linear',
+          target: 'my-repo',
           signing_secret: 'secret123',
           api_key: 'lin_api_abc',
         },
@@ -190,16 +191,80 @@ describe('TriggerConfigService', () => {
     });
 
     service = createService();
-    const linear = service.getLinearTrigger();
+    const triggers = service.getLinearTriggers();
 
-    expect(linear).toBeDefined();
-    expect(linear!.name).toBe('linear');
-    expect(linear!.type).toBe('linear');
-    expect(linear!.signing_secret).toBe('secret123');
-    expect(linear!.api_key).toBe('lin_api_abc');
+    expect(triggers).toHaveLength(1);
+    expect(triggers[0].name).toBe('coding-agent');
+    expect(triggers[0].target).toBe('my-repo');
+    expect(triggers[0].signing_secret).toBe('secret123');
+    expect(triggers[0].api_key).toBe('lin_api_abc');
   });
 
-  it('should return undefined when no linear trigger in config', () => {
+  it('should load multiple linear triggers', () => {
+    mockConfigFile({
+      triggers: [
+        {
+          name: 'coding-agent',
+          type: 'linear',
+          target: 'repo-a',
+          signing_secret: 'secret-a',
+          api_key: 'key-a',
+        },
+        {
+          name: 'review-agent',
+          type: 'linear',
+          target: 'repo-b',
+          signing_secret: 'secret-b',
+          api_key: 'key-b',
+        },
+      ],
+    });
+
+    service = createService();
+    const triggers = service.getLinearTriggers();
+
+    expect(triggers).toHaveLength(2);
+    expect(triggers[0].name).toBe('coding-agent');
+    expect(triggers[0].target).toBe('repo-a');
+    expect(triggers[1].name).toBe('review-agent');
+    expect(triggers[1].target).toBe('repo-b');
+  });
+
+  it('should look up linear trigger by name', () => {
+    mockConfigFile({
+      triggers: [
+        {
+          name: 'coding-agent',
+          type: 'linear',
+          target: 'repo-a',
+          signing_secret: 'secret-a',
+          api_key: 'key-a',
+        },
+        {
+          name: 'review-agent',
+          type: 'linear',
+          target: 'repo-b',
+          signing_secret: 'secret-b',
+          api_key: 'key-b',
+        },
+      ],
+    });
+
+    service = createService();
+
+    const coding = service.getLinearTrigger('coding-agent');
+    expect(coding).toBeDefined();
+    expect(coding!.target).toBe('repo-a');
+    expect(coding!.signing_secret).toBe('secret-a');
+
+    const review = service.getLinearTrigger('review-agent');
+    expect(review).toBeDefined();
+    expect(review!.target).toBe('repo-b');
+
+    expect(service.getLinearTrigger('nonexistent')).toBeUndefined();
+  });
+
+  it('should return empty array when no linear triggers in config', () => {
     mockConfigFile({
       triggers: [
         {
@@ -212,13 +277,13 @@ describe('TriggerConfigService', () => {
     });
 
     service = createService();
-    expect(service.getLinearTrigger()).toBeUndefined();
+    expect(service.getLinearTriggers()).toEqual([]);
   });
 
-  it('should return undefined for linear trigger when file does not exist', () => {
+  it('should return empty array for linear triggers when file does not exist', () => {
     mockNoFile();
     service = createService();
-    expect(service.getLinearTrigger()).toBeUndefined();
+    expect(service.getLinearTriggers()).toEqual([]);
   });
 
   it('should exclude linear triggers from getCronTriggers()', () => {
@@ -231,8 +296,9 @@ describe('TriggerConfigService', () => {
           prompt: 'Hello',
         },
         {
-          name: 'linear',
+          name: 'coding-agent',
           type: 'linear',
+          target: 'my-repo',
           signing_secret: 'secret',
           api_key: 'key',
         },
@@ -253,8 +319,9 @@ describe('TriggerConfigService', () => {
     mockConfigFile({
       triggers: [
         {
-          name: 'linear',
+          name: 'coding-agent',
           type: 'linear',
+          target: 'my-repo',
           signing_secret: '${TEST_LINEAR_SECRET}',
           api_key: '${TEST_LINEAR_KEY}',
         },
@@ -262,7 +329,7 @@ describe('TriggerConfigService', () => {
     });
 
     service = createService();
-    const linear = service.getLinearTrigger();
+    const linear = service.getLinearTrigger('coding-agent');
 
     expect(linear!.signing_secret).toBe('interpolated_secret');
     expect(linear!.api_key).toBe('interpolated_key');
@@ -277,8 +344,9 @@ describe('TriggerConfigService', () => {
     mockConfigFile({
       triggers: [
         {
-          name: 'linear',
+          name: 'coding-agent',
           type: 'linear',
+          target: 'my-repo',
           signing_secret: '${NONEXISTENT_VAR}',
           api_key: 'literal_key',
         },
@@ -286,7 +354,7 @@ describe('TriggerConfigService', () => {
     });
 
     service = createService();
-    const linear = service.getLinearTrigger();
+    const linear = service.getLinearTrigger('coding-agent');
 
     expect(linear!.signing_secret).toBe('${NONEXISTENT_VAR}');
     expect(linear!.api_key).toBe('literal_key');
@@ -302,8 +370,9 @@ describe('TriggerConfigService', () => {
           prompt: 'Morning',
         },
         {
-          name: 'linear',
+          name: 'coding-agent',
           type: 'linear',
+          target: 'repo-a',
           signing_secret: 'sec',
           api_key: 'key',
         },
@@ -313,6 +382,13 @@ describe('TriggerConfigService', () => {
           target: 'clerk',
           prompt: 'Evening',
         },
+        {
+          name: 'review-agent',
+          type: 'linear',
+          target: 'repo-b',
+          signing_secret: 'sec2',
+          api_key: 'key2',
+        },
       ],
     });
 
@@ -321,22 +397,40 @@ describe('TriggerConfigService', () => {
     expect(service.getCronTriggers()).toHaveLength(2);
     expect(service.getCronTriggers()[0].name).toBe('morning');
     expect(service.getCronTriggers()[1].name).toBe('evening');
-    expect(service.getLinearTrigger()).toBeDefined();
-    expect(service.getLinearTrigger()!.name).toBe('linear');
+    expect(service.getLinearTriggers()).toHaveLength(2);
+    expect(service.getLinearTrigger('coding-agent')).toBeDefined();
+    expect(service.getLinearTrigger('review-agent')).toBeDefined();
   });
 
   it('should skip invalid linear trigger (missing signing_secret)', () => {
     mockConfigFile({
       triggers: [
         {
-          name: 'linear',
+          name: 'bad-agent',
           type: 'linear',
+          target: 'my-repo',
           api_key: 'key',
         },
       ],
     });
 
     service = createService();
-    expect(service.getLinearTrigger()).toBeUndefined();
+    expect(service.getLinearTriggers()).toEqual([]);
+  });
+
+  it('should skip invalid linear trigger (missing target)', () => {
+    mockConfigFile({
+      triggers: [
+        {
+          name: 'bad-agent',
+          type: 'linear',
+          signing_secret: 'secret',
+          api_key: 'key',
+        },
+      ],
+    });
+
+    service = createService();
+    expect(service.getLinearTriggers()).toEqual([]);
   });
 });

@@ -10,6 +10,7 @@ export interface CronTrigger {
 export interface LinearTrigger {
   name: string;
   type: 'linear';
+  target: string;
   signing_secret: string;
   api_key: string;
 }

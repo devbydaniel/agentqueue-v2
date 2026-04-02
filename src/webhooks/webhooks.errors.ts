@@ -23,12 +23,11 @@ export class WebhookSignatureError extends WebhookError {
 }
 
 export class WebhookNotEnabledError extends WebhookError {
-  constructor() {
-    super(
-      'Linear webhook integration is not configured',
-      WebhookErrorCode.NOT_ENABLED,
-      404,
-    );
+  constructor(agentName?: string) {
+    const detail = agentName
+      ? `Linear webhook not configured for agent '${agentName}'`
+      : 'Linear webhook integration is not configured';
+    super(detail, WebhookErrorCode.NOT_ENABLED, 404);
   }
 }
 

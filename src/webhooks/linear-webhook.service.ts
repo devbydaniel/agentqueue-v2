@@ -112,9 +112,7 @@ export class LinearWebhookService {
       (data['promptContext'] as string | undefined) ??
       (payload['promptContext'] as string | undefined);
     if (!promptContext) {
-      throw new WebhookPayloadError(
-        'missing promptContext for created action',
-      );
+      throw new WebhookPayloadError('missing promptContext for created action');
     }
     data['promptContext'] = promptContext;
   }
