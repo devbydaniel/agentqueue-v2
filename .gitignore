@@ -9,6 +9,8 @@ coverage/
 .DS_Store
 Thumbs.db
 *.tsbuildinfo
+.agentqueue.pid
+logs/
 .idea/
 .vscode/
 *.swp
