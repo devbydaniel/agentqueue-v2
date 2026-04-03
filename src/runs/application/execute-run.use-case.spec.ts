@@ -1,6 +1,7 @@
 import { Test } from '@nestjs/testing';
 import { ExecuteRunUseCase } from './execute-run.use-case.js';
 import { AgentfilesConfigService } from '../../config/agentfiles-config.service.js';
+import { SessionRegistryService } from '../session-registry.service.js';
 import { CALLBACK_HANDLERS } from '../../callbacks/constants.js';
 import type { CallbackHandler } from '../../callbacks/callback-handler.interface.js';
 import { UnexpectedRunError } from './runs.errors.js';
@@ -18,7 +19,10 @@ const mockSession = {
   dispose: jest.fn(),
 };
 
-const mockSessionManager = { buildSessionContext: jest.fn() };
+const mockSessionManager = {
+  buildSessionContext: jest.fn(),
+  getSessionFile: jest.fn().mockReturnValue('/sessions/test-session.jsonl'),
+};
 const mockAuthStorage = {};
 const mockModelRegistry = {};
 const mockSettingsManager = {};
@@ -30,6 +34,7 @@ jest.mock(
     createAgentSession: jest.fn().mockResolvedValue({ session: mockSession }),
     SessionManager: {
       create: jest.fn().mockReturnValue(mockSessionManager),
+      open: jest.fn().mockReturnValue(mockSessionManager),
     },
     AuthStorage: {
       create: jest.fn().mockReturnValue(mockAuthStorage),
@@ -48,6 +53,7 @@ jest.mock(
 describe('ExecuteRunUseCase', () => {
   let useCase: ExecuteRunUseCase;
   let configService: AgentfilesConfigService;
+  let sessionRegistry: SessionRegistryService;
   const mockGlobalHandler: CallbackHandler = {
     name: 'test-global',
     onEvent: jest.fn(),
@@ -67,6 +73,16 @@ describe('ExecuteRunUseCase', () => {
           },
         },
         {
+          provide: SessionRegistryService,
+          useValue: {
+            getSessionFile: jest.fn().mockReturnValue(undefined),
+            storeSessionFile: jest.fn(),
+            trackActive: jest.fn(),
+            untrackActive: jest.fn(),
+            abort: jest.fn().mockResolvedValue(true),
+          },
+        },
+        {
           provide: CALLBACK_HANDLERS,
           useValue: [mockGlobalHandler],
         },
@@ -75,6 +91,7 @@ describe('ExecuteRunUseCase', () => {
 
     useCase = module.get(ExecuteRunUseCase);
     configService = module.get(AgentfilesConfigService);
+    sessionRegistry = module.get(SessionRegistryService);
   });
 
   it('should resolve the repo via config service', async () => {
@@ -289,5 +306,111 @@ describe('ExecuteRunUseCase', () => {
     )[0] as Record<string, unknown>;
     expect(options).not.toHaveProperty('systemPromptOverride');
     expect(options).not.toHaveProperty('appendSystemPromptOverride');
+  });
+
+  describe('session resumption', () => {
+    it('should open existing session when registry has a stored file', async () => {
+      const { SessionManager } = await import('@mariozechner/pi-coding-agent');
+      (sessionRegistry.getSessionFile as jest.Mock).mockReturnValueOnce(
+        '/sessions/existing.jsonl',
+      );
+
+      await useCase.execute({
+        repo: 'core',
+        prompt: 'follow up',
+        sessionKey: 'linear-session-1',
+      });
+
+      expect(sessionRegistry.getSessionFile).toHaveBeenCalledWith(
+        'linear-session-1',
+      );
+      expect(SessionManager.open).toHaveBeenCalledWith(
+        '/sessions/existing.jsonl',
+      );
+      expect(SessionManager.create).not.toHaveBeenCalled();
+    });
+
+    it('should fall back to create when open fails', async () => {
+      const { SessionManager } = await import('@mariozechner/pi-coding-agent');
+      (sessionRegistry.getSessionFile as jest.Mock).mockReturnValueOnce(
+        '/sessions/missing.jsonl',
+      );
+      (SessionManager.open as jest.Mock).mockImplementationOnce(() => {
+        throw new Error('file not found');
+      });
+
+      await useCase.execute({
+        repo: 'core',
+        prompt: 'follow up',
+        sessionKey: 'linear-session-1',
+      });
+
+      expect(SessionManager.open).toHaveBeenCalled();
+      expect(SessionManager.create).toHaveBeenCalled();
+    });
+
+    it('should store session file in registry after creation', async () => {
+      await useCase.execute({
+        repo: 'core',
+        prompt: 'hello',
+        sessionKey: 'linear-session-1',
+      });
+
+      expect(sessionRegistry.storeSessionFile).toHaveBeenCalledWith(
+        'linear-session-1',
+        '/sessions/test-session.jsonl',
+      );
+    });
+
+    it('should not query registry when no sessionKey is provided', async () => {
+      const { SessionManager } = await import('@mariozechner/pi-coding-agent');
+
+      await useCase.execute({ repo: 'core', prompt: 'hello' });
+
+      expect(sessionRegistry.getSessionFile).not.toHaveBeenCalled();
+      expect(sessionRegistry.storeSessionFile).not.toHaveBeenCalled();
+      expect(SessionManager.create).toHaveBeenCalled();
+      expect(SessionManager.open).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('active session tracking', () => {
+    it('should track and untrack active session via registry', async () => {
+      await useCase.execute({
+        repo: 'core',
+        prompt: 'hello',
+        sessionKey: 'linear-session-1',
+      });
+
+      expect(sessionRegistry.trackActive).toHaveBeenCalledWith(
+        'linear-session-1',
+        mockSession,
+      );
+      expect(sessionRegistry.untrackActive).toHaveBeenCalledWith(
+        'linear-session-1',
+      );
+    });
+
+    it('should untrack on error', async () => {
+      mockSession.prompt.mockRejectedValueOnce(new Error('boom'));
+
+      await expect(
+        useCase.execute({
+          repo: 'core',
+          prompt: 'hello',
+          sessionKey: 'linear-session-1',
+        }),
+      ).rejects.toThrow();
+
+      expect(sessionRegistry.untrackActive).toHaveBeenCalledWith(
+        'linear-session-1',
+      );
+    });
+
+    it('should delegate abort to registry', async () => {
+      await useCase.abortSession('linear-session-1');
+
+      expect(sessionRegistry.abort).toHaveBeenCalledWith('linear-session-1');
+    });
   });
 });

@@ -3,6 +3,7 @@ import { ApplicationError } from '../../common/errors/base.error.js';
 import { CALLBACK_HANDLERS } from '../../callbacks/constants.js';
 import type { CallbackHandler } from '../../callbacks/callback-handler.interface.js';
 import { AgentfilesConfigService } from '../../config/agentfiles-config.service.js';
+import { SessionRegistryService } from '../session-registry.service.js';
 import { UnexpectedRunError } from './runs.errors.js';
 import type { AgentSession } from '@mariozechner/pi-coding-agent';
 
@@ -25,10 +26,10 @@ export interface ExecuteRunResult {
 @Injectable()
 export class ExecuteRunUseCase {
   private readonly logger = new Logger(ExecuteRunUseCase.name);
-  private readonly activeSessions = new Map<string, AgentSession>();
 
   constructor(
     private readonly agentfilesConfigService: AgentfilesConfigService,
+    private readonly sessionRegistry: SessionRegistryService,
     @Inject(CALLBACK_HANDLERS)
     private readonly globalHandlers: CallbackHandler[],
   ) {}
@@ -38,14 +39,7 @@ export class ExecuteRunUseCase {
    * Returns true if the session was found and aborted.
    */
   async abortSession(sessionKey: string): Promise<boolean> {
-    const session = this.activeSessions.get(sessionKey);
-    if (!session) {
-      this.logger.warn(`No active session found for key: ${sessionKey}`);
-      return false;
-    }
-    this.logger.log(`Aborting session: ${sessionKey}`);
-    await session.abort();
-    return true;
+    return this.sessionRegistry.abort(sessionKey);
   }
 
   async execute(command: ExecuteRunCommand): Promise<ExecuteRunResult> {
@@ -89,14 +83,46 @@ export class ExecuteRunUseCase {
     const resourceLoader = new DefaultResourceLoader(resourceLoaderOptions);
     await resourceLoader.reload();
 
+    // Resume existing pi session or create a new one
+    const existingSessionFile = command.sessionKey
+      ? this.sessionRegistry.getSessionFile(command.sessionKey)
+      : undefined;
+
+    let sessionMgr: ReturnType<typeof SessionManager.create>;
+    if (existingSessionFile) {
+      try {
+        sessionMgr = SessionManager.open(existingSessionFile);
+        this.logger.log('Resuming pi session', {
+          sessionKey: command.sessionKey,
+          sessionFile: existingSessionFile,
+        });
+      } catch (error) {
+        this.logger.warn('Failed to resume pi session, starting new', {
+          sessionKey: command.sessionKey,
+          error: error as Error,
+        });
+        sessionMgr = SessionManager.create(cwd);
+      }
+    } else {
+      sessionMgr = SessionManager.create(cwd);
+    }
+
     const session = await createAgentSession({
       cwd,
-      sessionManager: SessionManager.create(cwd),
+      sessionManager: sessionMgr,
       authStorage,
       modelRegistry,
       resourceLoader,
       settingsManager,
     });
+
+    // Store session file path for future resumption
+    if (command.sessionKey) {
+      const sessionFile = sessionMgr.getSessionFile();
+      if (sessionFile) {
+        this.sessionRegistry.storeSessionFile(command.sessionKey, sessionFile);
+      }
+    }
 
     const detachCallbacks = this.attachHandlers(
       session.session,
@@ -104,7 +130,7 @@ export class ExecuteRunUseCase {
     );
 
     if (command.sessionKey) {
-      this.activeSessions.set(command.sessionKey, session.session);
+      this.sessionRegistry.trackActive(command.sessionKey, session.session);
     }
 
     try {
@@ -116,7 +142,7 @@ export class ExecuteRunUseCase {
       throw new UnexpectedRunError(error);
     } finally {
       if (command.sessionKey) {
-        this.activeSessions.delete(command.sessionKey);
+        this.sessionRegistry.untrackActive(command.sessionKey);
       }
       detachCallbacks();
       session.session.dispose();
