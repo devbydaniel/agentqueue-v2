@@ -19,8 +19,27 @@ export interface LinearTrigger {
   append_system_prompt?: string;
 }
 
+export interface WebhookFilter {
+  field: string;
+  equals?: string;
+  contains?: string;
+  in?: string[];
+  pattern?: string;
+}
+
+export interface GithubTrigger {
+  name: string;
+  type: 'github';
+  events: string[];
+  target: string;
+  prompt: string;
+  filters?: WebhookFilter[];
+  prepend_system_prompt?: string;
+  append_system_prompt?: string;
+}
+
 export interface TriggersFile {
-  triggers: (CronTrigger | LinearTrigger)[];
+  triggers: (CronTrigger | LinearTrigger | GithubTrigger)[];
 }
 
 /**

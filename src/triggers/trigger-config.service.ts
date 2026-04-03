@@ -5,8 +5,10 @@ import * as path from 'node:path';
 import * as yaml from 'js-yaml';
 import type {
   CronTrigger,
+  GithubTrigger,
   LinearTrigger,
   TriggersFile,
+  WebhookFilter,
 } from './trigger-config.interface.js';
 import { interpolateEnvVars } from './trigger-config.interface.js';
 
@@ -15,11 +17,13 @@ export class TriggerConfigService {
   private readonly logger = new Logger(TriggerConfigService.name);
   private readonly cronTriggers: CronTrigger[];
   private readonly linearTriggers: LinearTrigger[];
+  private readonly githubTriggers: GithubTrigger[];
 
   constructor() {
     const result = this.loadTriggers();
     this.cronTriggers = result.cron;
     this.linearTriggers = result.linear;
+    this.githubTriggers = result.github;
   }
 
   getCronTriggers(): CronTrigger[] {
@@ -34,6 +38,10 @@ export class TriggerConfigService {
     return this.linearTriggers.find((t) => t.name === name);
   }
 
+  getGithubTriggers(): GithubTrigger[] {
+    return this.githubTriggers;
+  }
+
   getConfigPath(): string {
     return path.join(os.homedir(), '.agentqueue', 'triggers.yaml');
   }
@@ -41,6 +49,7 @@ export class TriggerConfigService {
   private loadTriggers(): {
     cron: CronTrigger[];
     linear: LinearTrigger[];
+    github: GithubTrigger[];
   } {
     const configPath = this.getConfigPath();
 
@@ -49,7 +58,7 @@ export class TriggerConfigService {
       this.logger.warn(
         `Triggers config not found at ${configPath}, no cron triggers will be registered`,
       );
-      return { cron: [], linear: [] };
+      return { cron: [], linear: [], github: [] };
     }
 
     try {
@@ -58,7 +67,7 @@ export class TriggerConfigService {
       const parsed = yaml.load(content) as TriggersFile | null;
 
       if (!parsed?.triggers) {
-        return { cron: [], linear: [] };
+        return { cron: [], linear: [], github: [] };
       }
 
       const raw = parsed.triggers as unknown as Record<string, unknown>[];
@@ -94,9 +103,43 @@ export class TriggerConfigService {
           }),
         );
 
+      const githubEntries = raw
+        .filter((t) => t['type'] === 'github')
+        .filter((t) => this.validateGithubTrigger(t))
+        .map(
+          (entry): GithubTrigger => ({
+            name: entry['name'] as string,
+            type: 'github',
+            events: entry['events'] as string[],
+            target: entry['target'] as string,
+            prompt: entry['prompt'] as string,
+            ...(entry['filters']
+              ? { filters: entry['filters'] as WebhookFilter[] }
+              : {}),
+            ...(entry['prepend_system_prompt']
+              ? {
+                  prepend_system_prompt: entry[
+                    'prepend_system_prompt'
+                  ] as string,
+                }
+              : {}),
+            ...(entry['append_system_prompt']
+              ? {
+                  append_system_prompt: entry['append_system_prompt'] as string,
+                }
+              : {}),
+          }),
+        );
+
       if (linearEntries.length > 0) {
         this.logger.log(
           `Loaded ${linearEntries.length} linear trigger(s) from ${configPath}`,
+        );
+      }
+
+      if (githubEntries.length > 0) {
+        this.logger.log(
+          `Loaded ${githubEntries.length} github trigger(s) from ${configPath}`,
         );
       }
 
@@ -106,12 +149,13 @@ export class TriggerConfigService {
       return {
         cron: cronEntries as unknown as CronTrigger[],
         linear: linearEntries,
+        github: githubEntries,
       };
     } catch (error) {
       this.logger.error(
         `Failed to load triggers config: ${error instanceof Error ? error.message : String(error)}`,
       );
-      return { cron: [], linear: [] };
+      return { cron: [], linear: [], github: [] };
     }
   }
 
@@ -144,6 +188,65 @@ export class TriggerConfigService {
       return false;
     }
 
+    return true;
+  }
+
+  private validateGithubTrigger(trigger: Record<string, unknown>): boolean {
+    const name = trigger['name'] as string | undefined;
+    const events = trigger['events'];
+    const target = trigger['target'] as string | undefined;
+    const prompt = trigger['prompt'] as string | undefined;
+
+    if (!name || !target || !prompt) {
+      this.logger.warn(
+        `GitHub trigger missing required fields (name, target, prompt): ${JSON.stringify(trigger)}`,
+      );
+      return false;
+    }
+
+    if (!events || !Array.isArray(events) || events.length === 0) {
+      this.logger.warn(
+        `GitHub trigger "${name}" missing or empty events array`,
+      );
+      return false;
+    }
+
+    if (trigger['filters'] !== undefined) {
+      if (!Array.isArray(trigger['filters'])) {
+        this.logger.warn(`GitHub trigger "${name}" filters must be an array`);
+        return false;
+      }
+      if (!this.validateFilters(name, trigger['filters'] as WebhookFilter[])) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private validateFilters(
+    triggerName: string,
+    filters: WebhookFilter[],
+  ): boolean {
+    for (const filter of filters) {
+      if (!filter.field || typeof filter.field !== 'string') {
+        this.logger.warn(
+          `GitHub trigger "${triggerName}" has a filter missing "field"`,
+        );
+        return false;
+      }
+      if (filter.pattern !== undefined) {
+        try {
+          // eslint-disable-next-line security/detect-non-literal-regexp -- pattern is from admin trigger config, not user input
+          new RegExp(filter.pattern);
+        } catch {
+          this.logger.warn(
+            `GitHub trigger "${triggerName}" filter on "${filter.field}" has invalid regex: ${filter.pattern}`,
+          );
+          return false;
+        }
+      }
+    }
     return true;
   }
 }

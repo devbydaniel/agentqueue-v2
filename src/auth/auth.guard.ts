@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { timingSafeEqual } from 'node:crypto';
+import { AppConfigService } from '../config/app-config.service.js';
 import { IS_PUBLIC_KEY } from './public.decorator.js';
 
 @Injectable()
@@ -14,12 +15,11 @@ export class AuthGuard implements CanActivate {
   private readonly logger = new Logger(AuthGuard.name);
   private readonly token: string;
 
-  constructor(private readonly reflector: Reflector) {
-    const token = process.env.AUTH_TOKEN;
-    if (!token) {
-      throw new Error('AUTH_TOKEN environment variable is required');
-    }
-    this.token = token;
+  constructor(
+    private readonly reflector: Reflector,
+    appConfig: AppConfigService,
+  ) {
+    this.token = appConfig.authToken;
   }
 
   canActivate(context: ExecutionContext): boolean {

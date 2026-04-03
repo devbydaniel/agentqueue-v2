@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import type { AgentSessionEvent } from '@mariozechner/pi-coding-agent';
+import { AppConfigService } from '../../config/app-config.service.js';
 import {
   startObservation,
   type LangfuseSpan,
@@ -69,8 +70,8 @@ export class LangfuseCallbackHandler implements CallbackHandler {
   /** Whether Langfuse credentials are configured. */
   private readonly enabled: boolean;
 
-  constructor() {
-    this.enabled = !!process.env.LANGFUSE_SECRET_KEY;
+  constructor(appConfig: AppConfigService) {
+    this.enabled = appConfig.langfuseEnabled;
     if (!this.enabled) {
       this.logger.warn(
         'LANGFUSE_SECRET_KEY not set — Langfuse tracing disabled',

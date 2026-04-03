@@ -13,6 +13,7 @@ import { interpolateTemplate } from '../triggers/trigger-config.interface.js';
 import { AgentfilesConfigService } from '../config/agentfiles-config.service.js';
 import { ExecuteRunUseCase } from '../runs/application/execute-run.use-case.js';
 import { LinearWebhookService } from './linear-webhook.service.js';
+import { GithubWebhookService } from './github/github-webhook.service.js';
 import { LinearCallbackHandler } from '../callbacks/handlers/linear.callback-handler.js';
 import {
   WebhookNotEnabledError,
@@ -36,6 +37,7 @@ export class WebhooksController {
     private readonly triggerConfigService: TriggerConfigService,
     private readonly agentfilesConfigService: AgentfilesConfigService,
     private readonly linearWebhookService: LinearWebhookService,
+    private readonly githubWebhookService: GithubWebhookService,
     private readonly executeRunUseCase: ExecuteRunUseCase,
   ) {}
 
@@ -219,5 +221,45 @@ export class WebhooksController {
 
     // 10. Return 200 immediately
     return { accepted: true };
+  }
+
+  @Post('github')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Receive GitHub webhooks',
+    description:
+      'Verifies the webhook signature, matches against configured GitHub triggers, and fires agent runs for matching triggers.',
+  })
+  @ApiResponse({ status: 200, description: 'Webhook processed' })
+  @ApiResponse({ status: 401, description: 'Invalid signature' })
+  handleGithubWebhook(@Req() req: RawBodyRequest): {
+    accepted: boolean;
+    triggered: number;
+  } {
+    // 1. Verify signature
+    const rawBody = req.rawBody;
+    const signature = req.headers['x-hub-signature-256'] as string | undefined;
+    if (!rawBody || !signature) {
+      throw new WebhookSignatureError('Missing signature or raw body');
+    }
+    this.githubWebhookService.verifySignature(rawBody, signature);
+
+    // 2. Extract event type
+    const eventType =
+      (req.headers['x-github-event'] as string | undefined) ?? 'unknown';
+    const body = req.body as Record<string, unknown>;
+
+    this.logger.log('GitHub webhook received', {
+      event: eventType,
+      action: body['action'],
+      repository: (body['repository'] as Record<string, unknown> | undefined)?.[
+        'full_name'
+      ],
+    });
+
+    // 3. Match triggers and fire runs
+    const result = this.githubWebhookService.handleEvent(eventType, body);
+
+    return { accepted: true, triggered: result.triggered };
   }
 }

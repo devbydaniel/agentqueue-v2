@@ -1,6 +1,7 @@
 import { type ExecutionContext, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { AuthGuard } from './auth.guard.js';
+import { AppConfigService } from '../config/app-config.service.js';
 
 describe('AuthGuard', () => {
   const TEST_TOKEN = 'test-secret-token';
@@ -38,7 +39,7 @@ describe('AuthGuard', () => {
   beforeEach(() => {
     process.env.AUTH_TOKEN = TEST_TOKEN;
     reflector = new Reflector();
-    guard = new AuthGuard(reflector);
+    guard = new AuthGuard(reflector, new AppConfigService());
   });
 
   afterEach(() => {
@@ -47,7 +48,7 @@ describe('AuthGuard', () => {
 
   it('should throw during construction if AUTH_TOKEN is not set', () => {
     delete process.env.AUTH_TOKEN;
-    expect(() => new AuthGuard(reflector)).toThrow(
+    expect(() => new AuthGuard(reflector, new AppConfigService())).toThrow(
       'AUTH_TOKEN environment variable is required',
     );
   });

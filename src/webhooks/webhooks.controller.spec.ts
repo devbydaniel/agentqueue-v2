@@ -4,6 +4,7 @@ import request from 'supertest';
 import { createHmac } from 'node:crypto';
 import { WebhooksController } from './webhooks.controller.js';
 import { LinearWebhookService } from './linear-webhook.service.js';
+import { GithubWebhookService } from './github/github-webhook.service.js';
 import { TriggerConfigService } from '../triggers/trigger-config.service.js';
 import { AgentfilesConfigService } from '../config/agentfiles-config.service.js';
 import { ExecuteRunUseCase } from '../runs/application/execute-run.use-case.js';
@@ -49,6 +50,13 @@ describe('WebhooksController', () => {
       controllers: [WebhooksController],
       providers: [
         LinearWebhookService,
+        {
+          provide: GithubWebhookService,
+          useValue: {
+            verifySignature: jest.fn(),
+            handleEvent: jest.fn().mockReturnValue({ triggered: 0 }),
+          },
+        },
         {
           provide: TriggerConfigService,
           useValue: {
