@@ -28,15 +28,13 @@ info "Pulling latest changes"
 git pull --ff-only || fail "git pull failed — resolve manually"
 ok "Up to date"
 
-#─── Install dependencies ─────────────────────────────────────────────────────
+#─── Install & Build ──────────────────────────────────────────────────────────
 info "Installing dependencies"
-npm ci --omit=dev 2>&1 | tail -1
+npm ci --ignore-scripts 2>&1 | tail -1
+npm rebuild 2>&1 | tail -1
 ok "Dependencies installed"
 
-#─── Build ────────────────────────────────────────────────────────────────────
 info "Building"
-# Need devDependencies for build (nest CLI, typescript, etc.)
-npm ci 2>&1 | tail -1
 npm run build
 ok "Build complete"
 
