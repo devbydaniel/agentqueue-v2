@@ -143,4 +143,55 @@ describe('LinearCallbackHandler', () => {
       ephemeral: false,
     });
   });
+
+  describe('flush / emitResponse ordering', () => {
+    it('should flush pending activities before emitting a response', async () => {
+      const callOrder: string[] = [];
+      let resolveThought: () => void;
+      const thoughtPromise = new Promise<void>((r) => {
+        resolveThought = r;
+      });
+
+      const mockImpl = async (input: { content: { type: string } }) => {
+        if (input.content.type === 'thought') {
+          await thoughtPromise;
+          callOrder.push('thought');
+          return;
+        }
+        callOrder.push(input.content.type);
+      };
+      mockCreateAgentActivity.mockImplementation(mockImpl);
+
+      // Fire onEvent (thought) — does not await in the controller
+      const eventPromise = handler.onEvent({
+        type: 'agent_start',
+      } as AgentSessionEvent);
+
+      // emitResponse should wait for the pending thought before posting response
+      const responsePromise = handler.emitResponse('Done!');
+
+      // Thought is still pending — response should not have been posted yet
+      expect(callOrder).toEqual([]);
+
+      // Now let the thought resolve
+      resolveThought!();
+      await eventPromise;
+      await responsePromise;
+
+      // Thought must arrive before response
+      expect(callOrder).toEqual(['thought', 'response']);
+    });
+
+    it('should not fail emitResponse if a pending activity rejects', async () => {
+      mockCreateAgentActivity
+        .mockRejectedValueOnce(new Error('API error'))
+        .mockResolvedValueOnce({});
+
+      // Fire a failing event
+      await handler.onEvent({ type: 'agent_start' } as AgentSessionEvent);
+
+      // emitResponse should still succeed
+      await expect(handler.emitResponse('Done!')).resolves.toBeUndefined();
+    });
+  });
 });

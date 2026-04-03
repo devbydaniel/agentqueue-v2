@@ -32,6 +32,7 @@ export class LinearCallbackHandler implements CallbackHandler {
   readonly name = 'linear';
   private readonly logger = new Logger(LinearCallbackHandler.name);
   private lastAssistantMessage: string | undefined;
+  private pendingActivities: Promise<void>[] = [];
 
   constructor(
     private readonly agentSessionId: string,
@@ -46,7 +47,14 @@ export class LinearCallbackHandler implements CallbackHandler {
   async onEvent(event: AgentSessionEvent): Promise<void> {
     const activity = this.mapEventToActivity(event);
     if (!activity) return;
-    await this.postActivity(activity.content, activity.ephemeral);
+    const promise = this.postActivity(activity.content, activity.ephemeral);
+    this.pendingActivities.push(promise);
+    void promise.finally(() => {
+      this.pendingActivities = this.pendingActivities.filter(
+        (p) => p !== promise,
+      );
+    });
+    await promise;
   }
 
   /**
@@ -60,9 +68,20 @@ export class LinearCallbackHandler implements CallbackHandler {
   /**
    * Emit a response activity back to Linear.
    * Called when the agent completes or is stopped.
+   *
+   * Flushes all pending activities first to prevent a race where a
+   * `thought` arriving after the `response` reopens the working state.
    */
   async emitResponse(message: string): Promise<void> {
+    await this.flush();
     await this.postActivity({ type: 'response', body: message });
+  }
+
+  /**
+   * Wait for all in-flight activity posts to complete.
+   */
+  async flush(): Promise<void> {
+    await Promise.allSettled(this.pendingActivities);
   }
 
   private mapEventToActivity(
@@ -95,11 +114,10 @@ export class LinearCallbackHandler implements CallbackHandler {
       };
     }
     if (event.type === 'message_end') {
-      const msg = event.message as {
-        role?: string;
-        content?: Array<{ type: string; text?: string }>;
-      };
-      if (msg.role === 'assistant' && Array.isArray(msg.content)) {
+      const msg = (event as Record<string, unknown>).message as
+        | { role?: string; content?: Array<{ type: string; text?: string }> }
+        | undefined;
+      if (msg?.role === 'assistant' && Array.isArray(msg.content)) {
         const text = msg.content
           .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
           .map((c) => c.text)
