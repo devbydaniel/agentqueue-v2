@@ -26,6 +26,14 @@ function extractToolResult(result: unknown): string {
   );
 }
 
+function extractContentText(
+  content: string | Array<{ type: string; text?: string }> | undefined,
+): string {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) return extractAssistantText(content);
+  return '';
+}
+
 function extractAssistantText(
   content: Array<{ type: string; text?: string }>,
 ): string {
@@ -194,35 +202,55 @@ export class LangfuseCallbackHandler implements CallbackHandler {
 
     const msg = event.message as {
       role?: string;
-      content?: Array<{
-        type: string;
-        text?: string;
-        name?: string;
-        arguments?: unknown;
-      }>;
+      content?:
+        | string
+        | Array<{
+            type: string;
+            text?: string;
+            name?: string;
+            arguments?: unknown;
+          }>;
     };
 
-    if (msg.role !== 'assistant' || !Array.isArray(msg.content)) return;
+    if (!msg.role) return;
 
-    const text = extractAssistantText(msg.content);
-    const toolCalls = msg.content.filter((c) => c.type === 'toolCall');
+    switch (msg.role) {
+      case 'system':
+      case 'user': {
+        const text = extractContentText(msg.content);
+        if (!text) return;
+        const label = msg.role === 'system' ? 'system-message' : 'user-message';
+        const span = parent.startObservation(label, {
+          input: truncate(text),
+        });
+        span.end();
+        break;
+      }
 
-    const generation = parent.startObservation(
-      'assistant-message',
-      {
-        output: truncate(text),
-        metadata: toolCalls.length
-          ? {
-              toolCalls: toolCalls.map((tc) => ({
-                name: tc.name,
-                args: truncate(JSON.stringify(tc.arguments)),
-              })),
-            }
-          : undefined,
-      },
-      { asType: 'generation' },
-    );
-    generation.end();
+      case 'assistant': {
+        if (!Array.isArray(msg.content)) return;
+        const text = extractAssistantText(msg.content);
+        const toolCalls = msg.content.filter((c) => c.type === 'toolCall');
+
+        const generation = parent.startObservation(
+          'assistant-message',
+          {
+            output: truncate(text),
+            metadata: toolCalls.length
+              ? {
+                  toolCalls: toolCalls.map((tc) => ({
+                    name: tc.name,
+                    args: truncate(JSON.stringify(tc.arguments)),
+                  })),
+                }
+              : undefined,
+          },
+          { asType: 'generation' },
+        );
+        generation.end();
+        break;
+      }
+    }
   }
 
   // ── Tool executions ──────────────────────────────────────────────

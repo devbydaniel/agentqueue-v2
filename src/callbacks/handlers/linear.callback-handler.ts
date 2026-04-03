@@ -31,11 +31,17 @@ function extractToolResult(result: unknown): string {
 export class LinearCallbackHandler implements CallbackHandler {
   readonly name = 'linear';
   private readonly logger = new Logger(LinearCallbackHandler.name);
+  private lastAssistantMessage: string | undefined;
 
   constructor(
     private readonly agentSessionId: string,
     private readonly linearClient: LinearClient,
   ) {}
+
+  /** Returns the last assistant message captured during the run. */
+  getLastAssistantMessage(): string | undefined {
+    return this.lastAssistantMessage;
+  }
 
   async onEvent(event: AgentSessionEvent): Promise<void> {
     const activity = this.mapEventToActivity(event);
@@ -88,6 +94,25 @@ export class LinearCallbackHandler implements CallbackHandler {
         ephemeral: false,
       };
     }
+    if (event.type === 'message_end') {
+      const msg = event.message as {
+        role?: string;
+        content?: Array<{ type: string; text?: string }>;
+      };
+      if (msg.role === 'assistant' && Array.isArray(msg.content)) {
+        const text = msg.content
+          .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
+          .map((c) => c.text)
+          .join('\n');
+        if (text) {
+          this.lastAssistantMessage = text;
+          return {
+            content: { type: 'thought', body: truncate(text) },
+            ephemeral: false,
+          };
+        }
+      }
+    }
     // agent_end completion is handled by the controller after execute() resolves,
     // so we don't emit a response here to avoid duplicates.
     return null;
@@ -98,10 +123,17 @@ export class LinearCallbackHandler implements CallbackHandler {
     ephemeral = false,
   ): Promise<void> {
     try {
+      this.logger.debug('Posting activity to Linear', {
+        contentType: content['type'],
+        ephemeral,
+      });
       await this.linearClient.createAgentActivity({
         agentSessionId: this.agentSessionId,
         content,
         ephemeral,
+      });
+      this.logger.debug('Activity posted to Linear', {
+        contentType: content['type'],
       });
     } catch (error) {
       this.logger.error('Failed to post activity to Linear', {

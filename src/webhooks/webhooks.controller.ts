@@ -197,7 +197,8 @@ export class WebhooksController {
         appendSystemPrompt,
       })
       .then(async () => {
-        await linearHandler.emitResponse('Completed.');
+        const message = linearHandler.getLastAssistantMessage() ?? 'Completed.';
+        await linearHandler.emitResponse(message);
       })
       .catch(async (error: unknown) => {
         this.logger.error('Agent run from Linear webhook failed', {

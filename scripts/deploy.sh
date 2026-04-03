@@ -38,8 +38,9 @@ info "Building"
 npm run build
 ok "Build complete"
 
-# Prune devDependencies for production
-npm prune --omit=dev 2>&1 | tail -1
+# NOTE: do NOT prune devDependencies — transitive deps (e.g. @sinclair/typebox)
+# required at runtime by @mariozechner/pi-coding-agent are listed as devDeps
+# and would be removed, causing runtime crashes.
 
 #─── Stop existing process ────────────────────────────────────────────────────
 if [[ -f "$PID_FILE" ]]; then
