@@ -18,6 +18,7 @@ import {
   WebhookNotEnabledError,
   WebhookSignatureError,
 } from './webhooks.errors.js';
+import { Public } from '../auth/public.decorator.js';
 
 interface RawBodyRequest {
   rawBody?: Buffer;
@@ -25,6 +26,7 @@ interface RawBodyRequest {
   body: unknown;
 }
 
+@Public()
 @ApiTags('Webhooks')
 @Controller('webhooks')
 export class WebhooksController {

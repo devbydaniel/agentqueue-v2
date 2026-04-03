@@ -24,6 +24,7 @@ async function bootstrap() {
     .setTitle('AgentQueue')
     .setDescription('Centralized agent orchestrator for AI agent workloads')
     .setVersion('1.0')
+    .addBearerAuth()
     .build();
   const document = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup('docs', app, document);
