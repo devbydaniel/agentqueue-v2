@@ -3,6 +3,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import * as yaml from 'js-yaml';
 import { TriggerConfigService } from './trigger-config.service.js';
+import { interpolateTemplate } from './trigger-config.interface.js';
 
 jest.mock('node:fs');
 
@@ -432,5 +433,129 @@ describe('TriggerConfigService', () => {
 
     service = createService();
     expect(service.getLinearTriggers()).toEqual([]);
+  });
+
+  // --- system prompt fields ---
+
+  it('should parse prepend_system_prompt and append_system_prompt for cron triggers', () => {
+    mockConfigFile({
+      triggers: [
+        {
+          name: 'with-prompts',
+          schedule: '0 8 * * *',
+          target: 'assistant',
+          prompt: 'Hello',
+          prepend_system_prompt: 'You are a cron agent.',
+          append_system_prompt: 'Always be concise.',
+        },
+      ],
+    });
+
+    service = createService();
+    const trigger = service.getCronTriggers()[0];
+    expect(trigger.prepend_system_prompt).toBe('You are a cron agent.');
+    expect(trigger.append_system_prompt).toBe('Always be concise.');
+  });
+
+  it('should leave system prompt fields undefined for cron triggers when not set', () => {
+    mockConfigFile({
+      triggers: [
+        {
+          name: 'no-prompts',
+          schedule: '0 8 * * *',
+          target: 'assistant',
+          prompt: 'Hello',
+        },
+      ],
+    });
+
+    service = createService();
+    const trigger = service.getCronTriggers()[0];
+    expect(trigger.prepend_system_prompt).toBeUndefined();
+    expect(trigger.append_system_prompt).toBeUndefined();
+  });
+
+  it('should parse prepend_system_prompt and append_system_prompt for linear triggers', () => {
+    mockConfigFile({
+      triggers: [
+        {
+          name: 'coding-agent',
+          type: 'linear',
+          target: 'my-repo',
+          signing_secret: 'secret',
+          api_key: 'key',
+          prepend_system_prompt: 'You are working on Linear issue {{issueId}}.',
+          append_system_prompt: 'Post updates back to Linear.',
+        },
+      ],
+    });
+
+    service = createService();
+    const trigger = service.getLinearTrigger('coding-agent');
+    expect(trigger!.prepend_system_prompt).toBe(
+      'You are working on Linear issue {{issueId}}.',
+    );
+    expect(trigger!.append_system_prompt).toBe('Post updates back to Linear.');
+  });
+
+  it('should leave system prompt fields undefined for linear triggers when not set', () => {
+    mockConfigFile({
+      triggers: [
+        {
+          name: 'coding-agent',
+          type: 'linear',
+          target: 'my-repo',
+          signing_secret: 'secret',
+          api_key: 'key',
+        },
+      ],
+    });
+
+    service = createService();
+    const trigger = service.getLinearTrigger('coding-agent');
+    expect(trigger!.prepend_system_prompt).toBeUndefined();
+    expect(trigger!.append_system_prompt).toBeUndefined();
+  });
+});
+
+describe('interpolateTemplate', () => {
+  it('should replace known {{key}} variables', () => {
+    const result = interpolateTemplate(
+      'Issue: {{issueId}}, action: {{action}}',
+      {
+        issueId: 'ABC-123',
+        action: 'created',
+      },
+    );
+    expect(result).toBe('Issue: ABC-123, action: created');
+  });
+
+  it('should leave unknown keys as-is', () => {
+    const result = interpolateTemplate('Hello {{name}}, unknown {{missing}}', {
+      name: 'World',
+    });
+    expect(result).toBe('Hello World, unknown {{missing}}');
+  });
+
+  it('should leave keys with undefined values as-is', () => {
+    const result = interpolateTemplate('Issue: {{issueId}}', {
+      issueId: undefined,
+    });
+    expect(result).toBe('Issue: {{issueId}}');
+  });
+
+  it('should return the template unchanged when no patterns exist', () => {
+    const result = interpolateTemplate('No variables here', { key: 'val' });
+    expect(result).toBe('No variables here');
+  });
+
+  it('should handle empty template', () => {
+    const result = interpolateTemplate('', { key: 'val' });
+    expect(result).toBe('');
+  });
+
+  it('should handle multiple occurrences of the same key', () => {
+    const result = interpolateTemplate('{{x}} and {{x}}', { x: 'hi' });
+    expect(result).toBe('hi and hi');
   });
 });

@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { TriggerConfigService } from '../triggers/trigger-config.service.js';
+import { interpolateTemplate } from '../triggers/trigger-config.interface.js';
 import { AgentfilesConfigService } from '../config/agentfiles-config.service.js';
 import { ExecuteRunUseCase } from '../runs/application/execute-run.use-case.js';
 import { LinearWebhookService } from './linear-webhook.service.js';
@@ -161,7 +162,23 @@ export class WebhooksController {
       linearClient,
     );
 
-    // 9. Fire run in background
+    // 9. Interpolate system prompt templates
+    const templateVars = {
+      issueId: payload.issueId ?? '',
+      agentSessionId: payload.agentSessionId,
+      action: payload.action,
+      agentName,
+      target: repo,
+    };
+
+    const prependSystemPrompt = linearConfig.prepend_system_prompt
+      ? interpolateTemplate(linearConfig.prepend_system_prompt, templateVars)
+      : undefined;
+    const appendSystemPrompt = linearConfig.append_system_prompt
+      ? interpolateTemplate(linearConfig.append_system_prompt, templateVars)
+      : undefined;
+
+    // 10. Fire run in background
     this.logger.log('Firing async agent run from Linear webhook', {
       agentName,
       action: payload.action,
@@ -174,6 +191,8 @@ export class WebhooksController {
         prompt,
         sessionKey: payload.agentSessionId,
         additionalHandlers: [linearHandler],
+        prependSystemPrompt,
+        appendSystemPrompt,
       })
       .then(async () => {
         await linearHandler.emitResponse('Completed.');

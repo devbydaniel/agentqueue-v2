@@ -1,6 +1,6 @@
 # agentqueue-v2
 
-Centralized agent orchestrater for AI agent workloads.
+Centralized agent job queue for orchestrating AI agent workloads. Successor to the original agentqueue.
 
 ## Architecture
 
@@ -23,11 +23,6 @@ agentqueue-v2/
 ├── .github/workflows/      # CI pipelines
 └── AGENTS.md               # Agent guidelines
 ```
-
-## Config Files
-
-- **Agentfiles config** (`~/.config/agentfiles/config.toml`): Defines repos (name → local path), stores, bundles. Parsed by `AgentfilesConfigService`.
-- **Triggers config** (`~/.agentqueue/triggers.yaml`): Defines cron triggers and webhook trigger settings (e.g. Linear). Parsed by `TriggerConfigService`.
 
 ## Dev Environment
 

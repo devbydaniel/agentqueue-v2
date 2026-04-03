@@ -73,17 +73,13 @@ describe('LinearCallbackHandler', () => {
     });
   });
 
-  it('should emit a response activity on agent_end', async () => {
+  it('should not emit on agent_end (handled by controller)', async () => {
     await handler.onEvent({
       type: 'agent_end',
       messages: [],
     } as unknown as AgentSessionEvent);
 
-    expect(mockCreateAgentActivity).toHaveBeenCalledWith({
-      agentSessionId: sessionId,
-      content: { type: 'response', body: 'Completed.' },
-      ephemeral: false,
-    });
+    expect(mockCreateAgentActivity).not.toHaveBeenCalled();
   });
 
   it('should emit an error activity via emitError()', async () => {

@@ -218,4 +218,76 @@ describe('ExecuteRunUseCase', () => {
 
     expect(result).toEqual({ success: true });
   });
+
+  it('should pass systemPromptOverride to DefaultResourceLoader when prependSystemPrompt is provided', async () => {
+    const { DefaultResourceLoader } = await import(
+      '@mariozechner/pi-coding-agent'
+    );
+
+    await useCase.execute({
+      repo: 'core',
+      prompt: 'hello',
+      prependSystemPrompt: 'You are a Linear agent.',
+    });
+
+    expect(DefaultResourceLoader).toHaveBeenCalledWith(
+      expect.objectContaining({
+        systemPromptOverride: expect.any(Function),
+      }),
+    );
+
+    // Verify the override function prepends
+    const options = (DefaultResourceLoader as jest.Mock).mock.calls.at(
+      -1,
+    )[0] as Record<string, unknown>;
+    const override = options['systemPromptOverride'] as (
+      base: string | undefined,
+    ) => string;
+    expect(override('base prompt')).toBe(
+      'You are a Linear agent.\n\nbase prompt',
+    );
+    expect(override(undefined)).toBe('You are a Linear agent.');
+  });
+
+  it('should pass appendSystemPromptOverride to DefaultResourceLoader when appendSystemPrompt is provided', async () => {
+    const { DefaultResourceLoader } = await import(
+      '@mariozechner/pi-coding-agent'
+    );
+
+    await useCase.execute({
+      repo: 'core',
+      prompt: 'hello',
+      appendSystemPrompt: 'Always be concise.',
+    });
+
+    expect(DefaultResourceLoader).toHaveBeenCalledWith(
+      expect.objectContaining({
+        appendSystemPromptOverride: expect.any(Function),
+      }),
+    );
+
+    // Verify the override function appends
+    const options = (DefaultResourceLoader as jest.Mock).mock.calls.at(
+      -1,
+    )[0] as Record<string, unknown>;
+    const override = options['appendSystemPromptOverride'] as (
+      base: string[],
+    ) => string[];
+    expect(override(['existing'])).toEqual(['existing', 'Always be concise.']);
+    expect(override([])).toEqual(['Always be concise.']);
+  });
+
+  it('should not pass system prompt overrides when neither is provided', async () => {
+    const { DefaultResourceLoader } = await import(
+      '@mariozechner/pi-coding-agent'
+    );
+
+    await useCase.execute({ repo: 'core', prompt: 'hello' });
+
+    const options = (DefaultResourceLoader as jest.Mock).mock.calls.at(
+      -1,
+    )[0] as Record<string, unknown>;
+    expect(options).not.toHaveProperty('systemPromptOverride');
+    expect(options).not.toHaveProperty('appendSystemPromptOverride');
+  });
 });

@@ -136,6 +136,8 @@ describe('CronSchedulerService', () => {
       expect(executeRunUseCase.execute).toHaveBeenCalledWith({
         repo: 'myrepo',
         prompt: 'Do something',
+        prependSystemPrompt: undefined,
+        appendSystemPrompt: undefined,
       });
     });
 
@@ -156,6 +158,79 @@ describe('CronSchedulerService', () => {
       await tickHandler!();
 
       expect(executeRunUseCase.execute).toHaveBeenCalled();
+    });
+
+    it('should pass interpolated prepend_system_prompt to execute', async () => {
+      triggerConfigService.getCronTriggers.mockReturnValue([
+        makeTrigger({
+          target: 'myrepo',
+          prompt: 'Do something',
+          prepend_system_prompt: 'Trigger: {{triggerName}}, target: {{target}}',
+        }),
+      ]);
+      (cron.validate as jest.Mock).mockReturnValue(true);
+
+      let tickHandler: () => Promise<void>;
+      (cron.schedule as jest.Mock).mockImplementation((_schedule, handler) => {
+        tickHandler = handler as () => Promise<void>;
+        return mockTask;
+      });
+
+      scheduler.onModuleInit();
+      await tickHandler!();
+
+      expect(executeRunUseCase.execute).toHaveBeenCalledWith(
+        expect.objectContaining({
+          prependSystemPrompt: 'Trigger: test-trigger, target: myrepo',
+        }),
+      );
+    });
+
+    it('should pass interpolated append_system_prompt to execute', async () => {
+      triggerConfigService.getCronTriggers.mockReturnValue([
+        makeTrigger({
+          target: 'myrepo',
+          prompt: 'Do something',
+          append_system_prompt: 'Schedule: {{schedule}}',
+        }),
+      ]);
+      (cron.validate as jest.Mock).mockReturnValue(true);
+
+      let tickHandler: () => Promise<void>;
+      (cron.schedule as jest.Mock).mockImplementation((_schedule, handler) => {
+        tickHandler = handler as () => Promise<void>;
+        return mockTask;
+      });
+
+      scheduler.onModuleInit();
+      await tickHandler!();
+
+      expect(executeRunUseCase.execute).toHaveBeenCalledWith(
+        expect.objectContaining({
+          appendSystemPrompt: 'Schedule: 0 8 * * *',
+        }),
+      );
+    });
+
+    it('should not pass system prompt fields when trigger has no templates', async () => {
+      triggerConfigService.getCronTriggers.mockReturnValue([
+        makeTrigger({ target: 'myrepo', prompt: 'Do something' }),
+      ]);
+      (cron.validate as jest.Mock).mockReturnValue(true);
+
+      let tickHandler: () => Promise<void>;
+      (cron.schedule as jest.Mock).mockImplementation((_schedule, handler) => {
+        tickHandler = handler as () => Promise<void>;
+        return mockTask;
+      });
+
+      scheduler.onModuleInit();
+      await tickHandler!();
+
+      const call = executeRunUseCase.execute.mock
+        .calls[0][0] as unknown as Record<string, unknown>;
+      expect(call['prependSystemPrompt']).toBeUndefined();
+      expect(call['appendSystemPrompt']).toBeUndefined();
     });
   });
 });

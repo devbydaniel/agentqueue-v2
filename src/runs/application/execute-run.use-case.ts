@@ -12,6 +12,10 @@ interface ExecuteRunCommand {
   additionalHandlers?: CallbackHandler[];
   /** Optional key to track the session for later cancellation (e.g. Linear agentSessionId) */
   sessionKey?: string;
+  /** System prompt snippet to prepend before the base system prompt */
+  prependSystemPrompt?: string;
+  /** System prompt snippet to append after the base system prompt */
+  appendSystemPrompt?: string;
 }
 
 export interface ExecuteRunResult {
@@ -63,10 +67,26 @@ export class ExecuteRunUseCase {
     const authStorage = AuthStorage.create();
     const modelRegistry = ModelRegistry.create(authStorage);
     const settingsManager = SettingsManager.create(cwd);
-    const resourceLoader = new DefaultResourceLoader({
+    const resourceLoaderOptions: Record<string, unknown> = {
       cwd,
       settingsManager,
-    });
+    };
+
+    if (command.prependSystemPrompt) {
+      const snippet = command.prependSystemPrompt;
+      resourceLoaderOptions['systemPromptOverride'] = (
+        base: string | undefined,
+      ) => (base ? `${snippet}\n\n${base}` : snippet);
+    }
+
+    if (command.appendSystemPrompt) {
+      const snippet = command.appendSystemPrompt;
+      resourceLoaderOptions['appendSystemPromptOverride'] = (
+        base: string[],
+      ) => [...base, snippet];
+    }
+
+    const resourceLoader = new DefaultResourceLoader(resourceLoaderOptions);
     await resourceLoader.reload();
 
     const session = await createAgentSession({

@@ -296,4 +296,73 @@ describe('WebhooksController', () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ accepted: true });
   });
+
+  it('should pass interpolated prepend_system_prompt to execute', async () => {
+    const configWithPrepend: LinearTrigger = {
+      ...linearConfig,
+      prepend_system_prompt:
+        'You are working on issue {{issueId}} (session {{agentSessionId}}).',
+    };
+    getLinearTriggerMock.mockReturnValue(configWithPrepend);
+
+    const body = JSON.stringify(validCreatedPayload);
+    const sig = sign(body);
+
+    await request(app.getHttpServer())
+      .post('/webhooks/linear/coding-agent')
+      .set('Content-Type', 'application/json')
+      .set('linear-signature', sig)
+      .send(body);
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(executeRunMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prependSystemPrompt:
+          'You are working on issue issue-456 (session session-123).',
+      }),
+    );
+  });
+
+  it('should pass interpolated append_system_prompt to execute', async () => {
+    const configWithAppend: LinearTrigger = {
+      ...linearConfig,
+      append_system_prompt: 'Agent: {{agentName}}, target: {{target}}.',
+    };
+    getLinearTriggerMock.mockReturnValue(configWithAppend);
+
+    const body = JSON.stringify(validCreatedPayload);
+    const sig = sign(body);
+
+    await request(app.getHttpServer())
+      .post('/webhooks/linear/coding-agent')
+      .set('Content-Type', 'application/json')
+      .set('linear-signature', sig)
+      .send(body);
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(executeRunMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        appendSystemPrompt: 'Agent: coding-agent, target: my-repo.',
+      }),
+    );
+  });
+
+  it('should not pass system prompt fields when trigger has no templates', async () => {
+    const body = JSON.stringify(validCreatedPayload);
+    const sig = sign(body);
+
+    await request(app.getHttpServer())
+      .post('/webhooks/linear/coding-agent')
+      .set('Content-Type', 'application/json')
+      .set('linear-signature', sig)
+      .send(body);
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    const call = executeRunMock.mock.calls[0][0] as Record<string, unknown>;
+    expect(call['prependSystemPrompt']).toBeUndefined();
+    expect(call['appendSystemPrompt']).toBeUndefined();
+  });
 });

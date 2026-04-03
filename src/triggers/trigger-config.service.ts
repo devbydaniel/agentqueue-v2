@@ -79,6 +79,18 @@ export class TriggerConfigService {
               entry['signing_secret'] as string,
             ),
             api_key: interpolateEnvVars(entry['api_key'] as string),
+            ...(entry['prepend_system_prompt']
+              ? {
+                  prepend_system_prompt: entry[
+                    'prepend_system_prompt'
+                  ] as string,
+                }
+              : {}),
+            ...(entry['append_system_prompt']
+              ? {
+                  append_system_prompt: entry['append_system_prompt'] as string,
+                }
+              : {}),
           }),
         );
 
