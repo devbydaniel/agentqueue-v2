@@ -81,7 +81,12 @@ describe('LinearWebhookService', () => {
         type: 'AgentSession',
         data: {
           id: 'session-123',
-          agentActivityBody: 'Can you also fix the tests?',
+        },
+        agentActivity: {
+          content: {
+            type: 'prompt',
+            body: 'Can you also fix the tests?',
+          },
         },
       };
 
@@ -149,12 +154,23 @@ describe('LinearWebhookService', () => {
       ).toThrow(WebhookPayloadError);
     });
 
-    it('should throw when agentActivityBody is missing for prompted action', () => {
+    it('should throw when agentActivity.content.body is missing for prompted action', () => {
       expect(() =>
         service.parsePayload({
           action: 'prompted',
           type: 'AgentSession',
           data: { id: 'session-123' },
+        }),
+      ).toThrow(WebhookPayloadError);
+    });
+
+    it('should throw when agentActivity.content is empty for prompted action', () => {
+      expect(() =>
+        service.parsePayload({
+          action: 'prompted',
+          type: 'AgentSession',
+          data: { id: 'session-123' },
+          agentActivity: { content: {} },
         }),
       ).toThrow(WebhookPayloadError);
     });

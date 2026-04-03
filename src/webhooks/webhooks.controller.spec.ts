@@ -144,7 +144,12 @@ describe('WebhooksController', () => {
       webhookTimestamp: Date.now(),
       data: {
         id: 'session-123',
-        agentActivityBody: 'Also fix the tests',
+      },
+      agentActivity: {
+        content: {
+          type: 'prompt',
+          body: 'Also fix the tests',
+        },
       },
     };
     const body = JSON.stringify(promptedPayload);

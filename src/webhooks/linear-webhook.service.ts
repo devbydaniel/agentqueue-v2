@@ -126,13 +126,18 @@ export class LinearWebhookService {
     const agentActivity = payload['agentActivity'] as
       | Record<string, unknown>
       | undefined;
-    if (agentActivity?.['body']) {
-      data['agentActivityBody'] = agentActivity['body'];
+    // The user's message is nested inside agentActivity.content.body
+    // (agentActivity.content is a JSON object like { type: "prompt", body: "..." })
+    const content = agentActivity?.['content'] as
+      | Record<string, unknown>
+      | undefined;
+    if (content?.['body']) {
+      data['agentActivityBody'] = content['body'];
     }
     const signal = agentActivity?.['signal'] as string | undefined;
     if (!data['agentActivityBody'] && signal !== 'stop') {
       throw new WebhookPayloadError(
-        'missing agentActivity.body for prompted action',
+        'missing agentActivity.content.body for prompted action',
       );
     }
   }
