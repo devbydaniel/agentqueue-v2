@@ -5,6 +5,7 @@ import { ConfigModule } from './config/config.module.js';
 import { RunsModule } from './runs/runs.module.js';
 import { TriggersModule } from './triggers/triggers.module.js';
 import { WebhooksModule } from './webhooks/webhooks.module.js';
+import { FlowsModule } from './flows/flows.module.js';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { WebhooksModule } from './webhooks/webhooks.module.js';
     RunsModule,
     TriggersModule,
     WebhooksModule,
+    FlowsModule,
   ],
 })
 export class AppModule {}
