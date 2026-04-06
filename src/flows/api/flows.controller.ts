@@ -1,23 +1,21 @@
 import { Body, Controller, Get, HttpCode, Param, Post } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { FlowConfigService } from './flow-config.service.js';
-import { FlowRunRepository } from './infrastructure/flow-run.repository.js';
-import { FlowAbortTrackerService } from './flow-abort-tracker.service.js';
-import { FlowExecutorService } from './application/flow-executor.service.js';
-import {
-  FlowNotFoundError,
-  FlowRunNotFoundError,
-} from './application/flows.errors.js';
+import { StartFlowUseCase } from '../application/start-flow.use-case.js';
+import { AbortFlowUseCase } from '../application/abort-flow.use-case.js';
+import { ListFlowsUseCase } from '../application/list-flows.use-case.js';
+import { ListFlowRunsUseCase } from '../application/list-flow-runs.use-case.js';
+import { GetFlowRunUseCase } from '../application/get-flow-run.use-case.js';
 import { StartFlowDto } from './dto/start-flow.dto.js';
 
 @ApiTags('Flows')
 @Controller('flows')
 export class FlowsController {
   constructor(
-    private readonly flowConfigService: FlowConfigService,
-    private readonly flowRunRepository: FlowRunRepository,
-    private readonly flowAbortTracker: FlowAbortTrackerService,
-    private readonly flowExecutor: FlowExecutorService,
+    private readonly startFlowUseCase: StartFlowUseCase,
+    private readonly abortFlowUseCase: AbortFlowUseCase,
+    private readonly listFlowsUseCase: ListFlowsUseCase,
+    private readonly listFlowRunsUseCase: ListFlowRunsUseCase,
+    private readonly getFlowRunUseCase: GetFlowRunUseCase,
   ) {}
 
   @Get()
@@ -28,7 +26,7 @@ export class FlowsController {
   })
   @ApiResponse({ status: 200, description: 'List of available flows' })
   listFlows() {
-    return this.flowConfigService.listFlows();
+    return this.listFlowsUseCase.execute();
   }
 
   @Post(':name/start')
@@ -40,19 +38,11 @@ export class FlowsController {
   })
   @ApiResponse({ status: 200, description: 'Flow run started' })
   @ApiResponse({ status: 404, description: 'Flow not found' })
-  async startFlow(
-    @Param('name') name: string,
-    @Body() dto: StartFlowDto,
-  ): Promise<{ flowRunId: string }> {
-    // Validate flow exists (throws if config missing/invalid)
-    try {
-      this.flowConfigService.loadFlow(name);
-    } catch {
-      throw new FlowNotFoundError(name);
-    }
-
-    const flowRunId = await this.flowExecutor.start(name, dto.vars ?? {});
-    return { flowRunId };
+  startFlow(@Param('name') name: string, @Body() dto: StartFlowDto) {
+    return this.startFlowUseCase.execute({
+      flowName: name,
+      vars: dto.vars ?? {},
+    });
   }
 
   @Get(':name/runs')
@@ -62,7 +52,7 @@ export class FlowsController {
   })
   @ApiResponse({ status: 200, description: 'List of flow runs' })
   listRuns(@Param('name') name: string) {
-    return this.flowRunRepository.findByFlowName(name);
+    return this.listFlowRunsUseCase.execute({ flowName: name });
   }
 
   @Get('runs/:runId')
@@ -72,12 +62,8 @@ export class FlowsController {
   })
   @ApiResponse({ status: 200, description: 'Flow run details' })
   @ApiResponse({ status: 404, description: 'Flow run not found' })
-  async getRun(@Param('runId') runId: string) {
-    const run = await this.flowRunRepository.findById(runId);
-    if (!run) {
-      throw new FlowRunNotFoundError(runId);
-    }
-    return run;
+  getRun(@Param('runId') runId: string) {
+    return this.getFlowRunUseCase.execute({ flowRunId: runId });
   }
 
   @Post('runs/:runId/abort')
@@ -88,8 +74,7 @@ export class FlowsController {
       'Signals the abort controller for the flow run. Returns whether the abort was successful.',
   })
   @ApiResponse({ status: 200, description: 'Abort result' })
-  abortRun(@Param('runId') runId: string): { aborted: boolean } {
-    const aborted = this.flowAbortTracker.abort(runId);
-    return { aborted };
+  abortRun(@Param('runId') runId: string) {
+    return this.abortFlowUseCase.execute({ flowRunId: runId });
   }
 }

@@ -1,12 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as path from 'node:path';
-import { FlowConfigService } from '../flow-config.service.js';
-import { FlowRunRepository } from '../infrastructure/flow-run.repository.js';
-import { FlowAbortTrackerService } from '../flow-abort-tracker.service.js';
-import type { FlowConfig } from '../flow-config.interface.js';
-import { AgentfilesConfigService } from '../../config/agentfiles-config.service.js';
-import { ExecuteRunUseCase } from '../../runs/application/execute-run.use-case.js';
-import { interpolateTemplate } from '../../common/utils/interpolate-template.js';
+import { FlowConfigService } from './flow-config.service.js';
+import { FlowRunRepository } from './infrastructure/flow-run.repository.js';
+import { FlowAbortTrackerService } from './flow-abort-tracker.service.js';
+import type { FlowConfig } from './flow-config.interface.js';
+import { ExecuteRunUseCase } from '../runs/application/execute-run.use-case.js';
+import { interpolateTemplate } from '../common/utils/interpolate-template.js';
 
 export type ResolverResult =
   | { agent: string; vars: Record<string, string> }
@@ -27,29 +26,41 @@ interface LoopContext {
   vars: Record<string, string>;
 }
 
+/**
+ * Lifecycle service that owns in-process flow run loops.
+ *
+ * The flow run row is created by the caller (typically `StartFlowUseCase`);
+ * this service receives the `flowRunId` and runs the resolver loop in the
+ * background, dispatching agent steps via `ExecuteRunUseCase` and recording
+ * progress in the repository. Abort signals come in via `FlowAbortTrackerService`.
+ *
+ * Categorized as a lifecycle / runtime service (not a use case) because it
+ * owns long-running loop state and an in-memory `AbortController`. Use cases
+ * delegate to it for the runtime mechanics.
+ */
 @Injectable()
-export class FlowExecutorService {
-  private readonly logger = new Logger(FlowExecutorService.name);
+export class FlowRunnerService {
+  private readonly logger = new Logger(FlowRunnerService.name);
 
   constructor(
     private readonly flowConfigService: FlowConfigService,
     private readonly flowRunRepository: FlowRunRepository,
     private readonly flowAbortTracker: FlowAbortTrackerService,
-    private readonly agentfilesConfigService: AgentfilesConfigService,
     private readonly executeRunUseCase: ExecuteRunUseCase,
   ) {}
 
-  async start(flowName: string, vars: Record<string, string>): Promise<string> {
-    const run = await this.flowRunRepository.create(flowName, vars);
-    this.logger.log(`Starting flow "${flowName}" → run ${run.flowRunId}`);
+  /**
+   * Kick off a flow run loop in the background. Returns immediately.
+   * Caller is responsible for having created the flow run row first.
+   */
+  run(flowRunId: string, flowName: string, vars: Record<string, string>): void {
+    this.logger.log(`Starting flow "${flowName}" → run ${flowRunId}`);
 
-    void this.runLoop(run.flowRunId).catch((error: unknown) => {
+    void this.runLoop(flowRunId, flowName, vars).catch((error: unknown) => {
       this.logger.error(
-        `Flow run ${run.flowRunId} loop failed unexpectedly: ${error instanceof Error ? error.message : String(error)}`,
+        `Flow run ${flowRunId} loop failed unexpectedly: ${error instanceof Error ? error.message : String(error)}`,
       );
     });
-
-    return run.flowRunId;
   }
 
   /** @visibleForTesting — override in tests to inject a mock resolver */
@@ -63,11 +74,12 @@ export class FlowExecutorService {
     return mod;
   }
 
-  private async runLoop(flowRunId: string): Promise<void> {
-    const run = await this.flowRunRepository.findById(flowRunId);
-    if (!run) return;
-
-    const ctx = await this.initializeLoop(flowRunId, run.flowName, run.vars);
+  private async runLoop(
+    flowRunId: string,
+    flowName: string,
+    vars: Record<string, string>,
+  ): Promise<void> {
+    const ctx = await this.initializeLoop(flowRunId, flowName, vars);
     if (!ctx) return;
 
     try {

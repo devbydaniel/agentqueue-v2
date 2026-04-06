@@ -1,19 +1,18 @@
-import { FlowExecutorService } from './flow-executor.service.js';
-import type { Resolver } from './flow-executor.service.js';
-import type { FlowConfigService } from '../flow-config.service.js';
-import { FlowRunRepository } from '../infrastructure/flow-run.repository.js';
-import { FlowAbortTrackerService } from '../flow-abort-tracker.service.js';
-import type { AgentfilesConfigService } from '../../config/agentfiles-config.service.js';
-import type { ExecuteRunUseCase } from '../../runs/application/execute-run.use-case.js';
-import type { FlowConfig } from '../flow-config.interface.js';
+import { FlowRunnerService } from './flow-runner.service.js';
+import type { Resolver } from './flow-runner.service.js';
+import type { FlowConfigService } from './flow-config.service.js';
+import { FlowRunRepository } from './infrastructure/flow-run.repository.js';
+import { FlowAbortTrackerService } from './flow-abort-tracker.service.js';
+import type { ExecuteRunUseCase } from '../runs/application/execute-run.use-case.js';
+import type { FlowConfig } from './flow-config.interface.js';
 
 /** Wait for all microtasks / async work in the fire-and-forget loop to settle */
 function settle(ms = 50): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-describe('FlowExecutorService', () => {
-  let executor: FlowExecutorService;
+describe('FlowRunnerService', () => {
+  let runner: FlowRunnerService;
   let repository: FlowRunRepository;
   let abortTracker: FlowAbortTrackerService;
   let mockResolver: jest.Mock<ReturnType<Resolver>, Parameters<Resolver>>;
@@ -31,13 +30,19 @@ describe('FlowExecutorService', () => {
     getFlowDir: jest.fn().mockReturnValue('/fake/flows/factory'),
   } as unknown as FlowConfigService;
 
-  const mockAgentfilesConfigService = {
-    resolveRepo: jest.fn().mockReturnValue('/fake/repos/my-repo'),
-  } as unknown as AgentfilesConfigService;
-
   const mockExecuteRunUseCase = {
     execute: jest.fn().mockResolvedValue({ success: true }),
   } as unknown as ExecuteRunUseCase;
+
+  /** Helper: create the row in the repo and start the runner against it. */
+  async function startRun(
+    flowName: string,
+    vars: Record<string, string> = {},
+  ): Promise<string> {
+    const run = await repository.create(flowName, vars);
+    runner.run(run.flowRunId, flowName, vars);
+    return run.flowRunId;
+  }
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -45,17 +50,16 @@ describe('FlowExecutorService', () => {
     abortTracker = new FlowAbortTrackerService();
     mockResolver = jest.fn();
 
-    executor = new FlowExecutorService(
+    runner = new FlowRunnerService(
       mockFlowConfigService,
       repository,
       abortTracker,
-      mockAgentfilesConfigService,
       mockExecuteRunUseCase,
     );
 
     // Inject mock resolver instead of doing dynamic import
     jest
-      .spyOn(executor as never, 'loadResolver' as never)
+      .spyOn(runner as never, 'loadResolver' as never)
       .mockResolvedValue({ resolve: mockResolver } as never);
   });
 
@@ -65,7 +69,7 @@ describe('FlowExecutorService', () => {
       .mockResolvedValueOnce({ agent: 'qa', vars: {} })
       .mockResolvedValueOnce({ done: true, summary: 'All done' });
 
-    const runId = await executor.start('factory', {});
+    const runId = await startRun('factory');
     await settle();
 
     const run = (await repository.findById(runId))!;
@@ -82,7 +86,7 @@ describe('FlowExecutorService', () => {
   it('escalation: resolver returns escalate immediately', async () => {
     mockResolver.mockResolvedValueOnce({ escalate: 'Stuck on merge conflict' });
 
-    const runId = await executor.start('factory', {});
+    const runId = await startRun('factory');
     await settle();
 
     const run = (await repository.findById(runId))!;
@@ -95,7 +99,7 @@ describe('FlowExecutorService', () => {
   it('done immediately: resolver returns done', async () => {
     mockResolver.mockResolvedValueOnce({ done: true });
 
-    const runId = await executor.start('factory', {});
+    const runId = await startRun('factory');
     await settle();
 
     const run = (await repository.findById(runId))!;
@@ -110,7 +114,7 @@ describe('FlowExecutorService', () => {
       vars: {},
     });
 
-    const runId = await executor.start('factory', {});
+    const runId = await startRun('factory');
     await settle();
 
     const run = (await repository.findById(runId))!;
@@ -128,7 +132,7 @@ describe('FlowExecutorService', () => {
       new Error('pi session crashed'),
     );
 
-    const runId = await executor.start('factory', {});
+    const runId = await startRun('factory');
     await settle();
 
     const run = (await repository.findById(runId))!;
@@ -142,7 +146,7 @@ describe('FlowExecutorService', () => {
   it('resolver throws: status errored', async () => {
     mockResolver.mockRejectedValueOnce(new Error('resolver kaboom'));
 
-    const runId = await executor.start('factory', {});
+    const runId = await startRun('factory');
     await settle();
 
     const run = (await repository.findById(runId))!;
@@ -151,7 +155,7 @@ describe('FlowExecutorService', () => {
   });
 
   it('abort mid-loop: status aborted after first dispatch', async () => {
-    // eslint-disable-next-line prefer-const -- assigned inside start() after mock setup
+    // eslint-disable-next-line prefer-const -- assigned inside startRun() after mock setup
     let runId: string;
 
     mockResolver
@@ -170,19 +174,10 @@ describe('FlowExecutorService', () => {
       success: true,
     });
 
-    runId = await executor.start('factory', {});
+    runId = await startRun('factory');
     await settle();
 
     const run = (await repository.findById(runId))!;
-    // After the second resolver call returns, the loop checks abort before dispatching
-    // But the abort check is at the top of the loop, before calling resolve.
-    // So: first iteration dispatches dev, then loop restarts, checks abort (not set),
-    // calls resolver (which sets abort), gets result, but abort is checked at loop TOP.
-    // So the agent dispatch for qa will proceed, then next iteration checks abort.
-    // Actually let me re-check the flow: the abort check happens at the top of each
-    // iteration. The second resolver call aborts, but the code continues to dispatch qa.
-    // Then the third iteration checks abort and exits.
-    // Either way, status should be aborted.
     expect(run.status).toBe('aborted');
   });
 
@@ -195,7 +190,7 @@ describe('FlowExecutorService', () => {
       })
       .mockResolvedValueOnce({ done: true });
 
-    const runId = await executor.start('factory', { baseVar: 'hello' });
+    const runId = await startRun('factory', { baseVar: 'hello' });
     await settle();
 
     const run = (await repository.findById(runId))!;
@@ -208,9 +203,7 @@ describe('FlowExecutorService', () => {
 
     // Check that prompts were rendered with accumulated vars
     const calls = (mockExecuteRunUseCase.execute as jest.Mock).mock.calls;
-    // First dispatch: dev agent with task=feat-1
     expect(calls[0][0].prompt).toBe('Build feat-1');
-    // Second dispatch: qa agent with task=feat-1, reviewer=alice
     expect(calls[1][0].prompt).toBe('Review feat-1');
   });
 });
