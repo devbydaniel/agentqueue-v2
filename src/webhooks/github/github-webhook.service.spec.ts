@@ -8,6 +8,7 @@ function makeService(overrides: {
   triggers?: GithubTrigger[];
   resolveRepoFn?: (name: string) => string;
   executeFn?: jest.Mock;
+  beforeHookFn?: jest.Mock;
 }) {
   const appConfig = {
     githubWebhookSecret: overrides.secret,
@@ -28,15 +29,41 @@ function makeService(overrides: {
     execute: executeFn,
   };
 
+  const beforeHookFn =
+    overrides.beforeHookFn ??
+    jest.fn(async () => ({ proceed: true, output: '' }));
+  const beforeHookService = {
+    run: beforeHookFn,
+  };
+
   return {
     service: new GithubWebhookService(
       appConfig as never,
       triggerConfigService as never,
       agentfilesConfigService as never,
       executeRunUseCase as never,
+      beforeHookService as never,
     ),
     executeFn,
+    beforeHookFn,
   };
+}
+
+/** Flush pending microtasks so async fire-and-forget chains complete. */
+async function flush(): Promise<void> {
+  await new Promise((resolve) => setImmediate(resolve));
+}
+
+// Top-level helpers so the inline jest.fn() callbacks below stay shallow
+// (sonarjs/no-nested-functions caps nesting at 4 levels).
+function hookProceedFn(
+  output: string,
+): () => Promise<{ proceed: true; output: string }> {
+  return () => Promise.resolve({ proceed: true, output });
+}
+
+function hookSkipFn(): () => Promise<{ proceed: false; output: string }> {
+  return () => Promise.resolve({ proceed: false, output: '' });
 }
 
 describe('GithubWebhookService', () => {
@@ -210,6 +237,92 @@ describe('GithubWebhookService', () => {
           appendSystemPrompt: 'PR URL: https://github.com/org/my-repo/pull/42',
         }),
       );
+    });
+
+    describe('before hook', () => {
+      const triggerWithHook: GithubTrigger = {
+        ...prReviewTrigger,
+        before: '/scripts/check.sh',
+        prompt: 'PR review context: {{before_output}}',
+      };
+
+      it('does not call the hook when trigger.before is unset', () => {
+        const { service, beforeHookFn } = makeService({
+          secret: 'sec',
+          triggers: [prReviewTrigger],
+        });
+
+        service.handleEvent('pull_request_review', payload);
+
+        expect(beforeHookFn).not.toHaveBeenCalled();
+      });
+
+      it('runs the hook with the trigger label before executing', async () => {
+        const { service, beforeHookFn, executeFn } = makeService({
+          secret: 'sec',
+          triggers: [triggerWithHook],
+          beforeHookFn: jest.fn(hookProceedFn('gathered')),
+        });
+
+        service.handleEvent('pull_request_review', payload);
+        await flush();
+
+        expect(beforeHookFn).toHaveBeenCalledWith(
+          '/scripts/check.sh',
+          'github trigger "address-review"',
+        );
+        expect(executeFn).toHaveBeenCalled();
+      });
+
+      it('substitutes {{before_output}} in the prompt with hook stdout', async () => {
+        const { service, executeFn } = makeService({
+          secret: 'sec',
+          triggers: [triggerWithHook],
+          beforeHookFn: jest.fn(hookProceedFn('gathered context')),
+        });
+
+        service.handleEvent('pull_request_review', payload);
+        await flush();
+
+        expect(executeFn).toHaveBeenCalledWith(
+          expect.objectContaining({
+            prompt: 'PR review context: gathered context',
+          }),
+        );
+      });
+
+      it('substitutes {{before_output}} with empty string when hook output is empty', async () => {
+        const { service, executeFn } = makeService({
+          secret: 'sec',
+          triggers: [triggerWithHook],
+          beforeHookFn: jest.fn(hookProceedFn('')),
+        });
+
+        service.handleEvent('pull_request_review', payload);
+        await flush();
+
+        expect(executeFn).toHaveBeenCalledWith(
+          expect.objectContaining({
+            prompt: 'PR review context: ',
+          }),
+        );
+      });
+
+      it('skips the run when the hook returns proceed: false', async () => {
+        const { service, beforeHookFn, executeFn } = makeService({
+          secret: 'sec',
+          triggers: [triggerWithHook],
+          beforeHookFn: jest.fn(hookSkipFn()),
+        });
+
+        const result = service.handleEvent('pull_request_review', payload);
+        await flush();
+
+        // handleEvent still reports the trigger as matched
+        expect(result.triggered).toBe(1);
+        expect(beforeHookFn).toHaveBeenCalled();
+        expect(executeFn).not.toHaveBeenCalled();
+      });
     });
   });
 });

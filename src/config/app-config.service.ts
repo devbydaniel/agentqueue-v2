@@ -30,6 +30,12 @@ export class AppConfigService {
     return process.env.GITHUB_WEBHOOK_SECRET;
   }
 
+  // ── Hooks ────────────────────────────────────────────────────────
+
+  get beforeHookTimeout(): number {
+    return Number(process.env.BEFORE_HOOK_TIMEOUT ?? 30000);
+  }
+
   // ── Langfuse ─────────────────────────────────────────────────────
 
   get langfuseEnabled(): boolean {

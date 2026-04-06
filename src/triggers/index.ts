@@ -1,6 +1,8 @@
 export { TriggersModule } from './triggers.module.js';
 export { TriggerConfigService } from './trigger-config.service.js';
 export { CronSchedulerService } from './cron-scheduler.service.js';
+export { BeforeHookService } from './before-hook.service.js';
+export type { BeforeHookResult } from './before-hook.service.js';
 export type {
   CronTrigger,
   LinearTrigger,

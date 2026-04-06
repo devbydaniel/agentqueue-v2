@@ -116,6 +116,7 @@ export class TriggerConfigService {
             ...(entry['filters']
               ? { filters: entry['filters'] as WebhookFilter[] }
               : {}),
+            ...(entry['before'] ? { before: entry['before'] as string } : {}),
             ...(entry['prepend_system_prompt']
               ? {
                   prepend_system_prompt: entry[

@@ -8,6 +8,7 @@ import * as cron from 'node-cron';
 import { TriggerConfigService } from './trigger-config.service.js';
 import { interpolateTemplate } from './trigger-config.interface.js';
 import type { CronTrigger } from './trigger-config.interface.js';
+import { BeforeHookService } from './before-hook.service.js';
 import { ExecuteRunUseCase } from '../runs/application/execute-run.use-case.js';
 
 @Injectable()
@@ -18,6 +19,7 @@ export class CronSchedulerService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly triggerConfigService: TriggerConfigService,
     private readonly executeRunUseCase: ExecuteRunUseCase,
+    private readonly beforeHookService: BeforeHookService,
   ) {}
 
   onModuleInit(): void {
@@ -58,6 +60,21 @@ export class CronSchedulerService implements OnModuleInit, OnModuleDestroy {
       repo: trigger.target,
     });
 
+    let prompt = trigger.prompt;
+    if (trigger.before) {
+      const hookResult = await this.beforeHookService.run(
+        trigger.before,
+        `cron trigger "${trigger.name}"`,
+      );
+      if (!hookResult.proceed) {
+        this.logger.log(
+          `Cron trigger "${trigger.name}" skipped by before hook`,
+        );
+        return;
+      }
+      prompt = prompt.replace(/\{\{before_output\}\}/g, hookResult.output);
+    }
+
     const templateVars = {
       triggerName: trigger.name,
       schedule: trigger.schedule,
@@ -75,7 +92,7 @@ export class CronSchedulerService implements OnModuleInit, OnModuleDestroy {
     try {
       const result = await this.executeRunUseCase.execute({
         repo: trigger.target,
-        prompt: trigger.prompt,
+        prompt,
         prependSystemPrompt,
         appendSystemPrompt,
       });

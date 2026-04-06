@@ -3,6 +3,7 @@ import { CronSchedulerService } from './cron-scheduler.service.js';
 import type { TriggerConfigService } from './trigger-config.service.js';
 import type { ExecuteRunUseCase } from '../runs/application/execute-run.use-case.js';
 import type { CronTrigger } from './trigger-config.interface.js';
+import type { BeforeHookService } from './before-hook.service.js';
 
 jest.mock('node-cron');
 
@@ -10,6 +11,7 @@ describe('CronSchedulerService', () => {
   let scheduler: CronSchedulerService;
   let triggerConfigService: jest.Mocked<TriggerConfigService>;
   let executeRunUseCase: jest.Mocked<ExecuteRunUseCase>;
+  let beforeHookService: jest.Mocked<BeforeHookService>;
   let mockTask: { stop: jest.Mock };
 
   beforeEach(() => {
@@ -27,9 +29,14 @@ describe('CronSchedulerService', () => {
       execute: jest.fn().mockResolvedValue({ success: true }),
     } as unknown as jest.Mocked<ExecuteRunUseCase>;
 
+    beforeHookService = {
+      run: jest.fn().mockResolvedValue({ proceed: true, output: '' }),
+    } as unknown as jest.Mocked<BeforeHookService>;
+
     scheduler = new CronSchedulerService(
       triggerConfigService,
       executeRunUseCase,
+      beforeHookService,
     );
   });
 
@@ -231,6 +238,105 @@ describe('CronSchedulerService', () => {
         .calls[0][0] as unknown as Record<string, unknown>;
       expect(call['prependSystemPrompt']).toBeUndefined();
       expect(call['appendSystemPrompt']).toBeUndefined();
+    });
+  });
+
+  describe('before hook', () => {
+    function setupTickHandler(trigger: CronTrigger): () => Promise<void> {
+      triggerConfigService.getCronTriggers.mockReturnValue([trigger]);
+      (cron.validate as jest.Mock).mockReturnValue(true);
+
+      let tickHandler: () => Promise<void> = () => Promise.resolve();
+      (cron.schedule as jest.Mock).mockImplementation((_schedule, handler) => {
+        tickHandler = handler as () => Promise<void>;
+        return mockTask;
+      });
+      scheduler.onModuleInit();
+      return tickHandler;
+    }
+
+    it('does not call the hook when trigger.before is unset', async () => {
+      const tick = setupTickHandler(makeTrigger());
+      await tick();
+
+      expect(beforeHookService.run).not.toHaveBeenCalled();
+      expect(executeRunUseCase.execute).toHaveBeenCalled();
+    });
+
+    it('runs the hook before executing when trigger.before is set', async () => {
+      const tick = setupTickHandler(
+        makeTrigger({
+          name: 'meeting-prep',
+          before: '/scripts/check.sh',
+          prompt: 'Prepare for meeting',
+        }),
+      );
+      beforeHookService.run.mockResolvedValue({
+        proceed: true,
+        output: 'standup at 10am',
+      });
+
+      await tick();
+
+      expect(beforeHookService.run).toHaveBeenCalledWith(
+        '/scripts/check.sh',
+        'cron trigger "meeting-prep"',
+      );
+      expect(executeRunUseCase.execute).toHaveBeenCalled();
+    });
+
+    it('substitutes {{before_output}} in the prompt with the hook stdout', async () => {
+      const tick = setupTickHandler(
+        makeTrigger({
+          name: 'meeting-prep',
+          before: '/scripts/check.sh',
+          prompt: 'Prepare for: {{before_output}}',
+        }),
+      );
+      beforeHookService.run.mockResolvedValue({
+        proceed: true,
+        output: 'standup at 10am',
+      });
+
+      await tick();
+
+      expect(executeRunUseCase.execute).toHaveBeenCalledWith(
+        expect.objectContaining({
+          prompt: 'Prepare for: standup at 10am',
+        }),
+      );
+    });
+
+    it('substitutes {{before_output}} with empty string when hook output is empty', async () => {
+      const tick = setupTickHandler(
+        makeTrigger({
+          before: '/scripts/check.sh',
+          prompt: 'Info: {{before_output}} end',
+        }),
+      );
+      beforeHookService.run.mockResolvedValue({ proceed: true, output: '' });
+
+      await tick();
+
+      expect(executeRunUseCase.execute).toHaveBeenCalledWith(
+        expect.objectContaining({ prompt: 'Info:  end' }),
+      );
+    });
+
+    it('skips the run when the hook returns proceed: false', async () => {
+      const tick = setupTickHandler(
+        makeTrigger({
+          name: 'meeting-prep',
+          before: '/scripts/check.sh',
+          prompt: 'Prepare',
+        }),
+      );
+      beforeHookService.run.mockResolvedValue({ proceed: false, output: '' });
+
+      await tick();
+
+      expect(beforeHookService.run).toHaveBeenCalled();
+      expect(executeRunUseCase.execute).not.toHaveBeenCalled();
     });
   });
 });

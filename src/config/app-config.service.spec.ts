@@ -48,6 +48,19 @@ describe('AppConfigService', () => {
     });
   });
 
+  describe('beforeHookTimeout', () => {
+    it('should default to 30000', () => {
+      delete process.env.BEFORE_HOOK_TIMEOUT;
+      expect(service.beforeHookTimeout).toBe(30000);
+    });
+
+    it('should read from BEFORE_HOOK_TIMEOUT env var', () => {
+      process.env.BEFORE_HOOK_TIMEOUT = '5000';
+      expect(service.beforeHookTimeout).toBe(5000);
+      delete process.env.BEFORE_HOOK_TIMEOUT;
+    });
+  });
+
   describe('langfuseEnabled', () => {
     it('should return false when not set', () => {
       delete process.env.LANGFUSE_SECRET_KEY;

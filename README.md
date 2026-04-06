@@ -60,6 +60,7 @@ curl http://localhost:${PORT:-3000}/health
 |---|---|---|
 | `PORT` | No | Server port (default: `3000`) |
 | `AUTH_TOKEN` | **Yes** | Bearer token for authenticated endpoints |
+| `BEFORE_HOOK_TIMEOUT` | No | Timeout (ms) for trigger `before` hooks (default: `30000`) |
 | `GITHUB_WEBHOOK_SECRET` | No | HMAC secret for GitHub webhook signature verification |
 | `LANGFUSE_SECRET_KEY` | No | Enables Langfuse tracing when set |
 | `LANGFUSE_PUBLIC_KEY` | No | Langfuse public key |
@@ -147,6 +148,34 @@ triggers:
 ```
 
 Template variables for cron: `{{triggerName}}`, `{{schedule}}`, `{{date}}`, `{{target}}`.
+
+### Before hooks
+
+Cron and GitHub triggers support an optional `before` field that runs a shell
+command before the agent is invoked. The hook can **gate** the run (skip
+entirely if it exits non-zero) and **enrich** the prompt (substitute its stdout
+into `{{before_output}}`).
+
+```yaml
+triggers:
+  - name: meeting-prep
+    schedule: "*/30 8-17 * * 1-5"
+    target: assistant
+    before: "/home/you/scripts/check-calendar.sh"
+    prompt: "Prepare for the upcoming meeting: {{before_output}}"
+```
+
+Contract:
+
+| Exit code | Behavior |
+|---|---|
+| `0` | Proceed. `{{before_output}}` placeholders in `prompt` are replaced with the trimmed stdout. |
+| Non-zero | Skip. The run is not started. |
+| Timeout | Skip. The default timeout is `BEFORE_HOOK_TIMEOUT` (30s). |
+
+The hook is executed via `sh -c <before>`, so it can be a script path or an
+inline shell expression. It does **not** apply to Linear triggers (those have
+no static prompt to gate).
 
 #### Linear Triggers
 

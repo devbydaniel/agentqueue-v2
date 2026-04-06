@@ -3,6 +3,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import { AppConfigService } from '../../config/app-config.service.js';
 import type { GithubTrigger } from '../../triggers/trigger-config.interface.js';
 import { TriggerConfigService } from '../../triggers/trigger-config.service.js';
+import { BeforeHookService } from '../../triggers/before-hook.service.js';
 import { AgentfilesConfigService } from '../../config/agentfiles-config.service.js';
 import { ExecuteRunUseCase } from '../../runs/application/execute-run.use-case.js';
 import { matchesFilters } from './webhook-filter.js';
@@ -20,6 +21,7 @@ export class GithubWebhookService {
     private readonly triggerConfigService: TriggerConfigService,
     private readonly agentfilesConfigService: AgentfilesConfigService,
     private readonly executeRunUseCase: ExecuteRunUseCase,
+    private readonly beforeHookService: BeforeHookService,
   ) {}
 
   /**
@@ -73,18 +75,18 @@ export class GithubWebhookService {
     }
 
     for (const trigger of matching) {
-      this.fireRun(trigger, payload);
+      void this.fireRun(trigger, payload);
     }
 
     return { triggered: matching.length };
   }
 
-  private fireRun(
+  private async fireRun(
     trigger: GithubTrigger,
     payload: Record<string, unknown>,
-  ): void {
+  ): Promise<void> {
     const repo = interpolatePayloadTemplate(trigger.target, payload);
-    const prompt = interpolatePayloadTemplate(trigger.prompt, payload);
+    let prompt = interpolatePayloadTemplate(trigger.prompt, payload);
 
     if (prompt.length > MAX_PROMPT_LENGTH) {
       this.logger.warn(
@@ -103,6 +105,21 @@ export class GithubWebhookService {
       return;
     }
 
+    // Run the optional before hook (gate + enrich)
+    if (trigger.before) {
+      const hookResult = await this.beforeHookService.run(
+        trigger.before,
+        `github trigger "${trigger.name}"`,
+      );
+      if (!hookResult.proceed) {
+        this.logger.log(
+          `GitHub trigger "${trigger.name}" skipped by before hook`,
+        );
+        return;
+      }
+      prompt = prompt.replace(/\{\{before_output\}\}/g, hookResult.output);
+    }
+
     const prependSystemPrompt = trigger.prepend_system_prompt
       ? interpolatePayloadTemplate(trigger.prepend_system_prompt, payload)
       : undefined;
@@ -115,20 +132,18 @@ export class GithubWebhookService {
       event: payload['action'],
     });
 
-    void this.executeRunUseCase
-      .execute({
+    try {
+      await this.executeRunUseCase.execute({
         repo,
         prompt,
         prependSystemPrompt,
         appendSystemPrompt,
-      })
-      .then(() => {
-        this.logger.log(`Run completed for GitHub trigger "${trigger.name}"`);
-      })
-      .catch((error: unknown) => {
-        this.logger.error(`Run failed for GitHub trigger "${trigger.name}"`, {
-          error: error as Error,
-        });
       });
+      this.logger.log(`Run completed for GitHub trigger "${trigger.name}"`);
+    } catch (error) {
+      this.logger.error(`Run failed for GitHub trigger "${trigger.name}"`, {
+        error: error as Error,
+      });
+    }
   }
 }

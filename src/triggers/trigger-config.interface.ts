@@ -34,6 +34,7 @@ export interface GithubTrigger {
   target: string;
   prompt: string;
   filters?: WebhookFilter[];
+  before?: string;
   prepend_system_prompt?: string;
   append_system_prompt?: string;
 }
