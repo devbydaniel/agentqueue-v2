@@ -1,9 +1,10 @@
-import { ApplicationError } from '../common/errors/base.error.js';
+import { ApplicationError } from '../../common/errors/base.error.js';
 
 export enum WebhookErrorCode {
   SIGNATURE_INVALID = 'WEBHOOK_SIGNATURE_INVALID',
   NOT_ENABLED = 'WEBHOOK_NOT_ENABLED',
   PAYLOAD_INVALID = 'WEBHOOK_PAYLOAD_INVALID',
+  UNEXPECTED_WEBHOOK_ERROR = 'UNEXPECTED_WEBHOOK_ERROR',
 }
 
 export abstract class WebhookError extends ApplicationError {
@@ -38,5 +39,13 @@ export class WebhookPayloadError extends WebhookError {
       WebhookErrorCode.PAYLOAD_INVALID,
       400,
     );
+  }
+}
+
+export class UnexpectedWebhookError extends WebhookError {
+  constructor(error: unknown) {
+    const message =
+      error instanceof Error ? error.message : 'Unexpected webhook error';
+    super(message, WebhookErrorCode.UNEXPECTED_WEBHOOK_ERROR, 500);
   }
 }

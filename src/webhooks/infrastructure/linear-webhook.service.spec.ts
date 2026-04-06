@@ -1,6 +1,6 @@
 import { createHmac } from 'node:crypto';
 import { LinearWebhookService } from './linear-webhook.service.js';
-import { WebhookPayloadError } from './webhooks.errors.js';
+import { WebhookPayloadError } from '../application/webhooks.errors.js';
 
 describe('LinearWebhookService', () => {
   let service: LinearWebhookService;

@@ -8,18 +8,19 @@ import {
   Req,
 } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { TriggerConfigService } from '../triggers/trigger-config.service.js';
-import { interpolateTemplate } from '../triggers/trigger-config.interface.js';
-import { AgentfilesConfigService } from '../config/agentfiles-config.service.js';
-import { ExecuteRunUseCase } from '../runs/application/execute-run.use-case.js';
-import { LinearWebhookService } from './linear-webhook.service.js';
-import { GithubWebhookService } from './github/github-webhook.service.js';
-import { LinearCallbackHandler } from '../callbacks/handlers/linear.callback-handler.js';
+import { TriggerConfigService } from '../../triggers/trigger-config.service.js';
+import { interpolateTemplate } from '../../triggers/trigger-config.interface.js';
+import { AgentfilesConfigService } from '../../config/agentfiles-config.service.js';
+import { ExecuteRunUseCase } from '../../runs/application/execute-run.use-case.js';
+import { LinearWebhookService } from '../infrastructure/linear-webhook.service.js';
+import { GithubSignatureVerifierService } from '../infrastructure/github/github-signature-verifier.service.js';
+import { HandleGithubWebhookUseCase } from '../application/handle-github-webhook.use-case.js';
+import { LinearCallbackHandler } from '../../callbacks/handlers/linear.callback-handler.js';
 import {
   WebhookNotEnabledError,
   WebhookSignatureError,
-} from './webhooks.errors.js';
-import { Public } from '../auth/public.decorator.js';
+} from '../application/webhooks.errors.js';
+import { Public } from '../../auth/public.decorator.js';
 
 interface RawBodyRequest {
   rawBody?: Buffer;
@@ -33,11 +34,18 @@ interface RawBodyRequest {
 export class WebhooksController {
   private readonly logger = new Logger(WebhooksController.name);
 
+  // NOTE: the Linear webhook handler below still contains substantial
+  // orchestration logic (signature/timestamp verification, payload parsing,
+  // stop-signal abort, run dispatch with callback emit). Extracting it into
+  // dedicated use cases is deferred — it is entangled with the
+  // LinearCallbackHandler emit lifecycle and the abort flow. Tracked in the
+  // queue-and-run-registry plan.
   constructor(
     private readonly triggerConfigService: TriggerConfigService,
     private readonly agentfilesConfigService: AgentfilesConfigService,
     private readonly linearWebhookService: LinearWebhookService,
-    private readonly githubWebhookService: GithubWebhookService,
+    private readonly githubSignatureVerifier: GithubSignatureVerifierService,
+    private readonly handleGithubWebhookUseCase: HandleGithubWebhookUseCase,
     private readonly executeRunUseCase: ExecuteRunUseCase,
   ) {}
 
@@ -232,17 +240,17 @@ export class WebhooksController {
   })
   @ApiResponse({ status: 200, description: 'Webhook processed' })
   @ApiResponse({ status: 401, description: 'Invalid signature' })
-  handleGithubWebhook(@Req() req: RawBodyRequest): {
+  async handleGithubWebhook(@Req() req: RawBodyRequest): Promise<{
     accepted: boolean;
     triggered: number;
-  } {
+  }> {
     // 1. Verify signature
     const rawBody = req.rawBody;
     const signature = req.headers['x-hub-signature-256'] as string | undefined;
     if (!rawBody || !signature) {
       throw new WebhookSignatureError('Missing signature or raw body');
     }
-    this.githubWebhookService.verifySignature(rawBody, signature);
+    this.githubSignatureVerifier.verify(rawBody, signature);
 
     // 2. Extract event type
     const eventType =
@@ -257,8 +265,12 @@ export class WebhooksController {
       ],
     });
 
-    // 3. Match triggers and fire runs
-    const result = this.githubWebhookService.handleEvent(eventType, body);
+    // 3. Match triggers and fire runs (use case dispatches each one
+    //    fire-and-forget; we return immediately with the matched count)
+    const result = await this.handleGithubWebhookUseCase.execute({
+      eventType,
+      payload: body,
+    });
 
     return { accepted: true, triggered: result.triggered };
   }

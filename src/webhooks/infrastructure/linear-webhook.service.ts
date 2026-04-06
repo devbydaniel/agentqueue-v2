@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { LinearClient } from '@linear/sdk';
-import { WebhookPayloadError } from './webhooks.errors.js';
+import { WebhookPayloadError } from '../application/webhooks.errors.js';
 
 export interface LinearWebhookPayload {
   action: string;

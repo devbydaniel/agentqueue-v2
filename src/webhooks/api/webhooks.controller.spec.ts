@@ -3,13 +3,14 @@ import { type INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import { createHmac } from 'node:crypto';
 import { WebhooksController } from './webhooks.controller.js';
-import { LinearWebhookService } from './linear-webhook.service.js';
-import { GithubWebhookService } from './github/github-webhook.service.js';
-import { TriggerConfigService } from '../triggers/trigger-config.service.js';
-import { AgentfilesConfigService } from '../config/agentfiles-config.service.js';
-import { ExecuteRunUseCase } from '../runs/application/execute-run.use-case.js';
-import { ApplicationErrorFilter } from '../common/filters/application-error.filter.js';
-import type { LinearTrigger } from '../triggers/trigger-config.interface.js';
+import { LinearWebhookService } from '../infrastructure/linear-webhook.service.js';
+import { GithubSignatureVerifierService } from '../infrastructure/github/github-signature-verifier.service.js';
+import { HandleGithubWebhookUseCase } from '../application/handle-github-webhook.use-case.js';
+import { TriggerConfigService } from '../../triggers/trigger-config.service.js';
+import { AgentfilesConfigService } from '../../config/agentfiles-config.service.js';
+import { ExecuteRunUseCase } from '../../runs/application/execute-run.use-case.js';
+import { ApplicationErrorFilter } from '../../common/filters/application-error.filter.js';
+import type { LinearTrigger } from '../../triggers/trigger-config.interface.js';
 
 describe('WebhooksController', () => {
   let app: INestApplication;
@@ -51,10 +52,13 @@ describe('WebhooksController', () => {
       providers: [
         LinearWebhookService,
         {
-          provide: GithubWebhookService,
+          provide: GithubSignatureVerifierService,
+          useValue: { verify: jest.fn() },
+        },
+        {
+          provide: HandleGithubWebhookUseCase,
           useValue: {
-            verifySignature: jest.fn(),
-            handleEvent: jest.fn().mockReturnValue({ triggered: 0 }),
+            execute: jest.fn().mockResolvedValue({ triggered: 0 }),
           },
         },
         {
@@ -245,7 +249,7 @@ describe('WebhooksController', () => {
 
   it('should return 404 when target repo is not found in agentfiles', async () => {
     const configService = app.get(AgentfilesConfigService);
-    const { RepoNotFoundError } = await import('../config/config.errors.js');
+    const { RepoNotFoundError } = await import('../../config/config.errors.js');
     (configService.resolveRepo as jest.Mock).mockImplementation(() => {
       throw new RepoNotFoundError('my-repo');
     });
