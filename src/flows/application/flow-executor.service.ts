@@ -1,7 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as path from 'node:path';
 import { FlowConfigService } from '../flow-config.service.js';
-import { FlowRegistryService } from '../flow-registry.service.js';
+import { FlowRunRepository } from '../infrastructure/flow-run.repository.js';
+import { FlowAbortTrackerService } from '../flow-abort-tracker.service.js';
 import type { FlowConfig } from '../flow-config.interface.js';
 import { AgentfilesConfigService } from '../../config/agentfiles-config.service.js';
 import { ExecuteRunUseCase } from '../../runs/application/execute-run.use-case.js';
@@ -32,13 +33,14 @@ export class FlowExecutorService {
 
   constructor(
     private readonly flowConfigService: FlowConfigService,
-    private readonly flowRegistry: FlowRegistryService,
+    private readonly flowRunRepository: FlowRunRepository,
+    private readonly flowAbortTracker: FlowAbortTrackerService,
     private readonly agentfilesConfigService: AgentfilesConfigService,
     private readonly executeRunUseCase: ExecuteRunUseCase,
   ) {}
 
-  start(flowName: string, vars: Record<string, string>): string {
-    const run = this.flowRegistry.create(flowName, vars);
+  async start(flowName: string, vars: Record<string, string>): Promise<string> {
+    const run = await this.flowRunRepository.create(flowName, vars);
     this.logger.log(`Starting flow "${flowName}" → run ${run.flowRunId}`);
 
     void this.runLoop(run.flowRunId).catch((error: unknown) => {
@@ -62,7 +64,7 @@ export class FlowExecutorService {
   }
 
   private async runLoop(flowRunId: string): Promise<void> {
-    const run = this.flowRegistry.get(flowRunId);
+    const run = await this.flowRunRepository.findById(flowRunId);
     if (!run) return;
 
     const ctx = await this.initializeLoop(flowRunId, run.flowName, run.vars);
@@ -72,7 +74,7 @@ export class FlowExecutorService {
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- intentional resolver loop; exits via return on done/escalate/error/abort
       while (true) {
         if (ctx.abortController.signal.aborted) {
-          this.completeRun(flowRunId, 'aborted');
+          await this.completeRun(flowRunId, 'aborted');
           return;
         }
 
@@ -81,7 +83,7 @@ export class FlowExecutorService {
         if (!shouldContinue) return;
       }
     } catch (error) {
-      this.errorRun(flowRunId, error);
+      await this.errorRun(flowRunId, error);
     }
   }
 
@@ -103,7 +105,7 @@ export class FlowExecutorService {
       }
 
       const abortController = new AbortController();
-      this.flowRegistry.trackAbortController(flowRunId, abortController);
+      this.flowAbortTracker.track(flowRunId, abortController);
 
       return {
         flowRunId,
@@ -117,7 +119,7 @@ export class FlowExecutorService {
       this.logger.error(
         `Flow run ${flowRunId} failed to initialize: ${error instanceof Error ? error.message : String(error)}`,
       );
-      this.errorRun(flowRunId, error);
+      await this.errorRun(flowRunId, error);
       return null;
     }
   }
@@ -128,17 +130,17 @@ export class FlowExecutorService {
     result: ResolverResult,
   ): Promise<boolean> {
     if ('done' in result) {
-      this.completeRun(ctx.flowRunId, 'done', result.summary);
+      await this.completeRun(ctx.flowRunId, 'done', result.summary);
       return false;
     }
 
     if ('escalate' in result) {
-      this.completeRun(ctx.flowRunId, 'escalated', result.escalate);
+      await this.completeRun(ctx.flowRunId, 'escalated', result.escalate);
       return false;
     }
 
     if (!('agent' in result)) {
-      this.completeRun(
+      await this.completeRun(
         ctx.flowRunId,
         'errored',
         'Resolver returned invalid result (no agent/done/escalate)',
@@ -157,7 +159,7 @@ export class FlowExecutorService {
   ): Promise<boolean> {
     const agentConfig = ctx.config.agents.find((a) => a.name === agentName);
     if (!agentConfig) {
-      this.completeRun(
+      await this.completeRun(
         ctx.flowRunId,
         'errored',
         `Resolver returned unknown agent "${agentName}"`,
@@ -168,12 +170,12 @@ export class FlowExecutorService {
     Object.assign(ctx.vars, stepVars);
     const renderedPrompt = interpolateTemplate(agentConfig.prompt, ctx.vars);
 
-    this.flowRegistry.addStep(ctx.flowRunId, {
+    await this.flowRunRepository.addStep(ctx.flowRunId, {
       agent: agentName,
       vars: { ...stepVars },
       startedAt: new Date(),
     });
-    this.flowRegistry.update(ctx.flowRunId, {
+    await this.flowRunRepository.update(ctx.flowRunId, {
       currentAgent: agentName,
       vars: { ...ctx.vars },
     });
@@ -187,34 +189,34 @@ export class FlowExecutorService {
         repo: agentConfig.target,
         prompt: renderedPrompt,
       });
-      this.flowRegistry.completeStep(ctx.flowRunId, true);
+      await this.flowRunRepository.completeStep(ctx.flowRunId, true);
       return true;
     } catch (error) {
-      this.flowRegistry.completeStep(ctx.flowRunId, false);
+      await this.flowRunRepository.completeStep(ctx.flowRunId, false);
       const msg = `Dispatch failed for agent "${agentName}": ${error instanceof Error ? error.message : String(error)}`;
       this.logger.error(`Flow run ${ctx.flowRunId}: ${msg}`);
-      this.completeRun(ctx.flowRunId, 'errored', msg);
+      await this.completeRun(ctx.flowRunId, 'errored', msg);
       return false;
     }
   }
 
-  private completeRun(
+  private async completeRun(
     flowRunId: string,
     status: 'done' | 'escalated' | 'errored' | 'aborted',
     message?: string,
-  ): void {
+  ): Promise<void> {
     this.logger.log(`Flow run ${flowRunId} → ${status}`);
-    this.flowRegistry.update(flowRunId, {
+    await this.flowRunRepository.update(flowRunId, {
       status,
       message,
       completedAt: new Date(),
     });
   }
 
-  private errorRun(flowRunId: string, error: unknown): void {
+  private async errorRun(flowRunId: string, error: unknown): Promise<void> {
     const message = error instanceof Error ? error.message : String(error);
     this.logger.error(`Flow run ${flowRunId} errored: ${message}`);
-    this.flowRegistry.update(flowRunId, {
+    await this.flowRunRepository.update(flowRunId, {
       status: 'errored',
       message,
       completedAt: new Date(),

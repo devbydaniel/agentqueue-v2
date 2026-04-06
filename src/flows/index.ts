@@ -1,6 +1,7 @@
 export { FlowsModule } from './flows.module.js';
 export { FlowConfigService } from './flow-config.service.js';
-export { FlowRegistryService } from './flow-registry.service.js';
+export { FlowRunRepository } from './infrastructure/flow-run.repository.js';
+export { FlowAbortTrackerService } from './flow-abort-tracker.service.js';
 export { FlowExecutorService } from './application/flow-executor.service.js';
 export type {
   FlowConfig,
@@ -11,7 +12,7 @@ export type {
   FlowRun,
   FlowRunStatus,
   FlowStepRecord,
-} from './flow-registry.service.js';
+} from './infrastructure/flow-run.repository.js';
 export type {
   ResolverResult,
   Resolver,

@@ -1,7 +1,8 @@
 import { Test } from '@nestjs/testing';
 import { ExecuteRunUseCase } from './execute-run.use-case.js';
 import { AgentfilesConfigService } from '../../config/agentfiles-config.service.js';
-import { SessionRegistryService } from '../session-registry.service.js';
+import { LinearSessionRepository } from '../infrastructure/linear-session.repository.js';
+import { ActiveSessionTrackerService } from '../active-session-tracker.service.js';
 import { CALLBACK_HANDLERS } from '../../callbacks/constants.js';
 import type { CallbackHandler } from '../../callbacks/callback-handler.interface.js';
 import { UnexpectedRunError } from './runs.errors.js';
@@ -53,7 +54,8 @@ jest.mock(
 describe('ExecuteRunUseCase', () => {
   let useCase: ExecuteRunUseCase;
   let configService: AgentfilesConfigService;
-  let sessionRegistry: SessionRegistryService;
+  let linearSessionRepository: LinearSessionRepository;
+  let activeSessionTracker: ActiveSessionTrackerService;
   const mockGlobalHandler: CallbackHandler = {
     name: 'test-global',
     onEvent: jest.fn(),
@@ -73,12 +75,17 @@ describe('ExecuteRunUseCase', () => {
           },
         },
         {
-          provide: SessionRegistryService,
+          provide: LinearSessionRepository,
           useValue: {
-            getSessionFile: jest.fn().mockReturnValue(undefined),
-            storeSessionFile: jest.fn(),
-            trackActive: jest.fn(),
-            untrackActive: jest.fn(),
+            findFilePath: jest.fn().mockResolvedValue(null),
+            saveFilePath: jest.fn().mockResolvedValue(undefined),
+          },
+        },
+        {
+          provide: ActiveSessionTrackerService,
+          useValue: {
+            track: jest.fn(),
+            untrack: jest.fn(),
             abort: jest.fn().mockResolvedValue(true),
           },
         },
@@ -91,7 +98,8 @@ describe('ExecuteRunUseCase', () => {
 
     useCase = module.get(ExecuteRunUseCase);
     configService = module.get(AgentfilesConfigService);
-    sessionRegistry = module.get(SessionRegistryService);
+    linearSessionRepository = module.get(LinearSessionRepository);
+    activeSessionTracker = module.get(ActiveSessionTrackerService);
   });
 
   it('should resolve the repo via config service', async () => {
@@ -309,9 +317,9 @@ describe('ExecuteRunUseCase', () => {
   });
 
   describe('session resumption', () => {
-    it('should open existing session when registry has a stored file', async () => {
+    it('should open existing session when repository has a stored file', async () => {
       const { SessionManager } = await import('@mariozechner/pi-coding-agent');
-      (sessionRegistry.getSessionFile as jest.Mock).mockReturnValueOnce(
+      (linearSessionRepository.findFilePath as jest.Mock).mockResolvedValueOnce(
         '/sessions/existing.jsonl',
       );
 
@@ -321,7 +329,7 @@ describe('ExecuteRunUseCase', () => {
         sessionKey: 'linear-session-1',
       });
 
-      expect(sessionRegistry.getSessionFile).toHaveBeenCalledWith(
+      expect(linearSessionRepository.findFilePath).toHaveBeenCalledWith(
         'linear-session-1',
       );
       expect(SessionManager.open).toHaveBeenCalledWith(
@@ -332,7 +340,7 @@ describe('ExecuteRunUseCase', () => {
 
     it('should fall back to create when open fails', async () => {
       const { SessionManager } = await import('@mariozechner/pi-coding-agent');
-      (sessionRegistry.getSessionFile as jest.Mock).mockReturnValueOnce(
+      (linearSessionRepository.findFilePath as jest.Mock).mockResolvedValueOnce(
         '/sessions/missing.jsonl',
       );
       (SessionManager.open as jest.Mock).mockImplementationOnce(() => {
@@ -349,44 +357,44 @@ describe('ExecuteRunUseCase', () => {
       expect(SessionManager.create).toHaveBeenCalled();
     });
 
-    it('should store session file in registry after creation', async () => {
+    it('should store session file in repository after creation', async () => {
       await useCase.execute({
         repo: 'core',
         prompt: 'hello',
         sessionKey: 'linear-session-1',
       });
 
-      expect(sessionRegistry.storeSessionFile).toHaveBeenCalledWith(
+      expect(linearSessionRepository.saveFilePath).toHaveBeenCalledWith(
         'linear-session-1',
         '/sessions/test-session.jsonl',
       );
     });
 
-    it('should not query registry when no sessionKey is provided', async () => {
+    it('should not query repository when no sessionKey is provided', async () => {
       const { SessionManager } = await import('@mariozechner/pi-coding-agent');
 
       await useCase.execute({ repo: 'core', prompt: 'hello' });
 
-      expect(sessionRegistry.getSessionFile).not.toHaveBeenCalled();
-      expect(sessionRegistry.storeSessionFile).not.toHaveBeenCalled();
+      expect(linearSessionRepository.findFilePath).not.toHaveBeenCalled();
+      expect(linearSessionRepository.saveFilePath).not.toHaveBeenCalled();
       expect(SessionManager.create).toHaveBeenCalled();
       expect(SessionManager.open).not.toHaveBeenCalled();
     });
   });
 
   describe('active session tracking', () => {
-    it('should track and untrack active session via registry', async () => {
+    it('should track and untrack active session via tracker', async () => {
       await useCase.execute({
         repo: 'core',
         prompt: 'hello',
         sessionKey: 'linear-session-1',
       });
 
-      expect(sessionRegistry.trackActive).toHaveBeenCalledWith(
+      expect(activeSessionTracker.track).toHaveBeenCalledWith(
         'linear-session-1',
         mockSession,
       );
-      expect(sessionRegistry.untrackActive).toHaveBeenCalledWith(
+      expect(activeSessionTracker.untrack).toHaveBeenCalledWith(
         'linear-session-1',
       );
     });
@@ -402,15 +410,17 @@ describe('ExecuteRunUseCase', () => {
         }),
       ).rejects.toThrow();
 
-      expect(sessionRegistry.untrackActive).toHaveBeenCalledWith(
+      expect(activeSessionTracker.untrack).toHaveBeenCalledWith(
         'linear-session-1',
       );
     });
 
-    it('should delegate abort to registry', async () => {
+    it('should delegate abort to the tracker', async () => {
       await useCase.abortSession('linear-session-1');
 
-      expect(sessionRegistry.abort).toHaveBeenCalledWith('linear-session-1');
+      expect(activeSessionTracker.abort).toHaveBeenCalledWith(
+        'linear-session-1',
+      );
     });
   });
 });

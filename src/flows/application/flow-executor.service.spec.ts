@@ -1,7 +1,8 @@
 import { FlowExecutorService } from './flow-executor.service.js';
 import type { Resolver } from './flow-executor.service.js';
 import type { FlowConfigService } from '../flow-config.service.js';
-import { FlowRegistryService } from '../flow-registry.service.js';
+import { FlowRunRepository } from '../infrastructure/flow-run.repository.js';
+import { FlowAbortTrackerService } from '../flow-abort-tracker.service.js';
 import type { AgentfilesConfigService } from '../../config/agentfiles-config.service.js';
 import type { ExecuteRunUseCase } from '../../runs/application/execute-run.use-case.js';
 import type { FlowConfig } from '../flow-config.interface.js';
@@ -13,7 +14,8 @@ function settle(ms = 50): Promise<void> {
 
 describe('FlowExecutorService', () => {
   let executor: FlowExecutorService;
-  let registry: FlowRegistryService;
+  let repository: FlowRunRepository;
+  let abortTracker: FlowAbortTrackerService;
   let mockResolver: jest.Mock<ReturnType<Resolver>, Parameters<Resolver>>;
 
   const testConfig: FlowConfig = {
@@ -39,12 +41,14 @@ describe('FlowExecutorService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    registry = new FlowRegistryService();
+    repository = new FlowRunRepository();
+    abortTracker = new FlowAbortTrackerService();
     mockResolver = jest.fn();
 
     executor = new FlowExecutorService(
       mockFlowConfigService,
-      registry,
+      repository,
+      abortTracker,
       mockAgentfilesConfigService,
       mockExecuteRunUseCase,
     );
@@ -61,10 +65,10 @@ describe('FlowExecutorService', () => {
       .mockResolvedValueOnce({ agent: 'qa', vars: {} })
       .mockResolvedValueOnce({ done: true, summary: 'All done' });
 
-    const runId = executor.start('factory', {});
+    const runId = await executor.start('factory', {});
     await settle();
 
-    const run = registry.get(runId)!;
+    const run = (await repository.findById(runId))!;
     expect(run.status).toBe('done');
     expect(run.message).toBe('All done');
     expect(run.steps).toHaveLength(2);
@@ -78,10 +82,10 @@ describe('FlowExecutorService', () => {
   it('escalation: resolver returns escalate immediately', async () => {
     mockResolver.mockResolvedValueOnce({ escalate: 'Stuck on merge conflict' });
 
-    const runId = executor.start('factory', {});
+    const runId = await executor.start('factory', {});
     await settle();
 
-    const run = registry.get(runId)!;
+    const run = (await repository.findById(runId))!;
     expect(run.status).toBe('escalated');
     expect(run.message).toBe('Stuck on merge conflict');
     expect(run.steps).toHaveLength(0);
@@ -91,10 +95,10 @@ describe('FlowExecutorService', () => {
   it('done immediately: resolver returns done', async () => {
     mockResolver.mockResolvedValueOnce({ done: true });
 
-    const runId = executor.start('factory', {});
+    const runId = await executor.start('factory', {});
     await settle();
 
-    const run = registry.get(runId)!;
+    const run = (await repository.findById(runId))!;
     expect(run.status).toBe('done');
     expect(run.steps).toHaveLength(0);
     expect(mockExecuteRunUseCase.execute).not.toHaveBeenCalled();
@@ -106,10 +110,10 @@ describe('FlowExecutorService', () => {
       vars: {},
     });
 
-    const runId = executor.start('factory', {});
+    const runId = await executor.start('factory', {});
     await settle();
 
-    const run = registry.get(runId)!;
+    const run = (await repository.findById(runId))!;
     expect(run.status).toBe('errored');
     expect(run.message).toContain('nonexistent');
     expect(mockExecuteRunUseCase.execute).not.toHaveBeenCalled();
@@ -124,10 +128,10 @@ describe('FlowExecutorService', () => {
       new Error('pi session crashed'),
     );
 
-    const runId = executor.start('factory', {});
+    const runId = await executor.start('factory', {});
     await settle();
 
-    const run = registry.get(runId)!;
+    const run = (await repository.findById(runId))!;
     expect(run.status).toBe('errored');
     expect(run.message).toContain('pi session crashed');
     expect(run.steps).toHaveLength(1);
@@ -138,10 +142,10 @@ describe('FlowExecutorService', () => {
   it('resolver throws: status errored', async () => {
     mockResolver.mockRejectedValueOnce(new Error('resolver kaboom'));
 
-    const runId = executor.start('factory', {});
+    const runId = await executor.start('factory', {});
     await settle();
 
-    const run = registry.get(runId)!;
+    const run = (await repository.findById(runId))!;
     expect(run.status).toBe('errored');
     expect(run.message).toContain('resolver kaboom');
   });
@@ -156,7 +160,7 @@ describe('FlowExecutorService', () => {
       })
       .mockImplementationOnce(async () => {
         // Abort during second resolver call (after first dispatch)
-        registry.abort(runId);
+        abortTracker.abort(runId);
         // Return agent — but abort signal is already set, so loop should exit
         return { agent: 'qa', vars: {} };
       });
@@ -166,10 +170,10 @@ describe('FlowExecutorService', () => {
       success: true,
     });
 
-    runId = executor.start('factory', {});
+    runId = await executor.start('factory', {});
     await settle();
 
-    const run = registry.get(runId)!;
+    const run = (await repository.findById(runId))!;
     // After the second resolver call returns, the loop checks abort before dispatching
     // But the abort check is at the top of the loop, before calling resolve.
     // So: first iteration dispatches dev, then loop restarts, checks abort (not set),
@@ -191,10 +195,10 @@ describe('FlowExecutorService', () => {
       })
       .mockResolvedValueOnce({ done: true });
 
-    const runId = executor.start('factory', { baseVar: 'hello' });
+    const runId = await executor.start('factory', { baseVar: 'hello' });
     await settle();
 
-    const run = registry.get(runId)!;
+    const run = (await repository.findById(runId))!;
     expect(run.status).toBe('done');
     expect(run.vars).toEqual({
       baseVar: 'hello',

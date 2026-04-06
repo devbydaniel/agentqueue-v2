@@ -3,7 +3,8 @@ import { ApplicationError } from '../../common/errors/base.error.js';
 import { CALLBACK_HANDLERS } from '../../callbacks/constants.js';
 import type { CallbackHandler } from '../../callbacks/callback-handler.interface.js';
 import { AgentfilesConfigService } from '../../config/agentfiles-config.service.js';
-import { SessionRegistryService } from '../session-registry.service.js';
+import { LinearSessionRepository } from '../infrastructure/linear-session.repository.js';
+import { ActiveSessionTrackerService } from '../active-session-tracker.service.js';
 import { UnexpectedRunError } from './runs.errors.js';
 import type { AgentSession } from '@mariozechner/pi-coding-agent';
 
@@ -29,7 +30,8 @@ export class ExecuteRunUseCase {
 
   constructor(
     private readonly agentfilesConfigService: AgentfilesConfigService,
-    private readonly sessionRegistry: SessionRegistryService,
+    private readonly linearSessionRepository: LinearSessionRepository,
+    private readonly activeSessionTracker: ActiveSessionTrackerService,
     @Inject(CALLBACK_HANDLERS)
     private readonly globalHandlers: CallbackHandler[],
   ) {}
@@ -39,7 +41,7 @@ export class ExecuteRunUseCase {
    * Returns true if the session was found and aborted.
    */
   async abortSession(sessionKey: string): Promise<boolean> {
-    return this.sessionRegistry.abort(sessionKey);
+    return this.activeSessionTracker.abort(sessionKey);
   }
 
   async execute(command: ExecuteRunCommand): Promise<ExecuteRunResult> {
@@ -85,8 +87,8 @@ export class ExecuteRunUseCase {
 
     // Resume existing pi session or create a new one
     const existingSessionFile = command.sessionKey
-      ? this.sessionRegistry.getSessionFile(command.sessionKey)
-      : undefined;
+      ? await this.linearSessionRepository.findFilePath(command.sessionKey)
+      : null;
 
     let sessionMgr: ReturnType<typeof SessionManager.create>;
     if (existingSessionFile) {
@@ -120,7 +122,10 @@ export class ExecuteRunUseCase {
     if (command.sessionKey) {
       const sessionFile = sessionMgr.getSessionFile();
       if (sessionFile) {
-        this.sessionRegistry.storeSessionFile(command.sessionKey, sessionFile);
+        await this.linearSessionRepository.saveFilePath(
+          command.sessionKey,
+          sessionFile,
+        );
       }
     }
 
@@ -130,7 +135,7 @@ export class ExecuteRunUseCase {
     );
 
     if (command.sessionKey) {
-      this.sessionRegistry.trackActive(command.sessionKey, session.session);
+      this.activeSessionTracker.track(command.sessionKey, session.session);
     }
 
     try {
@@ -142,7 +147,7 @@ export class ExecuteRunUseCase {
       throw new UnexpectedRunError(error);
     } finally {
       if (command.sessionKey) {
-        this.sessionRegistry.untrackActive(command.sessionKey);
+        this.activeSessionTracker.untrack(command.sessionKey);
       }
       detachCallbacks();
       session.session.dispose();

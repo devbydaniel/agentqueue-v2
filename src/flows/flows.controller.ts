@@ -1,7 +1,8 @@
 import { Body, Controller, Get, HttpCode, Param, Post } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { FlowConfigService } from './flow-config.service.js';
-import { FlowRegistryService } from './flow-registry.service.js';
+import { FlowRunRepository } from './infrastructure/flow-run.repository.js';
+import { FlowAbortTrackerService } from './flow-abort-tracker.service.js';
 import { FlowExecutorService } from './application/flow-executor.service.js';
 import {
   FlowNotFoundError,
@@ -14,7 +15,8 @@ import { StartFlowDto } from './dto/start-flow.dto.js';
 export class FlowsController {
   constructor(
     private readonly flowConfigService: FlowConfigService,
-    private readonly flowRegistry: FlowRegistryService,
+    private readonly flowRunRepository: FlowRunRepository,
+    private readonly flowAbortTracker: FlowAbortTrackerService,
     private readonly flowExecutor: FlowExecutorService,
   ) {}
 
@@ -38,10 +40,10 @@ export class FlowsController {
   })
   @ApiResponse({ status: 200, description: 'Flow run started' })
   @ApiResponse({ status: 404, description: 'Flow not found' })
-  startFlow(
+  async startFlow(
     @Param('name') name: string,
     @Body() dto: StartFlowDto,
-  ): { flowRunId: string } {
+  ): Promise<{ flowRunId: string }> {
     // Validate flow exists (throws if config missing/invalid)
     try {
       this.flowConfigService.loadFlow(name);
@@ -49,7 +51,7 @@ export class FlowsController {
       throw new FlowNotFoundError(name);
     }
 
-    const flowRunId = this.flowExecutor.start(name, dto.vars ?? {});
+    const flowRunId = await this.flowExecutor.start(name, dto.vars ?? {});
     return { flowRunId };
   }
 
@@ -60,7 +62,7 @@ export class FlowsController {
   })
   @ApiResponse({ status: 200, description: 'List of flow runs' })
   listRuns(@Param('name') name: string) {
-    return this.flowRegistry.listByFlow(name);
+    return this.flowRunRepository.findByFlowName(name);
   }
 
   @Get('runs/:runId')
@@ -70,8 +72,8 @@ export class FlowsController {
   })
   @ApiResponse({ status: 200, description: 'Flow run details' })
   @ApiResponse({ status: 404, description: 'Flow run not found' })
-  getRun(@Param('runId') runId: string) {
-    const run = this.flowRegistry.get(runId);
+  async getRun(@Param('runId') runId: string) {
+    const run = await this.flowRunRepository.findById(runId);
     if (!run) {
       throw new FlowRunNotFoundError(runId);
     }
@@ -87,7 +89,7 @@ export class FlowsController {
   })
   @ApiResponse({ status: 200, description: 'Abort result' })
   abortRun(@Param('runId') runId: string): { aborted: boolean } {
-    const aborted = this.flowRegistry.abort(runId);
+    const aborted = this.flowAbortTracker.abort(runId);
     return { aborted };
   }
 }

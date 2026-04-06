@@ -3,10 +3,11 @@ import { type INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import { FlowsController } from './flows.controller.js';
 import { FlowConfigService } from './flow-config.service.js';
-import { FlowRegistryService } from './flow-registry.service.js';
+import { FlowRunRepository } from './infrastructure/flow-run.repository.js';
+import { FlowAbortTrackerService } from './flow-abort-tracker.service.js';
 import { FlowExecutorService } from './application/flow-executor.service.js';
 import { ApplicationErrorFilter } from '../common/filters/application-error.filter.js';
-import type { FlowRun } from './flow-registry.service.js';
+import type { FlowRun } from './infrastructure/flow-run.repository.js';
 
 describe('FlowsController', () => {
   let app: INestApplication;
@@ -16,9 +17,12 @@ describe('FlowsController', () => {
     loadFlow: jest.fn(),
   };
 
-  const mockFlowRegistry = {
-    listByFlow: jest.fn(),
-    get: jest.fn(),
+  const mockFlowRunRepository = {
+    findByFlowName: jest.fn(),
+    findById: jest.fn(),
+  };
+
+  const mockFlowAbortTracker = {
     abort: jest.fn(),
   };
 
@@ -33,7 +37,11 @@ describe('FlowsController', () => {
       controllers: [FlowsController],
       providers: [
         { provide: FlowConfigService, useValue: mockFlowConfigService },
-        { provide: FlowRegistryService, useValue: mockFlowRegistry },
+        { provide: FlowRunRepository, useValue: mockFlowRunRepository },
+        {
+          provide: FlowAbortTrackerService,
+          useValue: mockFlowAbortTracker,
+        },
         { provide: FlowExecutorService, useValue: mockFlowExecutor },
       ],
     }).compile();
@@ -75,7 +83,7 @@ describe('FlowsController', () => {
         resolver: './resolve.ts',
         agents: [],
       });
-      mockFlowExecutor.start.mockReturnValue('run-123');
+      mockFlowExecutor.start.mockResolvedValue('run-123');
 
       const res = await request(app.getHttpServer())
         .post('/flows/factory/start')
@@ -93,7 +101,7 @@ describe('FlowsController', () => {
         resolver: './resolve.ts',
         agents: [],
       });
-      mockFlowExecutor.start.mockReturnValue('run-456');
+      mockFlowExecutor.start.mockResolvedValue('run-456');
 
       await request(app.getHttpServer())
         .post('/flows/factory/start')
@@ -130,7 +138,7 @@ describe('FlowsController', () => {
           completedAt: new Date(),
         },
       ];
-      mockFlowRegistry.listByFlow.mockReturnValue(runs);
+      mockFlowRunRepository.findByFlowName.mockResolvedValue(runs);
 
       const res = await request(app.getHttpServer())
         .get('/flows/factory/runs')
@@ -152,7 +160,7 @@ describe('FlowsController', () => {
         steps: [],
         startedAt: new Date(),
       };
-      mockFlowRegistry.get.mockReturnValue(run);
+      mockFlowRunRepository.findById.mockResolvedValue(run);
 
       const res = await request(app.getHttpServer())
         .get('/flows/runs/run-1')
@@ -163,7 +171,7 @@ describe('FlowsController', () => {
     });
 
     it('should return 404 for unknown run ID', async () => {
-      mockFlowRegistry.get.mockReturnValue(undefined);
+      mockFlowRunRepository.findById.mockResolvedValue(null);
 
       const res = await request(app.getHttpServer())
         .get('/flows/runs/nonexistent')
@@ -175,7 +183,7 @@ describe('FlowsController', () => {
 
   describe('POST /flows/runs/:runId/abort', () => {
     it('should return aborted status', async () => {
-      mockFlowRegistry.abort.mockReturnValue(true);
+      mockFlowAbortTracker.abort.mockReturnValue(true);
 
       const res = await request(app.getHttpServer())
         .post('/flows/runs/run-1/abort')
@@ -185,7 +193,7 @@ describe('FlowsController', () => {
     });
 
     it('should return false when no active run', async () => {
-      mockFlowRegistry.abort.mockReturnValue(false);
+      mockFlowAbortTracker.abort.mockReturnValue(false);
 
       const res = await request(app.getHttpServer())
         .post('/flows/runs/nonexistent/abort')
