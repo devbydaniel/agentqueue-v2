@@ -1,6 +1,6 @@
 import { Test } from '@nestjs/testing';
 import { ListFlowsUseCase } from './list-flows.use-case.js';
-import { FlowConfigService } from '../flow-config.service.js';
+import { FlowConfigService } from '../infrastructure/flow-config.service.js';
 import { UnexpectedFlowError } from './flows.errors.js';
 
 describe('ListFlowsUseCase', () => {

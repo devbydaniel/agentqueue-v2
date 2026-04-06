@@ -1,6 +1,6 @@
 import { Test } from '@nestjs/testing';
 import { AbortFlowUseCase } from './abort-flow.use-case.js';
-import { FlowAbortTrackerService } from '../flow-abort-tracker.service.js';
+import { FlowAbortTrackerService } from './flow-abort-tracker.service.js';
 
 describe('AbortFlowUseCase', () => {
   let useCase: AbortFlowUseCase;

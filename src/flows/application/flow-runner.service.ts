@@ -1,11 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as path from 'node:path';
-import { FlowConfigService } from './flow-config.service.js';
-import { FlowRunRepository } from './infrastructure/flow-run.repository.js';
+import { FlowConfigService } from '../infrastructure/flow-config.service.js';
+import { FlowRunRepository } from '../infrastructure/flow-run.repository.js';
 import { FlowAbortTrackerService } from './flow-abort-tracker.service.js';
-import type { FlowConfig } from './flow-config.interface.js';
-import { ExecuteRunUseCase } from '../runs/application/execute-run.use-case.js';
-import { interpolateTemplate } from '../common/utils/interpolate-template.js';
+import type { FlowConfig } from '../infrastructure/flow-config.interface.js';
+import { ExecuteRunUseCase } from '../../runs/application/execute-run.use-case.js';
+import { interpolateTemplate } from '../../common/utils/interpolate-template.js';
 
 export type ResolverResult =
   | { agent: string; vars: Record<string, string> }

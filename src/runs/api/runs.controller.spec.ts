@@ -2,7 +2,7 @@ import { Test } from '@nestjs/testing';
 import { type INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import { RunsController } from './runs.controller.js';
-import { ExecuteRunUseCase } from './application/execute-run.use-case.js';
+import { ExecuteRunUseCase } from '../application/execute-run.use-case.js';
 
 describe('RunsController', () => {
   let app: INestApplication;

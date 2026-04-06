@@ -1,8 +1,8 @@
 import { Test } from '@nestjs/testing';
 import { StartFlowUseCase } from './start-flow.use-case.js';
-import { FlowConfigService } from '../flow-config.service.js';
+import { FlowConfigService } from '../infrastructure/flow-config.service.js';
 import { FlowRunRepository } from '../infrastructure/flow-run.repository.js';
-import { FlowRunnerService } from '../flow-runner.service.js';
+import { FlowRunnerService } from './flow-runner.service.js';
 import { FlowNotFoundError, UnexpectedFlowError } from './flows.errors.js';
 
 describe('StartFlowUseCase', () => {

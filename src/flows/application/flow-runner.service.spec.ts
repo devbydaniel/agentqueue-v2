@@ -1,10 +1,10 @@
 import { FlowRunnerService } from './flow-runner.service.js';
 import type { Resolver } from './flow-runner.service.js';
-import type { FlowConfigService } from './flow-config.service.js';
-import { FlowRunRepository } from './infrastructure/flow-run.repository.js';
+import type { FlowConfigService } from '../infrastructure/flow-config.service.js';
+import { FlowRunRepository } from '../infrastructure/flow-run.repository.js';
 import { FlowAbortTrackerService } from './flow-abort-tracker.service.js';
-import type { ExecuteRunUseCase } from '../runs/application/execute-run.use-case.js';
-import type { FlowConfig } from './flow-config.interface.js';
+import type { ExecuteRunUseCase } from '../../runs/application/execute-run.use-case.js';
+import type { FlowConfig } from '../infrastructure/flow-config.interface.js';
 
 /** Wait for all microtasks / async work in the fire-and-forget loop to settle */
 function settle(ms = 50): Promise<void> {

@@ -1,7 +1,7 @@
 import { Body, Controller, Post } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { ExecuteRunDto } from './dto/execute-run.dto.js';
-import { ExecuteRunUseCase } from './application/execute-run.use-case.js';
+import { ExecuteRunUseCase } from '../application/execute-run.use-case.js';
 
 @ApiTags('Runs')
 @Controller('runs')

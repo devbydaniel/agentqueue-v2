@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ApplicationError } from '../../common/errors/base.error.js';
-import { FlowConfigService } from '../flow-config.service.js';
-import type { FlowInfo } from '../flow-config.interface.js';
+import { FlowConfigService } from '../infrastructure/flow-config.service.js';
+import type { FlowInfo } from '../infrastructure/flow-config.interface.js';
 import { UnexpectedFlowError } from './flows.errors.js';
 
 @Injectable()

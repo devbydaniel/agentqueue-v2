@@ -4,7 +4,7 @@ import { CALLBACK_HANDLERS } from '../../callbacks/constants.js';
 import type { CallbackHandler } from '../../callbacks/callback-handler.interface.js';
 import { AgentfilesConfigService } from '../../config/agentfiles-config.service.js';
 import { LinearSessionRepository } from '../infrastructure/linear-session.repository.js';
-import { ActiveSessionTrackerService } from '../active-session-tracker.service.js';
+import { ActiveSessionTrackerService } from './active-session-tracker.service.js';
 import { UnexpectedRunError } from './runs.errors.js';
 import type { AgentSession } from '@mariozechner/pi-coding-agent';
 

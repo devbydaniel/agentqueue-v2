@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ApplicationError } from '../../common/errors/base.error.js';
-import { FlowAbortTrackerService } from '../flow-abort-tracker.service.js';
+import { FlowAbortTrackerService } from './flow-abort-tracker.service.js';
 import { UnexpectedFlowError } from './flows.errors.js';
 
 export interface AbortFlowCommand {
