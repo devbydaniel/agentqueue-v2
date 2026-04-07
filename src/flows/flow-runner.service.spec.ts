@@ -1,10 +1,9 @@
 import { FlowRunnerService } from './flow-runner.service.js';
-import type { Resolver } from './flow-runner.service.js';
-import type { FlowConfigService } from '../infrastructure/flow-config.service.js';
-import { FlowRunRepository } from '../infrastructure/flow-run.repository.js';
+import type { Resolver } from './flow-resolver-loader.service.js';
+import { FlowRunRepository } from './flow-run.repository.js';
 import { FlowAbortTrackerService } from './flow-abort-tracker.service.js';
-import type { RunsService } from '../../runs/runs.service.js';
-import type { FlowConfig } from '../infrastructure/flow-config.interface.js';
+import type { RunsService } from '../runs/runs.service.js';
+import type { FlowConfig } from './flow-config.service.js';
 
 /** Wait for all microtasks / async work in the fire-and-forget loop to settle */
 function settle(ms = 50): Promise<void> {
@@ -25,23 +24,28 @@ describe('FlowRunnerService', () => {
     ],
   };
 
-  const mockFlowConfigService = {
-    loadFlow: jest.fn().mockReturnValue(testConfig),
-    getFlowDir: jest.fn().mockReturnValue('/fake/flows/factory'),
-  } as unknown as FlowConfigService;
-
   const mockRunsService = {
     execute: jest.fn().mockResolvedValue({ success: true }),
   } as unknown as RunsService;
 
-  /** Helper: create the row in the repo and start the runner against it. */
+  /** Helper: create the row in the repo, track an abort controller, and start the runner. */
   async function startRun(
     flowName: string,
     vars: Record<string, string> = {},
-  ): Promise<string> {
+  ): Promise<{ flowRunId: string; abortController: AbortController }> {
     const run = await repository.create(flowName, vars);
-    runner.run(run.flowRunId, flowName, vars);
-    return run.flowRunId;
+    const abortController = new AbortController();
+    abortTracker.track(run.flowRunId, abortController);
+    runner.run({
+      flowRunId: run.flowRunId,
+      flowName,
+      flowDir: '/fake/flows/factory',
+      config: testConfig,
+      resolve: mockResolver,
+      vars,
+      abortSignal: abortController.signal,
+    });
+    return { flowRunId: run.flowRunId, abortController };
   }
 
   beforeEach(() => {
@@ -50,17 +54,7 @@ describe('FlowRunnerService', () => {
     abortTracker = new FlowAbortTrackerService();
     mockResolver = jest.fn();
 
-    runner = new FlowRunnerService(
-      mockFlowConfigService,
-      repository,
-      abortTracker,
-      mockRunsService,
-    );
-
-    // Inject mock resolver instead of doing dynamic import
-    jest
-      .spyOn(runner as never, 'loadResolver' as never)
-      .mockResolvedValue({ resolve: mockResolver } as never);
+    runner = new FlowRunnerService(repository, abortTracker, mockRunsService);
   });
 
   it('happy path: resolver returns agent twice then done', async () => {
@@ -69,10 +63,10 @@ describe('FlowRunnerService', () => {
       .mockResolvedValueOnce({ agent: 'qa', vars: {} })
       .mockResolvedValueOnce({ done: true, summary: 'All done' });
 
-    const runId = await startRun('factory');
+    const { flowRunId } = await startRun('factory');
     await settle();
 
-    const run = (await repository.findById(runId))!;
+    const run = (await repository.findById(flowRunId))!;
     expect(run.status).toBe('done');
     expect(run.message).toBe('All done');
     expect(run.steps).toHaveLength(2);
@@ -86,10 +80,10 @@ describe('FlowRunnerService', () => {
   it('escalation: resolver returns escalate immediately', async () => {
     mockResolver.mockResolvedValueOnce({ escalate: 'Stuck on merge conflict' });
 
-    const runId = await startRun('factory');
+    const { flowRunId } = await startRun('factory');
     await settle();
 
-    const run = (await repository.findById(runId))!;
+    const run = (await repository.findById(flowRunId))!;
     expect(run.status).toBe('escalated');
     expect(run.message).toBe('Stuck on merge conflict');
     expect(run.steps).toHaveLength(0);
@@ -99,10 +93,10 @@ describe('FlowRunnerService', () => {
   it('done immediately: resolver returns done', async () => {
     mockResolver.mockResolvedValueOnce({ done: true });
 
-    const runId = await startRun('factory');
+    const { flowRunId } = await startRun('factory');
     await settle();
 
-    const run = (await repository.findById(runId))!;
+    const run = (await repository.findById(flowRunId))!;
     expect(run.status).toBe('done');
     expect(run.steps).toHaveLength(0);
     expect(mockRunsService.execute).not.toHaveBeenCalled();
@@ -114,10 +108,10 @@ describe('FlowRunnerService', () => {
       vars: {},
     });
 
-    const runId = await startRun('factory');
+    const { flowRunId } = await startRun('factory');
     await settle();
 
-    const run = (await repository.findById(runId))!;
+    const run = (await repository.findById(flowRunId))!;
     expect(run.status).toBe('errored');
     expect(run.message).toContain('nonexistent');
     expect(mockRunsService.execute).not.toHaveBeenCalled();
@@ -132,10 +126,10 @@ describe('FlowRunnerService', () => {
       new Error('pi session crashed'),
     );
 
-    const runId = await startRun('factory');
+    const { flowRunId } = await startRun('factory');
     await settle();
 
-    const run = (await repository.findById(runId))!;
+    const run = (await repository.findById(flowRunId))!;
     expect(run.status).toBe('errored');
     expect(run.message).toContain('pi session crashed');
     expect(run.steps).toHaveLength(1);
@@ -146,10 +140,10 @@ describe('FlowRunnerService', () => {
   it('resolver throws: status errored', async () => {
     mockResolver.mockRejectedValueOnce(new Error('resolver kaboom'));
 
-    const runId = await startRun('factory');
+    const { flowRunId } = await startRun('factory');
     await settle();
 
-    const run = (await repository.findById(runId))!;
+    const run = (await repository.findById(flowRunId))!;
     expect(run.status).toBe('errored');
     expect(run.message).toContain('resolver kaboom');
   });
@@ -169,12 +163,13 @@ describe('FlowRunnerService', () => {
         return { agent: 'qa', vars: {} };
       });
 
-    // Make execute slow enough that the second resolver call happens
+    // Make execute resolve quickly so the second resolver call happens
     (mockRunsService.execute as jest.Mock).mockResolvedValue({
       success: true,
     });
 
-    runId = await startRun('factory');
+    const result = await startRun('factory');
+    runId = result.flowRunId;
     await settle();
 
     const run = (await repository.findById(runId))!;
@@ -190,10 +185,10 @@ describe('FlowRunnerService', () => {
       })
       .mockResolvedValueOnce({ done: true });
 
-    const runId = await startRun('factory', { baseVar: 'hello' });
+    const { flowRunId } = await startRun('factory', { baseVar: 'hello' });
     await settle();
 
-    const run = (await repository.findById(runId))!;
+    const run = (await repository.findById(flowRunId))!;
     expect(run.status).toBe('done');
     expect(run.vars).toEqual({
       baseVar: 'hello',
@@ -205,5 +200,15 @@ describe('FlowRunnerService', () => {
     const calls = (mockRunsService.execute as jest.Mock).mock.calls;
     expect(calls[0][0].prompt).toBe('Build feat-1');
     expect(calls[1][0].prompt).toBe('Review feat-1');
+  });
+
+  it('completion untracks the abort controller', async () => {
+    mockResolver.mockResolvedValueOnce({ done: true });
+    const untrackSpy = jest.spyOn(abortTracker, 'untrack');
+
+    const { flowRunId } = await startRun('factory');
+    await settle();
+
+    expect(untrackSpy).toHaveBeenCalledWith(flowRunId);
   });
 });

@@ -1,22 +1,12 @@
 import { Body, Controller, Get, HttpCode, Param, Post } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { StartFlowUseCase } from '../application/start-flow.use-case.js';
-import { AbortFlowUseCase } from '../application/abort-flow.use-case.js';
-import { ListFlowsUseCase } from '../application/list-flows.use-case.js';
-import { ListFlowRunsUseCase } from '../application/list-flow-runs.use-case.js';
-import { GetFlowRunUseCase } from '../application/get-flow-run.use-case.js';
+import { FlowsService } from './flows.service.js';
 import { StartFlowDto } from './dto/start-flow.dto.js';
 
 @ApiTags('Flows')
 @Controller('flows')
 export class FlowsController {
-  constructor(
-    private readonly startFlowUseCase: StartFlowUseCase,
-    private readonly abortFlowUseCase: AbortFlowUseCase,
-    private readonly listFlowsUseCase: ListFlowsUseCase,
-    private readonly listFlowRunsUseCase: ListFlowRunsUseCase,
-    private readonly getFlowRunUseCase: GetFlowRunUseCase,
-  ) {}
+  constructor(private readonly flowsService: FlowsService) {}
 
   @Get()
   @ApiOperation({
@@ -26,7 +16,7 @@ export class FlowsController {
   })
   @ApiResponse({ status: 200, description: 'List of available flows' })
   listFlows() {
-    return this.listFlowsUseCase.execute();
+    return this.flowsService.listFlows();
   }
 
   @Post(':name/start')
@@ -39,7 +29,7 @@ export class FlowsController {
   @ApiResponse({ status: 200, description: 'Flow run started' })
   @ApiResponse({ status: 404, description: 'Flow not found' })
   startFlow(@Param('name') name: string, @Body() dto: StartFlowDto) {
-    return this.startFlowUseCase.execute({
+    return this.flowsService.startFlow({
       flowName: name,
       vars: dto.vars ?? {},
     });
@@ -52,7 +42,7 @@ export class FlowsController {
   })
   @ApiResponse({ status: 200, description: 'List of flow runs' })
   listRuns(@Param('name') name: string) {
-    return this.listFlowRunsUseCase.execute({ flowName: name });
+    return this.flowsService.listFlowRuns(name);
   }
 
   @Get('runs/:runId')
@@ -63,7 +53,7 @@ export class FlowsController {
   @ApiResponse({ status: 200, description: 'Flow run details' })
   @ApiResponse({ status: 404, description: 'Flow run not found' })
   getRun(@Param('runId') runId: string) {
-    return this.getFlowRunUseCase.execute({ flowRunId: runId });
+    return this.flowsService.getFlowRun(runId);
   }
 
   @Post('runs/:runId/abort')
@@ -75,6 +65,6 @@ export class FlowsController {
   })
   @ApiResponse({ status: 200, description: 'Abort result' })
   abortRun(@Param('runId') runId: string) {
-    return this.abortFlowUseCase.execute({ flowRunId: runId });
+    return this.flowsService.abortFlowRun(runId);
   }
 }

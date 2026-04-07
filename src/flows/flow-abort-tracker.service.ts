@@ -19,6 +19,14 @@ export class FlowAbortTrackerService {
   }
 
   /**
+   * Drop the tracker entry for a flow run without signalling abort. Called by
+   * the runner when a loop completes normally so the map doesn't leak.
+   */
+  untrack(flowRunId: string): void {
+    this.controllers.delete(flowRunId);
+  }
+
+  /**
    * Signal abort on the tracked controller and remove it.
    * Returns true if a controller was found and aborted, false otherwise.
    */

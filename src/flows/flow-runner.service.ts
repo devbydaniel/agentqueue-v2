@@ -1,49 +1,52 @@
 import { Injectable, Logger } from '@nestjs/common';
-import * as path from 'node:path';
-import { FlowConfigService } from '../infrastructure/flow-config.service.js';
-import { FlowRunRepository } from '../infrastructure/flow-run.repository.js';
+import { RunsService } from '../runs/runs.service.js';
+import { interpolateTemplate } from '../common/utils/interpolate-template.js';
+import type { FlowConfig } from './flow-config.service.js';
+import type {
+  Resolver,
+  ResolverResult,
+} from './flow-resolver-loader.service.js';
+import { FlowRunRepository } from './flow-run.repository.js';
 import { FlowAbortTrackerService } from './flow-abort-tracker.service.js';
-import type { FlowConfig } from '../infrastructure/flow-config.interface.js';
-import { RunsService } from '../../runs/runs.service.js';
-import { interpolateTemplate } from '../../common/utils/interpolate-template.js';
 
-export type ResolverResult =
-  | { agent: string; vars: Record<string, string> }
-  | { done: true; summary?: string }
-  | { escalate: string };
-
-export type Resolver = (
-  flowDir: string,
-  vars: Record<string, string>,
-) => ResolverResult | Promise<ResolverResult>;
+export interface RunFlowLoopOptions {
+  flowRunId: string;
+  flowName: string;
+  flowDir: string;
+  config: FlowConfig;
+  resolve: Resolver;
+  vars: Record<string, string>;
+  abortSignal: AbortSignal;
+}
 
 interface LoopContext {
   flowRunId: string;
-  config: FlowConfig;
+  flowName: string;
   flowDir: string;
+  config: FlowConfig;
   resolve: Resolver;
-  abortController: AbortController;
+  abortSignal: AbortSignal;
   vars: Record<string, string>;
 }
 
 /**
- * Lifecycle service that owns in-process flow run loops.
+ * Runs the resolver loop for a single flow run in the background.
  *
- * The flow run row is created by the caller (typically `StartFlowUseCase`);
- * this service receives the `flowRunId` and runs the resolver loop in the
- * background, dispatching agent steps via `RunsService` and recording
- * progress in the repository. Abort signals come in via `FlowAbortTrackerService`.
+ * Caller (FlowsService) is responsible for:
+ *  - Loading the flow config + resolver synchronously
+ *  - Creating the FlowRun row in the repository
+ *  - Creating the AbortController and registering it with FlowAbortTrackerService
+ *  - Calling `run()` with everything pre-resolved
  *
- * Categorized as a lifecycle / runtime service (not a use case) because it
- * owns long-running loop state and an in-memory `AbortController`. Use cases
- * delegate to it for the runtime mechanics.
+ * This service then dispatches agent steps via `RunsService` and records
+ * progress in the repository. It exits the loop on done / escalate / error /
+ * abort signal.
  */
 @Injectable()
 export class FlowRunnerService {
   private readonly logger = new Logger(FlowRunnerService.name);
 
   constructor(
-    private readonly flowConfigService: FlowConfigService,
     private readonly flowRunRepository: FlowRunRepository,
     private readonly flowAbortTracker: FlowAbortTrackerService,
     private readonly runsService: RunsService,
@@ -51,42 +54,35 @@ export class FlowRunnerService {
 
   /**
    * Kick off a flow run loop in the background. Returns immediately.
-   * Caller is responsible for having created the flow run row first.
    */
-  run(flowRunId: string, flowName: string, vars: Record<string, string>): void {
-    this.logger.log(`Starting flow "${flowName}" → run ${flowRunId}`);
+  run(options: RunFlowLoopOptions): void {
+    this.logger.log(
+      `Starting flow "${options.flowName}" → run ${options.flowRunId}`,
+    );
 
-    void this.runLoop(flowRunId, flowName, vars).catch((error: unknown) => {
+    void this.runLoop(options).catch((error: unknown) => {
       this.logger.error(
-        `Flow run ${flowRunId} loop failed unexpectedly: ${error instanceof Error ? error.message : String(error)}`,
+        `Flow run ${options.flowRunId} loop failed unexpectedly: ${error instanceof Error ? error.message : String(error)}`,
       );
     });
   }
 
-  /** @visibleForTesting — override in tests to inject a mock resolver */
-  protected async loadResolver(
-    resolverPath: string,
-  ): Promise<{ resolve: Resolver }> {
-    // Register tsx loader for TypeScript resolvers
-    // eslint-disable-next-line @typescript-eslint/no-require-imports -- tsx CJS registration must use require()
-    require('tsx/cjs/api');
-    const mod = (await import(resolverPath)) as { resolve: Resolver };
-    return mod;
-  }
-
-  private async runLoop(
-    flowRunId: string,
-    flowName: string,
-    vars: Record<string, string>,
-  ): Promise<void> {
-    const ctx = await this.initializeLoop(flowRunId, flowName, vars);
-    if (!ctx) return;
+  private async runLoop(options: RunFlowLoopOptions): Promise<void> {
+    const ctx: LoopContext = {
+      flowRunId: options.flowRunId,
+      flowName: options.flowName,
+      flowDir: options.flowDir,
+      config: options.config,
+      resolve: options.resolve,
+      abortSignal: options.abortSignal,
+      vars: { ...options.vars },
+    };
 
     try {
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- intentional resolver loop; exits via return on done/escalate/error/abort
       while (true) {
-        if (ctx.abortController.signal.aborted) {
-          await this.completeRun(flowRunId, 'aborted');
+        if (ctx.abortSignal.aborted) {
+          await this.completeRun(ctx.flowRunId, 'aborted');
           return;
         }
 
@@ -95,44 +91,11 @@ export class FlowRunnerService {
         if (!shouldContinue) return;
       }
     } catch (error) {
-      await this.errorRun(flowRunId, error);
-    }
-  }
-
-  private async initializeLoop(
-    flowRunId: string,
-    flowName: string,
-    vars: Record<string, string>,
-  ): Promise<LoopContext | null> {
-    try {
-      const config = this.flowConfigService.loadFlow(flowName);
-      const flowDir = this.flowConfigService.getFlowDir(flowName);
-      const resolverPath = path.resolve(flowDir, config.resolver);
-      const mod = await this.loadResolver(resolverPath);
-
-      if (typeof mod.resolve !== 'function') {
-        throw new Error(
-          `Resolver module at "${resolverPath}" does not export a "resolve" function`,
-        );
-      }
-
-      const abortController = new AbortController();
-      this.flowAbortTracker.track(flowRunId, abortController);
-
-      return {
-        flowRunId,
-        config,
-        flowDir,
-        resolve: mod.resolve,
-        abortController,
-        vars: { ...vars },
-      };
-    } catch (error) {
-      this.logger.error(
-        `Flow run ${flowRunId} failed to initialize: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      await this.errorRun(flowRunId, error);
-      return null;
+      await this.errorRun(ctx.flowRunId, error);
+    } finally {
+      // Drop the abort controller registration so the map doesn't leak
+      // entries for completed runs.
+      this.flowAbortTracker.untrack(ctx.flowRunId);
     }
   }
 

@@ -28,4 +28,14 @@ describe('FlowAbortTrackerService', () => {
     tracker.abort('run-1');
     expect(tracker.abort('run-1')).toBe(false);
   });
+
+  it('untrack should remove the entry without signalling abort', () => {
+    const controller = new AbortController();
+    tracker.track('run-1', controller);
+
+    tracker.untrack('run-1');
+
+    expect(controller.signal.aborted).toBe(false);
+    expect(tracker.abort('run-1')).toBe(false);
+  });
 });

@@ -1,14 +1,37 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as yaml from 'js-yaml';
-import type {
-  FlowAgentConfig,
-  FlowConfig,
-  FlowInfo,
-} from './flow-config.interface.js';
 
+export interface FlowAgentConfig {
+  name: string;
+  target: string;
+  prompt: string;
+}
+
+export interface FlowConfig {
+  resolver: string;
+  agents: FlowAgentConfig[];
+}
+
+export interface FlowInfo {
+  name: string;
+  configPath: string;
+}
+
+/**
+ * Loads and validates flow configs from `~/.agentqueue/flows/<name>/config.yaml`.
+ *
+ * Throws `NotFoundException` when the flow directory or config file is
+ * missing, and `BadRequestException` when the YAML is malformed or fails
+ * shape validation.
+ */
 @Injectable()
 export class FlowConfigService {
   private readonly logger = new Logger(FlowConfigService.name);
@@ -62,7 +85,7 @@ export class FlowConfigService {
 
     // eslint-disable-next-line security/detect-non-literal-fs-filename -- path is built from os.homedir(), not user input
     if (!existsSync(configPath)) {
-      throw new Error(
+      throw new NotFoundException(
         `Flow "${name}" not found (no config.yaml at ${configPath})`,
       );
     }
@@ -72,19 +95,19 @@ export class FlowConfigService {
     const parsed = yaml.load(content) as Record<string, unknown> | null;
 
     if (!parsed) {
-      throw new Error(`Flow "${name}" has an empty config.yaml`);
+      throw new BadRequestException(`Flow "${name}" has an empty config.yaml`);
     }
 
     const resolver = parsed['resolver'];
     if (!resolver || typeof resolver !== 'string') {
-      throw new Error(
+      throw new BadRequestException(
         `Flow "${name}" config.yaml is missing a valid "resolver" field`,
       );
     }
 
     const agents = parsed['agents'];
     if (!agents || !Array.isArray(agents) || agents.length === 0) {
-      throw new Error(
+      throw new BadRequestException(
         `Flow "${name}" config.yaml has an empty or missing "agents" list`,
       );
     }
@@ -103,7 +126,7 @@ export class FlowConfigService {
         !prompt ||
         typeof prompt !== 'string'
       ) {
-        throw new Error(
+        throw new BadRequestException(
           `Flow "${name}" agent is missing required fields (name, target, prompt): ${JSON.stringify(agent)}`,
         );
       }

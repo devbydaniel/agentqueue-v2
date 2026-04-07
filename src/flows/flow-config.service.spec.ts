@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as yaml from 'js-yaml';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { FlowConfigService } from './flow-config.service.js';
 
 describe('FlowConfigService', () => {
@@ -95,66 +96,67 @@ describe('FlowConfigService', () => {
       });
     });
 
-    it('should throw on missing resolver field', () => {
+    it('should throw BadRequestException on missing resolver field', () => {
       createFlowDir('bad', {
         agents: [{ name: 'dev', target: 'repo', prompt: 'do stuff' }],
       });
 
+      expect(() => service.loadFlow('bad')).toThrow(BadRequestException);
       expect(() => service.loadFlow('bad')).toThrow(
         /missing a valid "resolver"/,
       );
     });
 
-    it('should throw on empty agents list', () => {
+    it('should throw BadRequestException on empty agents list', () => {
       createFlowDir('bad', {
         resolver: './resolve.ts',
         agents: [],
       });
 
+      expect(() => service.loadFlow('bad')).toThrow(BadRequestException);
       expect(() => service.loadFlow('bad')).toThrow(
         /empty or missing "agents"/,
       );
     });
 
-    it('should throw on missing agents field', () => {
+    it('should throw BadRequestException on missing agents field', () => {
       createFlowDir('bad', {
         resolver: './resolve.ts',
       });
 
-      expect(() => service.loadFlow('bad')).toThrow(
-        /empty or missing "agents"/,
-      );
+      expect(() => service.loadFlow('bad')).toThrow(BadRequestException);
     });
 
-    it('should throw on agent missing name', () => {
+    it('should throw BadRequestException on agent missing name', () => {
       createFlowDir('bad', {
         resolver: './resolve.ts',
         agents: [{ target: 'repo', prompt: 'do stuff' }],
       });
 
+      expect(() => service.loadFlow('bad')).toThrow(BadRequestException);
       expect(() => service.loadFlow('bad')).toThrow(/missing required fields/);
     });
 
-    it('should throw on agent missing target', () => {
+    it('should throw BadRequestException on agent missing target', () => {
       createFlowDir('bad', {
         resolver: './resolve.ts',
         agents: [{ name: 'dev', prompt: 'do stuff' }],
       });
 
-      expect(() => service.loadFlow('bad')).toThrow(/missing required fields/);
+      expect(() => service.loadFlow('bad')).toThrow(BadRequestException);
     });
 
-    it('should throw on agent missing prompt', () => {
+    it('should throw BadRequestException on agent missing prompt', () => {
       createFlowDir('bad', {
         resolver: './resolve.ts',
         agents: [{ name: 'dev', target: 'repo' }],
       });
 
-      expect(() => service.loadFlow('bad')).toThrow(/missing required fields/);
+      expect(() => service.loadFlow('bad')).toThrow(BadRequestException);
     });
 
-    it('should throw on non-existent flow name', () => {
-      expect(() => service.loadFlow('nonexistent')).toThrow(/not found/);
+    it('should throw NotFoundException on non-existent flow name', () => {
+      expect(() => service.loadFlow('nonexistent')).toThrow(NotFoundException);
     });
   });
 
