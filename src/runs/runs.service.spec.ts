@@ -1,60 +1,24 @@
 import { Test } from '@nestjs/testing';
+import { NotFoundException } from '@nestjs/common';
+import type { AgentSession } from '@mariozechner/pi-coding-agent';
 import { RunsService } from './runs.service.js';
 import { AgentfilesConfigService } from '../config/agentfiles-config.service.js';
-import { LinearSessionRepository } from './linear-session.repository.js';
+import { PiSessionFactory } from './pi-session.factory.js';
 import { ActiveSessionTrackerService } from './active-session-tracker.service.js';
 import { CALLBACK_HANDLERS } from '../callbacks/constants.js';
 import type { CallbackHandler } from '../callbacks/callback-handler.interface.js';
-import { NotFoundException } from '@nestjs/common';
-
-// Mock the pi SDK module
-const mockUnsubscribe = jest.fn();
-let subscribeFn: ((event: unknown) => void) | undefined;
-const mockSession = {
-  prompt: jest.fn().mockResolvedValue(undefined),
-  subscribe: jest.fn().mockImplementation((fn: (event: unknown) => void) => {
-    subscribeFn = fn;
-    return mockUnsubscribe;
-  }),
-  dispose: jest.fn(),
-};
-
-const mockSessionManager = {
-  buildSessionContext: jest.fn(),
-  getSessionFile: jest.fn().mockReturnValue('/sessions/test-session.jsonl'),
-};
-const mockAuthStorage = {};
-const mockModelRegistry = {};
-const mockSettingsManager = {};
-const mockResourceLoader = { reload: jest.fn().mockResolvedValue(undefined) };
-
-jest.mock(
-  '@mariozechner/pi-coding-agent',
-  () => ({
-    createAgentSession: jest.fn().mockResolvedValue({ session: mockSession }),
-    SessionManager: {
-      create: jest.fn().mockReturnValue(mockSessionManager),
-      open: jest.fn().mockReturnValue(mockSessionManager),
-    },
-    AuthStorage: {
-      create: jest.fn().mockReturnValue(mockAuthStorage),
-    },
-    ModelRegistry: {
-      create: jest.fn().mockReturnValue(mockModelRegistry),
-    },
-    SettingsManager: {
-      create: jest.fn().mockReturnValue(mockSettingsManager),
-    },
-    DefaultResourceLoader: jest.fn().mockReturnValue(mockResourceLoader),
-  }),
-  { virtual: true },
-);
 
 describe('RunsService', () => {
   let service: RunsService;
   let configService: AgentfilesConfigService;
-  let linearSessionRepository: LinearSessionRepository;
+  let piSessionFactory: PiSessionFactory;
   let activeSessionTracker: ActiveSessionTrackerService;
+  let mockSession: jest.Mocked<Pick<AgentSession, 'prompt' | 'subscribe'>> & {
+    dispose: jest.Mock;
+  };
+  let mockDispose: jest.Mock;
+  let subscribeFn: ((event: unknown) => void) | undefined;
+
   const mockGlobalHandler: CallbackHandler = {
     name: 'test-global',
     onEvent: jest.fn(),
@@ -63,6 +27,19 @@ describe('RunsService', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
     subscribeFn = undefined;
+
+    const unsubscribe = jest.fn();
+    mockSession = {
+      prompt: jest.fn().mockResolvedValue(undefined),
+      subscribe: jest
+        .fn()
+        .mockImplementation((fn: (event: unknown) => void) => {
+          subscribeFn = fn;
+          return unsubscribe;
+        }),
+      dispose: jest.fn(),
+    };
+    mockDispose = jest.fn();
 
     const module = await Test.createTestingModule({
       providers: [
@@ -74,10 +51,12 @@ describe('RunsService', () => {
           },
         },
         {
-          provide: LinearSessionRepository,
+          provide: PiSessionFactory,
           useValue: {
-            findFilePath: jest.fn().mockResolvedValue(null),
-            saveFilePath: jest.fn().mockResolvedValue(undefined),
+            create: jest.fn().mockResolvedValue({
+              session: mockSession,
+              dispose: mockDispose,
+            }),
           },
         },
         {
@@ -97,7 +76,7 @@ describe('RunsService', () => {
 
     service = module.get(RunsService);
     configService = module.get(AgentfilesConfigService);
-    linearSessionRepository = module.get(LinearSessionRepository);
+    piSessionFactory = module.get(PiSessionFactory);
     activeSessionTracker = module.get(ActiveSessionTrackerService);
   });
 
@@ -107,22 +86,21 @@ describe('RunsService', () => {
     expect(configService.resolveRepo).toHaveBeenCalledWith('core');
   });
 
-  it('should create an agent session with the resolved cwd', async () => {
-    const { createAgentSession, SessionManager } = await import(
-      '@mariozechner/pi-coding-agent'
-    );
+  it('should call the factory with cwd + system prompt options', async () => {
+    await service.execute({
+      repo: 'core',
+      prompt: 'do something',
+      sessionKey: 'session-1',
+      prependSystemPrompt: 'prepend',
+      appendSystemPrompt: 'append',
+    });
 
-    await service.execute({ repo: 'core', prompt: 'do something' });
-
-    expect(SessionManager.create).toHaveBeenCalledWith(
-      '/home/user/dev/my-repo',
-    );
-    expect(createAgentSession).toHaveBeenCalledWith(
-      expect.objectContaining({
-        cwd: '/home/user/dev/my-repo',
-        sessionManager: mockSessionManager,
-      }),
-    );
+    expect(piSessionFactory.create).toHaveBeenCalledWith({
+      cwd: '/home/user/dev/my-repo',
+      sessionKey: 'session-1',
+      prependSystemPrompt: 'prepend',
+      appendSystemPrompt: 'append',
+    });
   });
 
   it('should call session.prompt with the provided prompt', async () => {
@@ -137,20 +115,20 @@ describe('RunsService', () => {
     expect(result).toEqual({ success: true });
   });
 
-  it('should dispose the session even on success', async () => {
+  it('should call dispose() on success', async () => {
     await service.execute({ repo: 'core', prompt: 'hello' });
 
-    expect(mockSession.dispose).toHaveBeenCalled();
+    expect(mockDispose).toHaveBeenCalled();
   });
 
-  it('should dispose the session on error', async () => {
+  it('should call dispose() on error', async () => {
     mockSession.prompt.mockRejectedValueOnce(new Error('boom'));
 
     await expect(
       service.execute({ repo: 'core', prompt: 'hello' }),
     ).rejects.toThrow();
 
-    expect(mockSession.dispose).toHaveBeenCalled();
+    expect(mockDispose).toHaveBeenCalled();
   });
 
   it('should propagate NotFoundException from resolveRepo unchanged', async () => {
@@ -171,213 +149,74 @@ describe('RunsService', () => {
     ).rejects.toThrow('something broke');
   });
 
-  it('should call additionalHandlers on session events', async () => {
-    const additionalHandler: CallbackHandler = {
-      name: 'test-additional',
-      onEvent: jest.fn(),
-    };
+  describe('callback handlers', () => {
+    it('should call additionalHandlers on session events', async () => {
+      const additionalHandler: CallbackHandler = {
+        name: 'test-additional',
+        onEvent: jest.fn(),
+      };
 
-    // Make prompt emit an event before resolving
-    mockSession.prompt.mockImplementationOnce(async () => {
-      subscribeFn?.({ type: 'agent_start' });
-    });
-
-    await service.execute({
-      repo: 'core',
-      prompt: 'hello',
-      additionalHandlers: [additionalHandler],
-    });
-
-    expect(additionalHandler.onEvent).toHaveBeenCalledWith({
-      type: 'agent_start',
-    });
-    expect(mockGlobalHandler.onEvent).toHaveBeenCalledWith({
-      type: 'agent_start',
-    });
-  });
-
-  it('should not crash if an additional handler throws synchronously', async () => {
-    const throwingHandler: CallbackHandler = {
-      name: 'throwing-handler',
-      onEvent: jest.fn().mockImplementation(() => {
-        throw new Error('handler exploded');
-      }),
-    };
-
-    const safeHandler: CallbackHandler = {
-      name: 'safe-handler',
-      onEvent: jest.fn(),
-    };
-
-    mockSession.prompt.mockImplementationOnce(async () => {
-      subscribeFn?.({ type: 'agent_start' });
-    });
-
-    const result = await service.execute({
-      repo: 'core',
-      prompt: 'hello',
-      additionalHandlers: [throwingHandler, safeHandler],
-    });
-
-    expect(result).toEqual({ success: true });
-    // The safe handler should still have been called after the throwing one
-    expect(safeHandler.onEvent).toHaveBeenCalled();
-  });
-
-  it('should not crash if an additional handler rejects asynchronously', async () => {
-    const rejectingHandler: CallbackHandler = {
-      name: 'rejecting-handler',
-      onEvent: jest.fn().mockRejectedValue(new Error('async boom')),
-    };
-
-    mockSession.prompt.mockImplementationOnce(async () => {
-      subscribeFn?.({ type: 'agent_start' });
-    });
-
-    const result = await service.execute({
-      repo: 'core',
-      prompt: 'hello',
-      additionalHandlers: [rejectingHandler],
-    });
-
-    expect(result).toEqual({ success: true });
-  });
-
-  it('should pass systemPromptOverride to DefaultResourceLoader when prependSystemPrompt is provided', async () => {
-    const { DefaultResourceLoader } = await import(
-      '@mariozechner/pi-coding-agent'
-    );
-
-    await service.execute({
-      repo: 'core',
-      prompt: 'hello',
-      prependSystemPrompt: 'You are a Linear agent.',
-    });
-
-    expect(DefaultResourceLoader).toHaveBeenCalledWith(
-      expect.objectContaining({
-        systemPromptOverride: expect.any(Function),
-      }),
-    );
-
-    // Verify the override function prepends
-    const options = (DefaultResourceLoader as jest.Mock).mock.calls.at(
-      -1,
-    )[0] as Record<string, unknown>;
-    const override = options['systemPromptOverride'] as (
-      base: string | undefined,
-    ) => string;
-    expect(override('base prompt')).toBe(
-      'You are a Linear agent.\n\nbase prompt',
-    );
-    expect(override(undefined)).toBe('You are a Linear agent.');
-  });
-
-  it('should pass appendSystemPromptOverride to DefaultResourceLoader when appendSystemPrompt is provided', async () => {
-    const { DefaultResourceLoader } = await import(
-      '@mariozechner/pi-coding-agent'
-    );
-
-    await service.execute({
-      repo: 'core',
-      prompt: 'hello',
-      appendSystemPrompt: 'Always be concise.',
-    });
-
-    expect(DefaultResourceLoader).toHaveBeenCalledWith(
-      expect.objectContaining({
-        appendSystemPromptOverride: expect.any(Function),
-      }),
-    );
-
-    // Verify the override function appends
-    const options = (DefaultResourceLoader as jest.Mock).mock.calls.at(
-      -1,
-    )[0] as Record<string, unknown>;
-    const override = options['appendSystemPromptOverride'] as (
-      base: string[],
-    ) => string[];
-    expect(override(['existing'])).toEqual(['existing', 'Always be concise.']);
-    expect(override([])).toEqual(['Always be concise.']);
-  });
-
-  it('should not pass system prompt overrides when neither is provided', async () => {
-    const { DefaultResourceLoader } = await import(
-      '@mariozechner/pi-coding-agent'
-    );
-
-    await service.execute({ repo: 'core', prompt: 'hello' });
-
-    const options = (DefaultResourceLoader as jest.Mock).mock.calls.at(
-      -1,
-    )[0] as Record<string, unknown>;
-    expect(options).not.toHaveProperty('systemPromptOverride');
-    expect(options).not.toHaveProperty('appendSystemPromptOverride');
-  });
-
-  describe('session resumption', () => {
-    it('should open existing session when repository has a stored file', async () => {
-      const { SessionManager } = await import('@mariozechner/pi-coding-agent');
-      (linearSessionRepository.findFilePath as jest.Mock).mockResolvedValueOnce(
-        '/sessions/existing.jsonl',
-      );
-
-      await service.execute({
-        repo: 'core',
-        prompt: 'follow up',
-        sessionKey: 'linear-session-1',
+      mockSession.prompt.mockImplementationOnce(async () => {
+        subscribeFn?.({ type: 'agent_start' });
       });
 
-      expect(linearSessionRepository.findFilePath).toHaveBeenCalledWith(
-        'linear-session-1',
-      );
-      expect(SessionManager.open).toHaveBeenCalledWith(
-        '/sessions/existing.jsonl',
-      );
-      expect(SessionManager.create).not.toHaveBeenCalled();
-    });
-
-    it('should fall back to create when open fails', async () => {
-      const { SessionManager } = await import('@mariozechner/pi-coding-agent');
-      (linearSessionRepository.findFilePath as jest.Mock).mockResolvedValueOnce(
-        '/sessions/missing.jsonl',
-      );
-      (SessionManager.open as jest.Mock).mockImplementationOnce(() => {
-        throw new Error('file not found');
-      });
-
-      await service.execute({
-        repo: 'core',
-        prompt: 'follow up',
-        sessionKey: 'linear-session-1',
-      });
-
-      expect(SessionManager.open).toHaveBeenCalled();
-      expect(SessionManager.create).toHaveBeenCalled();
-    });
-
-    it('should store session file in repository after creation', async () => {
       await service.execute({
         repo: 'core',
         prompt: 'hello',
-        sessionKey: 'linear-session-1',
+        additionalHandlers: [additionalHandler],
       });
 
-      expect(linearSessionRepository.saveFilePath).toHaveBeenCalledWith(
-        'linear-session-1',
-        '/sessions/test-session.jsonl',
-      );
+      expect(additionalHandler.onEvent).toHaveBeenCalledWith({
+        type: 'agent_start',
+      });
+      expect(mockGlobalHandler.onEvent).toHaveBeenCalledWith({
+        type: 'agent_start',
+      });
     });
 
-    it('should not query repository when no sessionKey is provided', async () => {
-      const { SessionManager } = await import('@mariozechner/pi-coding-agent');
+    it('should not crash if a handler throws synchronously', async () => {
+      const throwingHandler: CallbackHandler = {
+        name: 'throwing-handler',
+        onEvent: jest.fn().mockImplementation(() => {
+          throw new Error('handler exploded');
+        }),
+      };
+      const safeHandler: CallbackHandler = {
+        name: 'safe-handler',
+        onEvent: jest.fn(),
+      };
 
-      await service.execute({ repo: 'core', prompt: 'hello' });
+      mockSession.prompt.mockImplementationOnce(async () => {
+        subscribeFn?.({ type: 'agent_start' });
+      });
 
-      expect(linearSessionRepository.findFilePath).not.toHaveBeenCalled();
-      expect(linearSessionRepository.saveFilePath).not.toHaveBeenCalled();
-      expect(SessionManager.create).toHaveBeenCalled();
-      expect(SessionManager.open).not.toHaveBeenCalled();
+      const result = await service.execute({
+        repo: 'core',
+        prompt: 'hello',
+        additionalHandlers: [throwingHandler, safeHandler],
+      });
+
+      expect(result).toEqual({ success: true });
+      expect(safeHandler.onEvent).toHaveBeenCalled();
+    });
+
+    it('should not crash if a handler rejects asynchronously', async () => {
+      const rejectingHandler: CallbackHandler = {
+        name: 'rejecting-handler',
+        onEvent: jest.fn().mockRejectedValue(new Error('async boom')),
+      };
+
+      mockSession.prompt.mockImplementationOnce(async () => {
+        subscribeFn?.({ type: 'agent_start' });
+      });
+
+      const result = await service.execute({
+        repo: 'core',
+        prompt: 'hello',
+        additionalHandlers: [rejectingHandler],
+      });
+
+      expect(result).toEqual({ success: true });
     });
   });
 
@@ -412,6 +251,13 @@ describe('RunsService', () => {
       expect(activeSessionTracker.untrack).toHaveBeenCalledWith(
         'linear-session-1',
       );
+    });
+
+    it('should not track when no sessionKey is provided', async () => {
+      await service.execute({ repo: 'core', prompt: 'hello' });
+
+      expect(activeSessionTracker.track).not.toHaveBeenCalled();
+      expect(activeSessionTracker.untrack).not.toHaveBeenCalled();
     });
 
     it('should delegate abort to the tracker', async () => {

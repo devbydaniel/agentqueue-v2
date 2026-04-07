@@ -2,8 +2,8 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { CALLBACK_HANDLERS } from '../callbacks/constants.js';
 import type { CallbackHandler } from '../callbacks/callback-handler.interface.js';
 import { AgentfilesConfigService } from '../config/agentfiles-config.service.js';
-import { LinearSessionRepository } from './linear-session.repository.js';
 import { ActiveSessionTrackerService } from './active-session-tracker.service.js';
+import { PiSessionFactory } from './pi-session.factory.js';
 import type { AgentSession } from '@mariozechner/pi-coding-agent';
 
 export interface ExecuteRunCommand {
@@ -28,7 +28,7 @@ export class RunsService {
 
   constructor(
     private readonly agentfilesConfigService: AgentfilesConfigService,
-    private readonly linearSessionRepository: LinearSessionRepository,
+    private readonly piSessionFactory: PiSessionFactory,
     private readonly activeSessionTracker: ActiveSessionTrackerService,
     @Inject(CALLBACK_HANDLERS)
     private readonly globalHandlers: CallbackHandler[],
@@ -43,108 +43,35 @@ export class RunsService {
   }
 
   async execute(command: ExecuteRunCommand): Promise<ExecuteRunResult> {
-    this.logger.log('Executing run', {
-      repo: command.repo,
-    });
+    this.logger.log('Executing run', { repo: command.repo });
 
     const cwd = this.agentfilesConfigService.resolveRepo(command.repo);
 
-    const {
-      createAgentSession,
-      SessionManager,
-      AuthStorage,
-      ModelRegistry,
-      DefaultResourceLoader,
-      SettingsManager,
-    } = await import('@mariozechner/pi-coding-agent');
-
-    const authStorage = AuthStorage.create();
-    const modelRegistry = ModelRegistry.create(authStorage);
-    const settingsManager = SettingsManager.create(cwd);
-    const resourceLoaderOptions: Record<string, unknown> = {
+    const { session, dispose } = await this.piSessionFactory.create({
       cwd,
-      settingsManager,
-    };
-
-    if (command.prependSystemPrompt) {
-      const snippet = command.prependSystemPrompt;
-      resourceLoaderOptions['systemPromptOverride'] = (
-        base: string | undefined,
-      ) => (base ? `${snippet}\n\n${base}` : snippet);
-    }
-
-    if (command.appendSystemPrompt) {
-      const snippet = command.appendSystemPrompt;
-      resourceLoaderOptions['appendSystemPromptOverride'] = (
-        base: string[],
-      ) => [...base, snippet];
-    }
-
-    const resourceLoader = new DefaultResourceLoader(resourceLoaderOptions);
-    await resourceLoader.reload();
-
-    // Resume existing pi session or create a new one
-    const existingSessionFile = command.sessionKey
-      ? await this.linearSessionRepository.findFilePath(command.sessionKey)
-      : null;
-
-    let sessionMgr: ReturnType<typeof SessionManager.create>;
-    if (existingSessionFile) {
-      try {
-        sessionMgr = SessionManager.open(existingSessionFile);
-        this.logger.log('Resuming pi session', {
-          sessionKey: command.sessionKey,
-          sessionFile: existingSessionFile,
-        });
-      } catch (error) {
-        this.logger.warn('Failed to resume pi session, starting new', {
-          sessionKey: command.sessionKey,
-          error: error as Error,
-        });
-        sessionMgr = SessionManager.create(cwd);
-      }
-    } else {
-      sessionMgr = SessionManager.create(cwd);
-    }
-
-    const session = await createAgentSession({
-      cwd,
-      sessionManager: sessionMgr,
-      authStorage,
-      modelRegistry,
-      resourceLoader,
-      settingsManager,
+      sessionKey: command.sessionKey,
+      prependSystemPrompt: command.prependSystemPrompt,
+      appendSystemPrompt: command.appendSystemPrompt,
     });
 
-    // Store session file path for future resumption
-    if (command.sessionKey) {
-      const sessionFile = sessionMgr.getSessionFile();
-      if (sessionFile) {
-        await this.linearSessionRepository.saveFilePath(
-          command.sessionKey,
-          sessionFile,
-        );
-      }
-    }
-
     const detachCallbacks = this.attachHandlers(
-      session.session,
+      session,
       command.additionalHandlers,
     );
 
     if (command.sessionKey) {
-      this.activeSessionTracker.track(command.sessionKey, session.session);
+      this.activeSessionTracker.track(command.sessionKey, session);
     }
 
     try {
-      await session.session.prompt(command.prompt);
+      await session.prompt(command.prompt);
       return { success: true };
     } finally {
       if (command.sessionKey) {
         this.activeSessionTracker.untrack(command.sessionKey);
       }
       detachCallbacks();
-      session.session.dispose();
+      dispose();
     }
   }
 
