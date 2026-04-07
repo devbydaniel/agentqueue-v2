@@ -16,7 +16,9 @@ describe('TriggerConfigService', () => {
   });
 
   function createService(): TriggerConfigService {
-    return new TriggerConfigService();
+    const instance = new TriggerConfigService();
+    instance.onModuleInit();
+    return instance;
   }
 
   function mockConfigFile(content: object): void {

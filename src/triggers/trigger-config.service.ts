@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import { existsSync, readFileSync } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -13,13 +13,13 @@ import type {
 import { interpolateEnvVars } from './trigger-config.interface.js';
 
 @Injectable()
-export class TriggerConfigService {
+export class TriggerConfigService implements OnModuleInit {
   private readonly logger = new Logger(TriggerConfigService.name);
-  private readonly cronTriggers: CronTrigger[];
-  private readonly linearTriggers: LinearTrigger[];
-  private readonly githubTriggers: GithubTrigger[];
+  private cronTriggers: CronTrigger[] = [];
+  private linearTriggers: LinearTrigger[] = [];
+  private githubTriggers: GithubTrigger[] = [];
 
-  constructor() {
+  onModuleInit(): void {
     const result = this.loadTriggers();
     this.cronTriggers = result.cron;
     this.linearTriggers = result.linear;
