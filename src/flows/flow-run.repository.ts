@@ -31,7 +31,15 @@ export interface FlowRun {
 
 /**
  * Persists flow run state. Currently in-memory; the API is async so the
- * eventual database-backed implementation can drop in without changing callers.
+ * eventual database-backed implementation can drop in without changing
+ * callers.
+ *
+ * The mutation surface is intentionally minimal: callers load the run via
+ * `findById` (or receive it from `create`), mutate the object directly, then
+ * persist with `save`. The in-memory implementation mutates the same object
+ * reference held in the map, so `save` is effectively a no-op — but the call
+ * site still expresses "this is a persistence boundary", which matters once a
+ * real DB is wired up.
  */
 @Injectable()
 export class FlowRunRepository {
@@ -64,23 +72,7 @@ export class FlowRunRepository {
     return [...this.runs.values()].filter((r) => r.flowName === flowName);
   }
 
-  async update(flowRunId: string, partial: Partial<FlowRun>): Promise<void> {
-    const run = this.runs.get(flowRunId);
-    if (!run) return;
-    Object.assign(run, partial);
-  }
-
-  async addStep(flowRunId: string, step: FlowStepRecord): Promise<void> {
-    const run = this.runs.get(flowRunId);
-    if (!run) return;
-    run.steps.push(step);
-  }
-
-  async completeStep(flowRunId: string, success: boolean): Promise<void> {
-    const run = this.runs.get(flowRunId);
-    if (!run || run.steps.length === 0) return;
-    const lastStep = run.steps[run.steps.length - 1];
-    lastStep.completedAt = new Date();
-    lastStep.success = success;
+  async save(run: FlowRun): Promise<void> {
+    this.runs.set(run.flowRunId, run);
   }
 }

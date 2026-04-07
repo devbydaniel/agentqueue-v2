@@ -37,12 +37,10 @@ describe('FlowRunnerService', () => {
     const abortController = new AbortController();
     abortTracker.track(run.flowRunId, abortController);
     runner.run({
-      flowRunId: run.flowRunId,
-      flowName,
+      run,
       flowDir: '/fake/flows/factory',
       config: testConfig,
       resolve: mockResolver,
-      vars,
       abortSignal: abortController.signal,
     });
     return { flowRunId: run.flowRunId, abortController };

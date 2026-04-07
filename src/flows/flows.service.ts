@@ -71,12 +71,10 @@ export class FlowsService {
 
     // Hand off to the runner (fire-and-forget; runner manages its own lifecycle)
     this.flowRunner.run({
-      flowRunId: run.flowRunId,
-      flowName: params.flowName,
+      run,
       flowDir,
       config,
       resolve,
-      vars: params.vars,
       abortSignal: abortController.signal,
     });
 

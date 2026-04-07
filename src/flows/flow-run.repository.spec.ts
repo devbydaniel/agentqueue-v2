@@ -52,86 +52,55 @@ describe('FlowRunRepository', () => {
     });
   });
 
-  describe('update', () => {
-    it('should merge partial fields into the run', async () => {
+  describe('save', () => {
+    it('should persist mutations to an existing run', async () => {
       const run = await repository.create('factory', {});
-      await repository.update(run.flowRunId, {
-        status: 'done',
-        message: 'All good',
-        completedAt: new Date(),
+
+      run.status = 'done';
+      run.message = 'All good';
+      run.completedAt = new Date();
+      await repository.save(run);
+
+      const fetched = await repository.findById(run.flowRunId);
+      expect(fetched).not.toBeNull();
+      expect(fetched!.status).toBe('done');
+      expect(fetched!.message).toBe('All good');
+      expect(fetched!.completedAt).toBeInstanceOf(Date);
+      // Original fields preserved
+      expect(fetched!.flowName).toBe('factory');
+    });
+
+    it('should persist a new run that was not created via create()', async () => {
+      // The save API should be capable of inserting too — useful when
+      // reconstructing a run from a queue payload, etc.
+      await repository.save({
+        flowRunId: 'manual-1',
+        flowName: 'factory',
+        status: 'running',
+        vars: {},
+        steps: [],
+        startedAt: new Date(),
       });
 
-      const updated = await repository.findById(run.flowRunId);
-      expect(updated).not.toBeNull();
-      expect(updated!.status).toBe('done');
-      expect(updated!.message).toBe('All good');
-      expect(updated!.completedAt).toBeInstanceOf(Date);
-      // Original fields preserved
-      expect(updated!.flowName).toBe('factory');
+      const fetched = await repository.findById('manual-1');
+      expect(fetched).not.toBeNull();
+      expect(fetched!.flowName).toBe('factory');
     });
 
-    it('should no-op for unknown run ID', async () => {
-      await expect(
-        repository.update('nonexistent', { status: 'done' }),
-      ).resolves.not.toThrow();
-    });
-  });
-
-  describe('addStep / completeStep', () => {
-    it('should add a step and complete it', async () => {
+    it('should persist appended steps', async () => {
       const run = await repository.create('factory', {});
-      const step = {
+
+      run.steps.push({
         agent: 'dev',
         vars: { task: 'build' },
         startedAt: new Date(),
-      };
-
-      await repository.addStep(run.flowRunId, step);
-      const afterAdd = await repository.findById(run.flowRunId);
-      expect(afterAdd!.steps).toHaveLength(1);
-      expect(afterAdd!.steps[0].agent).toBe('dev');
-      expect(afterAdd!.steps[0].completedAt).toBeUndefined();
-      expect(afterAdd!.steps[0].success).toBeUndefined();
-
-      await repository.completeStep(run.flowRunId, true);
-      const afterComplete = await repository.findById(run.flowRunId);
-      expect(afterComplete!.steps[0].completedAt).toBeInstanceOf(Date);
-      expect(afterComplete!.steps[0].success).toBe(true);
-    });
-
-    it('should complete the last step when multiple exist', async () => {
-      const run = await repository.create('factory', {});
-
-      await repository.addStep(run.flowRunId, {
-        agent: 'dev',
-        vars: {},
-        startedAt: new Date(),
       });
-      await repository.completeStep(run.flowRunId, true);
+      await repository.save(run);
 
-      await repository.addStep(run.flowRunId, {
-        agent: 'qa',
-        vars: {},
-        startedAt: new Date(),
-      });
-      await repository.completeStep(run.flowRunId, false);
-
-      const final = await repository.findById(run.flowRunId);
-      expect(final!.steps[0].success).toBe(true);
-      expect(final!.steps[1].success).toBe(false);
-    });
-
-    it('should no-op for unknown run ID', async () => {
-      await expect(
-        repository.addStep('nonexistent', {
-          agent: 'dev',
-          vars: {},
-          startedAt: new Date(),
-        }),
-      ).resolves.not.toThrow();
-      await expect(
-        repository.completeStep('nonexistent', true),
-      ).resolves.not.toThrow();
+      const fetched = await repository.findById(run.flowRunId);
+      expect(fetched!.steps).toHaveLength(1);
+      expect(fetched!.steps[0].agent).toBe('dev');
+      expect(fetched!.steps[0].completedAt).toBeUndefined();
     });
   });
 });

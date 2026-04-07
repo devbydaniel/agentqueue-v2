@@ -153,15 +153,17 @@ describe('FlowsService', () => {
   // ── startFlow ──────────────────────────────────────────────────────
 
   describe('startFlow', () => {
+    const createdRun: FlowRun = {
+      flowRunId: 'run-1',
+      flowName: 'factory',
+      status: 'running',
+      vars: {},
+      steps: [],
+      startedAt: new Date(),
+    };
+
     beforeEach(() => {
-      flowRunRepository.create.mockResolvedValue({
-        flowRunId: 'run-1',
-        flowName: 'factory',
-        status: 'running',
-        vars: {},
-        steps: [],
-        startedAt: new Date(),
-      });
+      flowRunRepository.create.mockResolvedValue(createdRun);
     });
 
     it('should load config + resolver, create the row, track abort, and dispatch to runner', async () => {
@@ -184,12 +186,10 @@ describe('FlowsService', () => {
       );
       expect(flowRunner.run).toHaveBeenCalledWith(
         expect.objectContaining({
-          flowRunId: 'run-1',
-          flowName: 'factory',
+          run: createdRun,
           flowDir: '/fake/flows/factory',
           config: fakeConfig,
           resolve: fakeResolver,
-          vars: { task: 'feat-1' },
           abortSignal: expect.any(AbortSignal),
         }),
       );
