@@ -1,10 +1,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {
-  InternalServerErrorException,
-  NotFoundException,
-} from '@nestjs/common';
+import { NotFoundException } from '@nestjs/common';
 import { AgentfilesConfigService } from './agentfiles-config.service.js';
 
 jest.mock('node:fs');
@@ -43,21 +40,21 @@ describe('AgentfilesConfigService', () => {
       );
     });
 
-    it('should throw InternalServerErrorException if the file cannot be read', () => {
+    it('should throw a bootstrap Error if the file cannot be read', () => {
       (fs.readFileSync as jest.Mock).mockImplementation(() => {
         throw new Error('ENOENT');
       });
 
       expect(() => service.onModuleInit()).toThrow(
-        InternalServerErrorException,
+        /Cannot read agentfiles config/,
       );
     });
 
-    it('should throw InternalServerErrorException if TOML is invalid', () => {
+    it('should throw a bootstrap Error if TOML is invalid', () => {
       (fs.readFileSync as jest.Mock).mockReturnValue('not valid toml [[[');
 
       expect(() => service.onModuleInit()).toThrow(
-        InternalServerErrorException,
+        /Failed to parse agentfiles config/,
       );
     });
   });

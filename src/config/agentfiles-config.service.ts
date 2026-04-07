@@ -1,6 +1,5 @@
 import {
   Injectable,
-  InternalServerErrorException,
   Logger,
   NotFoundException,
   type OnModuleInit,
@@ -39,7 +38,9 @@ export class AgentfilesConfigService implements OnModuleInit {
       // eslint-disable-next-line security/detect-non-literal-fs-filename -- path is built from os.homedir(), not user input
       raw = fs.readFileSync(configPath, 'utf-8');
     } catch (error) {
-      throw new InternalServerErrorException(
+      // Bootstrap-time failure — no HTTP context, throw a plain Error so
+      // Nest's bootstrap aborts cleanly with a readable stack.
+      throw new Error(
         `Cannot read agentfiles config at ${configPath}: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
@@ -48,7 +49,7 @@ export class AgentfilesConfigService implements OnModuleInit {
     try {
       parsed = toml.parse(raw) as unknown as AgentfilesConfig;
     } catch (error) {
-      throw new InternalServerErrorException(
+      throw new Error(
         `Failed to parse agentfiles config: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
