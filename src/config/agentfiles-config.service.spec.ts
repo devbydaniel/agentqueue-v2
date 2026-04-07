@@ -1,8 +1,11 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import {
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
 import { AgentfilesConfigService } from './agentfiles-config.service.js';
-import { RepoNotFoundError, ConfigParseError } from './config.errors.js';
 
 jest.mock('node:fs');
 
@@ -40,18 +43,22 @@ describe('AgentfilesConfigService', () => {
       );
     });
 
-    it('should throw ConfigParseError if the file cannot be read', () => {
+    it('should throw InternalServerErrorException if the file cannot be read', () => {
       (fs.readFileSync as jest.Mock).mockImplementation(() => {
         throw new Error('ENOENT');
       });
 
-      expect(() => service.onModuleInit()).toThrow(ConfigParseError);
+      expect(() => service.onModuleInit()).toThrow(
+        InternalServerErrorException,
+      );
     });
 
-    it('should throw ConfigParseError if TOML is invalid', () => {
+    it('should throw InternalServerErrorException if TOML is invalid', () => {
       (fs.readFileSync as jest.Mock).mockReturnValue('not valid toml [[[');
 
-      expect(() => service.onModuleInit()).toThrow(ConfigParseError);
+      expect(() => service.onModuleInit()).toThrow(
+        InternalServerErrorException,
+      );
     });
   });
 
@@ -75,9 +82,9 @@ describe('AgentfilesConfigService', () => {
       expect(result).toBe(path.join(os.homedir(), 'agents', 'assistant'));
     });
 
-    it('should throw RepoNotFoundError for unknown repo', () => {
+    it('should throw NotFoundException for unknown repo', () => {
       expect(() => service.resolveRepo('nonexistent')).toThrow(
-        RepoNotFoundError,
+        NotFoundException,
       );
     });
   });

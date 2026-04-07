@@ -1,9 +1,14 @@
-import { Injectable, Logger, type OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+  NotFoundException,
+  type OnModuleInit,
+} from '@nestjs/common';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as toml from '@iarna/toml';
-import { ConfigParseError, RepoNotFoundError } from './config.errors.js';
 
 interface RepoEntry {
   name: string;
@@ -34,8 +39,8 @@ export class AgentfilesConfigService implements OnModuleInit {
       // eslint-disable-next-line security/detect-non-literal-fs-filename -- path is built from os.homedir(), not user input
       raw = fs.readFileSync(configPath, 'utf-8');
     } catch (error) {
-      throw new ConfigParseError(
-        `Cannot read config file at ${configPath}: ${error instanceof Error ? error.message : String(error)}`,
+      throw new InternalServerErrorException(
+        `Cannot read agentfiles config at ${configPath}: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
 
@@ -43,8 +48,8 @@ export class AgentfilesConfigService implements OnModuleInit {
     try {
       parsed = toml.parse(raw) as unknown as AgentfilesConfig;
     } catch (error) {
-      throw new ConfigParseError(
-        error instanceof Error ? error.message : String(error),
+      throw new InternalServerErrorException(
+        `Failed to parse agentfiles config: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
 
@@ -55,7 +60,9 @@ export class AgentfilesConfigService implements OnModuleInit {
   resolveRepo(name: string): string {
     const entry = this.repos.find((r) => r.name === name);
     if (!entry) {
-      throw new RepoNotFoundError(name);
+      throw new NotFoundException(
+        `Repo "${name}" not found in agentfiles config`,
+      );
     }
 
     return this.expandHome(entry.path);

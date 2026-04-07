@@ -3,13 +3,10 @@ import { NestFactory } from '@nestjs/core';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module.js';
-import { ApplicationErrorFilter } from './common/filters/index.js';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
   const app = await NestFactory.create(AppModule, { rawBody: true });
-
-  app.useGlobalFilters(new ApplicationErrorFilter());
 
   app.useGlobalPipes(
     new ValidationPipe({

@@ -5,7 +5,7 @@ import { LinearSessionRepository } from './linear-session.repository.js';
 import { ActiveSessionTrackerService } from './active-session-tracker.service.js';
 import { CALLBACK_HANDLERS } from '../callbacks/constants.js';
 import type { CallbackHandler } from '../callbacks/callback-handler.interface.js';
-import { RepoNotFoundError } from '../config/config.errors.js';
+import { NotFoundException } from '@nestjs/common';
 
 // Mock the pi SDK module
 const mockUnsubscribe = jest.fn();
@@ -153,14 +153,14 @@ describe('RunsService', () => {
     expect(mockSession.dispose).toHaveBeenCalled();
   });
 
-  it('should re-throw ApplicationError subclasses as-is', async () => {
+  it('should propagate NotFoundException from resolveRepo unchanged', async () => {
     (configService.resolveRepo as jest.Mock).mockImplementation(() => {
-      throw new RepoNotFoundError('unknown');
+      throw new NotFoundException('Repo "unknown" not found');
     });
 
     await expect(
       service.execute({ repo: 'unknown', prompt: 'hello' }),
-    ).rejects.toThrow(RepoNotFoundError);
+    ).rejects.toThrow(NotFoundException);
   });
 
   it('should propagate unknown errors from session.prompt unchanged', async () => {

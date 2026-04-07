@@ -11,7 +11,6 @@ import { TriggerConfigService } from '../triggers/trigger-config.service.js';
 import { BeforeHookService } from '../triggers/before-hook.service.js';
 import { AgentfilesConfigService } from '../config/agentfiles-config.service.js';
 import { RunsService } from '../runs/runs.service.js';
-import { ApplicationErrorFilter } from '../common/filters/application-error.filter.js';
 import type { LinearTrigger } from '../triggers/trigger-config.interface.js';
 
 describe('WebhooksController', () => {
@@ -90,7 +89,6 @@ describe('WebhooksController', () => {
     }).compile();
 
     app = module.createNestApplication({ rawBody: true });
-    app.useGlobalFilters(new ApplicationErrorFilter());
     app.useGlobalPipes(
       new ValidationPipe({
         whitelist: true,
@@ -256,9 +254,9 @@ describe('WebhooksController', () => {
 
   it('should return 404 when target repo is not found in agentfiles', async () => {
     const configService = app.get(AgentfilesConfigService);
-    const { RepoNotFoundError } = await import('../config/config.errors.js');
+    const { NotFoundException } = await import('@nestjs/common');
     (configService.resolveRepo as jest.Mock).mockImplementation(() => {
-      throw new RepoNotFoundError('my-repo');
+      throw new NotFoundException('Repo "my-repo" not found');
     });
 
     const body = JSON.stringify(validCreatedPayload);
