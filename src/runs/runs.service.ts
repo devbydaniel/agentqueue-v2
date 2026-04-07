@@ -1,14 +1,12 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { ApplicationError } from '../../common/errors/base.error.js';
-import { CALLBACK_HANDLERS } from '../../callbacks/constants.js';
-import type { CallbackHandler } from '../../callbacks/callback-handler.interface.js';
-import { AgentfilesConfigService } from '../../config/agentfiles-config.service.js';
-import { LinearSessionRepository } from '../infrastructure/linear-session.repository.js';
+import { CALLBACK_HANDLERS } from '../callbacks/constants.js';
+import type { CallbackHandler } from '../callbacks/callback-handler.interface.js';
+import { AgentfilesConfigService } from '../config/agentfiles-config.service.js';
+import { LinearSessionRepository } from './linear-session.repository.js';
 import { ActiveSessionTrackerService } from './active-session-tracker.service.js';
-import { UnexpectedRunError } from './runs.errors.js';
 import type { AgentSession } from '@mariozechner/pi-coding-agent';
 
-interface ExecuteRunCommand {
+export interface ExecuteRunCommand {
   repo: string;
   prompt: string;
   additionalHandlers?: CallbackHandler[];
@@ -25,8 +23,8 @@ export interface ExecuteRunResult {
 }
 
 @Injectable()
-export class ExecuteRunUseCase {
-  private readonly logger = new Logger(ExecuteRunUseCase.name);
+export class RunsService {
+  private readonly logger = new Logger(RunsService.name);
 
   constructor(
     private readonly agentfilesConfigService: AgentfilesConfigService,
@@ -141,10 +139,6 @@ export class ExecuteRunUseCase {
     try {
       await session.session.prompt(command.prompt);
       return { success: true };
-    } catch (error) {
-      if (error instanceof ApplicationError) throw error;
-      this.logger.error('Error executing run', { error: error as Error });
-      throw new UnexpectedRunError(error);
     } finally {
       if (command.sessionKey) {
         this.activeSessionTracker.untrack(command.sessionKey);

@@ -4,7 +4,7 @@ import { FlowConfigService } from '../infrastructure/flow-config.service.js';
 import { FlowRunRepository } from '../infrastructure/flow-run.repository.js';
 import { FlowAbortTrackerService } from './flow-abort-tracker.service.js';
 import type { FlowConfig } from '../infrastructure/flow-config.interface.js';
-import { ExecuteRunUseCase } from '../../runs/application/execute-run.use-case.js';
+import { RunsService } from '../../runs/runs.service.js';
 import { interpolateTemplate } from '../../common/utils/interpolate-template.js';
 
 export type ResolverResult =
@@ -31,7 +31,7 @@ interface LoopContext {
  *
  * The flow run row is created by the caller (typically `StartFlowUseCase`);
  * this service receives the `flowRunId` and runs the resolver loop in the
- * background, dispatching agent steps via `ExecuteRunUseCase` and recording
+ * background, dispatching agent steps via `RunsService` and recording
  * progress in the repository. Abort signals come in via `FlowAbortTrackerService`.
  *
  * Categorized as a lifecycle / runtime service (not a use case) because it
@@ -46,7 +46,7 @@ export class FlowRunnerService {
     private readonly flowConfigService: FlowConfigService,
     private readonly flowRunRepository: FlowRunRepository,
     private readonly flowAbortTracker: FlowAbortTrackerService,
-    private readonly executeRunUseCase: ExecuteRunUseCase,
+    private readonly runsService: RunsService,
   ) {}
 
   /**
@@ -197,7 +197,7 @@ export class FlowRunnerService {
     );
 
     try {
-      await this.executeRunUseCase.execute({
+      await this.runsService.execute({
         repo: agentConfig.target,
         prompt: renderedPrompt,
       });

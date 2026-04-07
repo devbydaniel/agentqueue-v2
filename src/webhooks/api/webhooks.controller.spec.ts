@@ -8,7 +8,7 @@ import { GithubSignatureVerifierService } from '../infrastructure/github/github-
 import { HandleGithubWebhookUseCase } from '../application/handle-github-webhook.use-case.js';
 import { TriggerConfigService } from '../../triggers/trigger-config.service.js';
 import { AgentfilesConfigService } from '../../config/agentfiles-config.service.js';
-import { ExecuteRunUseCase } from '../../runs/application/execute-run.use-case.js';
+import { RunsService } from '../../runs/runs.service.js';
 import { ApplicationErrorFilter } from '../../common/filters/application-error.filter.js';
 import type { LinearTrigger } from '../../triggers/trigger-config.interface.js';
 
@@ -74,7 +74,7 @@ describe('WebhooksController', () => {
           },
         },
         {
-          provide: ExecuteRunUseCase,
+          provide: RunsService,
           useValue: {
             execute: executeRunMock,
           },

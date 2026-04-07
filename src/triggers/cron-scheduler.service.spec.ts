@@ -1,7 +1,7 @@
 import * as cron from 'node-cron';
 import { CronSchedulerService } from './cron-scheduler.service.js';
 import type { TriggerConfigService } from './trigger-config.service.js';
-import type { ExecuteRunUseCase } from '../runs/application/execute-run.use-case.js';
+import type { RunsService } from '../runs/runs.service.js';
 import type { CronTrigger } from './trigger-config.interface.js';
 import type { BeforeHookService } from './before-hook.service.js';
 
@@ -10,7 +10,7 @@ jest.mock('node-cron');
 describe('CronSchedulerService', () => {
   let scheduler: CronSchedulerService;
   let triggerConfigService: jest.Mocked<TriggerConfigService>;
-  let executeRunUseCase: jest.Mocked<ExecuteRunUseCase>;
+  let runsService: jest.Mocked<RunsService>;
   let beforeHookService: jest.Mocked<BeforeHookService>;
   let mockTask: { stop: jest.Mock };
 
@@ -25,9 +25,9 @@ describe('CronSchedulerService', () => {
       getConfigPath: jest.fn(),
     } as unknown as jest.Mocked<TriggerConfigService>;
 
-    executeRunUseCase = {
+    runsService = {
       execute: jest.fn().mockResolvedValue({ success: true }),
-    } as unknown as jest.Mocked<ExecuteRunUseCase>;
+    } as unknown as jest.Mocked<RunsService>;
 
     beforeHookService = {
       run: jest.fn().mockResolvedValue({ proceed: true, output: '' }),
@@ -35,7 +35,7 @@ describe('CronSchedulerService', () => {
 
     scheduler = new CronSchedulerService(
       triggerConfigService,
-      executeRunUseCase,
+      runsService,
       beforeHookService,
     );
   });
@@ -124,7 +124,7 @@ describe('CronSchedulerService', () => {
   });
 
   describe('cron tick handler', () => {
-    it('should call executeRunUseCase when cron fires', async () => {
+    it('should call runsService when cron fires', async () => {
       triggerConfigService.getCronTriggers.mockReturnValue([
         makeTrigger({ target: 'myrepo', prompt: 'Do something' }),
       ]);
@@ -140,7 +140,7 @@ describe('CronSchedulerService', () => {
 
       await tickHandler!();
 
-      expect(executeRunUseCase.execute).toHaveBeenCalledWith({
+      expect(runsService.execute).toHaveBeenCalledWith({
         repo: 'myrepo',
         prompt: 'Do something',
         prependSystemPrompt: undefined,
@@ -148,10 +148,10 @@ describe('CronSchedulerService', () => {
       });
     });
 
-    it('should not throw when executeRunUseCase fails', async () => {
+    it('should not throw when runsService fails', async () => {
       triggerConfigService.getCronTriggers.mockReturnValue([makeTrigger()]);
       (cron.validate as jest.Mock).mockReturnValue(true);
-      executeRunUseCase.execute.mockRejectedValue(new Error('Run failed'));
+      runsService.execute.mockRejectedValue(new Error('Run failed'));
 
       let tickHandler: () => Promise<void>;
       (cron.schedule as jest.Mock).mockImplementation((_schedule, handler) => {
@@ -164,7 +164,7 @@ describe('CronSchedulerService', () => {
 
       await tickHandler!();
 
-      expect(executeRunUseCase.execute).toHaveBeenCalled();
+      expect(runsService.execute).toHaveBeenCalled();
     });
 
     it('should pass interpolated prepend_system_prompt to execute', async () => {
@@ -186,7 +186,7 @@ describe('CronSchedulerService', () => {
       scheduler.onModuleInit();
       await tickHandler!();
 
-      expect(executeRunUseCase.execute).toHaveBeenCalledWith(
+      expect(runsService.execute).toHaveBeenCalledWith(
         expect.objectContaining({
           prependSystemPrompt: 'Trigger: test-trigger, target: myrepo',
         }),
@@ -212,7 +212,7 @@ describe('CronSchedulerService', () => {
       scheduler.onModuleInit();
       await tickHandler!();
 
-      expect(executeRunUseCase.execute).toHaveBeenCalledWith(
+      expect(runsService.execute).toHaveBeenCalledWith(
         expect.objectContaining({
           appendSystemPrompt: 'Schedule: 0 8 * * *',
         }),
@@ -234,8 +234,10 @@ describe('CronSchedulerService', () => {
       scheduler.onModuleInit();
       await tickHandler!();
 
-      const call = executeRunUseCase.execute.mock
-        .calls[0][0] as unknown as Record<string, unknown>;
+      const call = runsService.execute.mock.calls[0][0] as unknown as Record<
+        string,
+        unknown
+      >;
       expect(call['prependSystemPrompt']).toBeUndefined();
       expect(call['appendSystemPrompt']).toBeUndefined();
     });
@@ -260,7 +262,7 @@ describe('CronSchedulerService', () => {
       await tick();
 
       expect(beforeHookService.run).not.toHaveBeenCalled();
-      expect(executeRunUseCase.execute).toHaveBeenCalled();
+      expect(runsService.execute).toHaveBeenCalled();
     });
 
     it('runs the hook before executing when trigger.before is set', async () => {
@@ -282,7 +284,7 @@ describe('CronSchedulerService', () => {
         '/scripts/check.sh',
         'cron trigger "meeting-prep"',
       );
-      expect(executeRunUseCase.execute).toHaveBeenCalled();
+      expect(runsService.execute).toHaveBeenCalled();
     });
 
     it('substitutes {{before_output}} in the prompt with the hook stdout', async () => {
@@ -300,7 +302,7 @@ describe('CronSchedulerService', () => {
 
       await tick();
 
-      expect(executeRunUseCase.execute).toHaveBeenCalledWith(
+      expect(runsService.execute).toHaveBeenCalledWith(
         expect.objectContaining({
           prompt: 'Prepare for: standup at 10am',
         }),
@@ -318,7 +320,7 @@ describe('CronSchedulerService', () => {
 
       await tick();
 
-      expect(executeRunUseCase.execute).toHaveBeenCalledWith(
+      expect(runsService.execute).toHaveBeenCalledWith(
         expect.objectContaining({ prompt: 'Info:  end' }),
       );
     });
@@ -336,7 +338,7 @@ describe('CronSchedulerService', () => {
       await tick();
 
       expect(beforeHookService.run).toHaveBeenCalled();
-      expect(executeRunUseCase.execute).not.toHaveBeenCalled();
+      expect(runsService.execute).not.toHaveBeenCalled();
     });
   });
 });

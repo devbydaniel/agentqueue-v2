@@ -2,18 +2,18 @@ import { Test } from '@nestjs/testing';
 import { type INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import { RunsController } from './runs.controller.js';
-import { ExecuteRunUseCase } from '../application/execute-run.use-case.js';
+import { RunsService } from './runs.service.js';
 
 describe('RunsController', () => {
   let app: INestApplication;
-  let executeRunUseCase: ExecuteRunUseCase;
+  let runsService: RunsService;
 
   beforeEach(async () => {
     const module = await Test.createTestingModule({
       controllers: [RunsController],
       providers: [
         {
-          provide: ExecuteRunUseCase,
+          provide: RunsService,
           useValue: {
             execute: jest.fn().mockResolvedValue({ success: true }),
           },
@@ -31,7 +31,7 @@ describe('RunsController', () => {
     );
     await app.init();
 
-    executeRunUseCase = module.get(ExecuteRunUseCase);
+    runsService = module.get(RunsService);
   });
 
   afterEach(async () => {
@@ -45,7 +45,7 @@ describe('RunsController', () => {
       .expect(201);
 
     expect(response.body).toEqual({ success: true });
-    expect(executeRunUseCase.execute).toHaveBeenCalledWith({
+    expect(runsService.execute).toHaveBeenCalledWith({
       repo: 'core',
       prompt: 'do something',
     });

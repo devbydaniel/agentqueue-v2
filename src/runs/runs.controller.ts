@@ -1,12 +1,12 @@
 import { Body, Controller, Post } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { ExecuteRunDto } from './dto/execute-run.dto.js';
-import { ExecuteRunUseCase } from '../application/execute-run.use-case.js';
+import { RunsService } from './runs.service.js';
 
 @ApiTags('Runs')
 @Controller('runs')
 export class RunsController {
-  constructor(private readonly executeRunUseCase: ExecuteRunUseCase) {}
+  constructor(private readonly runsService: RunsService) {}
 
   @Post()
   @ApiOperation({
@@ -22,6 +22,6 @@ export class RunsController {
   })
   @ApiResponse({ status: 500, description: 'Unexpected error during run' })
   async executeRun(@Body() dto: ExecuteRunDto) {
-    return this.executeRunUseCase.execute(dto);
+    return this.runsService.execute(dto);
   }
 }

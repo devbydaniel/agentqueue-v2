@@ -3,7 +3,7 @@ import type { Resolver } from './flow-runner.service.js';
 import type { FlowConfigService } from '../infrastructure/flow-config.service.js';
 import { FlowRunRepository } from '../infrastructure/flow-run.repository.js';
 import { FlowAbortTrackerService } from './flow-abort-tracker.service.js';
-import type { ExecuteRunUseCase } from '../../runs/application/execute-run.use-case.js';
+import type { RunsService } from '../../runs/runs.service.js';
 import type { FlowConfig } from '../infrastructure/flow-config.interface.js';
 
 /** Wait for all microtasks / async work in the fire-and-forget loop to settle */
@@ -30,9 +30,9 @@ describe('FlowRunnerService', () => {
     getFlowDir: jest.fn().mockReturnValue('/fake/flows/factory'),
   } as unknown as FlowConfigService;
 
-  const mockExecuteRunUseCase = {
+  const mockRunsService = {
     execute: jest.fn().mockResolvedValue({ success: true }),
-  } as unknown as ExecuteRunUseCase;
+  } as unknown as RunsService;
 
   /** Helper: create the row in the repo and start the runner against it. */
   async function startRun(
@@ -54,7 +54,7 @@ describe('FlowRunnerService', () => {
       mockFlowConfigService,
       repository,
       abortTracker,
-      mockExecuteRunUseCase,
+      mockRunsService,
     );
 
     // Inject mock resolver instead of doing dynamic import
@@ -80,7 +80,7 @@ describe('FlowRunnerService', () => {
     expect(run.steps[0].success).toBe(true);
     expect(run.steps[1].agent).toBe('qa');
     expect(run.steps[1].success).toBe(true);
-    expect(mockExecuteRunUseCase.execute).toHaveBeenCalledTimes(2);
+    expect(mockRunsService.execute).toHaveBeenCalledTimes(2);
   });
 
   it('escalation: resolver returns escalate immediately', async () => {
@@ -93,7 +93,7 @@ describe('FlowRunnerService', () => {
     expect(run.status).toBe('escalated');
     expect(run.message).toBe('Stuck on merge conflict');
     expect(run.steps).toHaveLength(0);
-    expect(mockExecuteRunUseCase.execute).not.toHaveBeenCalled();
+    expect(mockRunsService.execute).not.toHaveBeenCalled();
   });
 
   it('done immediately: resolver returns done', async () => {
@@ -105,7 +105,7 @@ describe('FlowRunnerService', () => {
     const run = (await repository.findById(runId))!;
     expect(run.status).toBe('done');
     expect(run.steps).toHaveLength(0);
-    expect(mockExecuteRunUseCase.execute).not.toHaveBeenCalled();
+    expect(mockRunsService.execute).not.toHaveBeenCalled();
   });
 
   it('agent not found: resolver returns unknown agent name', async () => {
@@ -120,15 +120,15 @@ describe('FlowRunnerService', () => {
     const run = (await repository.findById(runId))!;
     expect(run.status).toBe('errored');
     expect(run.message).toContain('nonexistent');
-    expect(mockExecuteRunUseCase.execute).not.toHaveBeenCalled();
+    expect(mockRunsService.execute).not.toHaveBeenCalled();
   });
 
-  it('dispatch failure: ExecuteRunUseCase.execute throws', async () => {
+  it('dispatch failure: RunsService.execute throws', async () => {
     mockResolver.mockResolvedValueOnce({
       agent: 'dev',
       vars: { task: 'feat-1' },
     });
-    (mockExecuteRunUseCase.execute as jest.Mock).mockRejectedValueOnce(
+    (mockRunsService.execute as jest.Mock).mockRejectedValueOnce(
       new Error('pi session crashed'),
     );
 
@@ -170,7 +170,7 @@ describe('FlowRunnerService', () => {
       });
 
     // Make execute slow enough that the second resolver call happens
-    (mockExecuteRunUseCase.execute as jest.Mock).mockResolvedValue({
+    (mockRunsService.execute as jest.Mock).mockResolvedValue({
       success: true,
     });
 
@@ -202,7 +202,7 @@ describe('FlowRunnerService', () => {
     });
 
     // Check that prompts were rendered with accumulated vars
-    const calls = (mockExecuteRunUseCase.execute as jest.Mock).mock.calls;
+    const calls = (mockRunsService.execute as jest.Mock).mock.calls;
     expect(calls[0][0].prompt).toBe('Build feat-1');
     expect(calls[1][0].prompt).toBe('Review feat-1');
   });

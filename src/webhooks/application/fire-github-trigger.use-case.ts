@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ApplicationError } from '../../common/errors/base.error.js';
 import { AgentfilesConfigService } from '../../config/agentfiles-config.service.js';
-import { ExecuteRunUseCase } from '../../runs/application/execute-run.use-case.js';
+import { RunsService } from '../../runs/runs.service.js';
 import { BeforeHookService } from '../../triggers/before-hook.service.js';
 import type { GithubTrigger } from '../../triggers/trigger-config.interface.js';
 import { interpolatePayloadTemplate } from '../infrastructure/github/payload-template.js';
@@ -17,7 +17,7 @@ export interface FireGithubTriggerCommand {
 /**
  * Fires a single GitHub trigger: interpolates target/prompt, validates the
  * resolved repo, runs the optional before-hook (gate + enrich), and dispatches
- * the agent run via `ExecuteRunUseCase`.
+ * the agent run via `RunsService`.
  *
  * Skip paths (prompt too long, repo not configured, hook said skip) return
  * normally without throwing — they are expected business outcomes, not errors.
@@ -29,7 +29,7 @@ export class FireGithubTriggerUseCase {
 
   constructor(
     private readonly agentfilesConfigService: AgentfilesConfigService,
-    private readonly executeRunUseCase: ExecuteRunUseCase,
+    private readonly runsService: RunsService,
     private readonly beforeHookService: BeforeHookService,
   ) {}
 
@@ -85,7 +85,7 @@ export class FireGithubTriggerUseCase {
         event: payload['action'],
       });
 
-      await this.executeRunUseCase.execute({
+      await this.runsService.execute({
         repo,
         prompt,
         prependSystemPrompt,

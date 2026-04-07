@@ -1,12 +1,11 @@
 import { Test } from '@nestjs/testing';
-import { ExecuteRunUseCase } from './execute-run.use-case.js';
-import { AgentfilesConfigService } from '../../config/agentfiles-config.service.js';
-import { LinearSessionRepository } from '../infrastructure/linear-session.repository.js';
+import { RunsService } from './runs.service.js';
+import { AgentfilesConfigService } from '../config/agentfiles-config.service.js';
+import { LinearSessionRepository } from './linear-session.repository.js';
 import { ActiveSessionTrackerService } from './active-session-tracker.service.js';
-import { CALLBACK_HANDLERS } from '../../callbacks/constants.js';
-import type { CallbackHandler } from '../../callbacks/callback-handler.interface.js';
-import { UnexpectedRunError } from './runs.errors.js';
-import { RepoNotFoundError } from '../../config/config.errors.js';
+import { CALLBACK_HANDLERS } from '../callbacks/constants.js';
+import type { CallbackHandler } from '../callbacks/callback-handler.interface.js';
+import { RepoNotFoundError } from '../config/config.errors.js';
 
 // Mock the pi SDK module
 const mockUnsubscribe = jest.fn();
@@ -51,8 +50,8 @@ jest.mock(
   { virtual: true },
 );
 
-describe('ExecuteRunUseCase', () => {
-  let useCase: ExecuteRunUseCase;
+describe('RunsService', () => {
+  let service: RunsService;
   let configService: AgentfilesConfigService;
   let linearSessionRepository: LinearSessionRepository;
   let activeSessionTracker: ActiveSessionTrackerService;
@@ -67,7 +66,7 @@ describe('ExecuteRunUseCase', () => {
 
     const module = await Test.createTestingModule({
       providers: [
-        ExecuteRunUseCase,
+        RunsService,
         {
           provide: AgentfilesConfigService,
           useValue: {
@@ -96,14 +95,14 @@ describe('ExecuteRunUseCase', () => {
       ],
     }).compile();
 
-    useCase = module.get(ExecuteRunUseCase);
+    service = module.get(RunsService);
     configService = module.get(AgentfilesConfigService);
     linearSessionRepository = module.get(LinearSessionRepository);
     activeSessionTracker = module.get(ActiveSessionTrackerService);
   });
 
   it('should resolve the repo via config service', async () => {
-    await useCase.execute({ repo: 'core', prompt: 'do something' });
+    await service.execute({ repo: 'core', prompt: 'do something' });
 
     expect(configService.resolveRepo).toHaveBeenCalledWith('core');
   });
@@ -113,7 +112,7 @@ describe('ExecuteRunUseCase', () => {
       '@mariozechner/pi-coding-agent'
     );
 
-    await useCase.execute({ repo: 'core', prompt: 'do something' });
+    await service.execute({ repo: 'core', prompt: 'do something' });
 
     expect(SessionManager.create).toHaveBeenCalledWith(
       '/home/user/dev/my-repo',
@@ -127,19 +126,19 @@ describe('ExecuteRunUseCase', () => {
   });
 
   it('should call session.prompt with the provided prompt', async () => {
-    await useCase.execute({ repo: 'core', prompt: 'fix the tests' });
+    await service.execute({ repo: 'core', prompt: 'fix the tests' });
 
     expect(mockSession.prompt).toHaveBeenCalledWith('fix the tests');
   });
 
   it('should return success true on completion', async () => {
-    const result = await useCase.execute({ repo: 'core', prompt: 'hello' });
+    const result = await service.execute({ repo: 'core', prompt: 'hello' });
 
     expect(result).toEqual({ success: true });
   });
 
   it('should dispose the session even on success', async () => {
-    await useCase.execute({ repo: 'core', prompt: 'hello' });
+    await service.execute({ repo: 'core', prompt: 'hello' });
 
     expect(mockSession.dispose).toHaveBeenCalled();
   });
@@ -148,7 +147,7 @@ describe('ExecuteRunUseCase', () => {
     mockSession.prompt.mockRejectedValueOnce(new Error('boom'));
 
     await expect(
-      useCase.execute({ repo: 'core', prompt: 'hello' }),
+      service.execute({ repo: 'core', prompt: 'hello' }),
     ).rejects.toThrow();
 
     expect(mockSession.dispose).toHaveBeenCalled();
@@ -160,16 +159,16 @@ describe('ExecuteRunUseCase', () => {
     });
 
     await expect(
-      useCase.execute({ repo: 'unknown', prompt: 'hello' }),
+      service.execute({ repo: 'unknown', prompt: 'hello' }),
     ).rejects.toThrow(RepoNotFoundError);
   });
 
-  it('should wrap unknown errors in UnexpectedRunError', async () => {
+  it('should propagate unknown errors from session.prompt unchanged', async () => {
     mockSession.prompt.mockRejectedValueOnce(new Error('something broke'));
 
     await expect(
-      useCase.execute({ repo: 'core', prompt: 'hello' }),
-    ).rejects.toThrow(UnexpectedRunError);
+      service.execute({ repo: 'core', prompt: 'hello' }),
+    ).rejects.toThrow('something broke');
   });
 
   it('should call additionalHandlers on session events', async () => {
@@ -183,7 +182,7 @@ describe('ExecuteRunUseCase', () => {
       subscribeFn?.({ type: 'agent_start' });
     });
 
-    await useCase.execute({
+    await service.execute({
       repo: 'core',
       prompt: 'hello',
       additionalHandlers: [additionalHandler],
@@ -214,7 +213,7 @@ describe('ExecuteRunUseCase', () => {
       subscribeFn?.({ type: 'agent_start' });
     });
 
-    const result = await useCase.execute({
+    const result = await service.execute({
       repo: 'core',
       prompt: 'hello',
       additionalHandlers: [throwingHandler, safeHandler],
@@ -235,7 +234,7 @@ describe('ExecuteRunUseCase', () => {
       subscribeFn?.({ type: 'agent_start' });
     });
 
-    const result = await useCase.execute({
+    const result = await service.execute({
       repo: 'core',
       prompt: 'hello',
       additionalHandlers: [rejectingHandler],
@@ -249,7 +248,7 @@ describe('ExecuteRunUseCase', () => {
       '@mariozechner/pi-coding-agent'
     );
 
-    await useCase.execute({
+    await service.execute({
       repo: 'core',
       prompt: 'hello',
       prependSystemPrompt: 'You are a Linear agent.',
@@ -279,7 +278,7 @@ describe('ExecuteRunUseCase', () => {
       '@mariozechner/pi-coding-agent'
     );
 
-    await useCase.execute({
+    await service.execute({
       repo: 'core',
       prompt: 'hello',
       appendSystemPrompt: 'Always be concise.',
@@ -307,7 +306,7 @@ describe('ExecuteRunUseCase', () => {
       '@mariozechner/pi-coding-agent'
     );
 
-    await useCase.execute({ repo: 'core', prompt: 'hello' });
+    await service.execute({ repo: 'core', prompt: 'hello' });
 
     const options = (DefaultResourceLoader as jest.Mock).mock.calls.at(
       -1,
@@ -323,7 +322,7 @@ describe('ExecuteRunUseCase', () => {
         '/sessions/existing.jsonl',
       );
 
-      await useCase.execute({
+      await service.execute({
         repo: 'core',
         prompt: 'follow up',
         sessionKey: 'linear-session-1',
@@ -347,7 +346,7 @@ describe('ExecuteRunUseCase', () => {
         throw new Error('file not found');
       });
 
-      await useCase.execute({
+      await service.execute({
         repo: 'core',
         prompt: 'follow up',
         sessionKey: 'linear-session-1',
@@ -358,7 +357,7 @@ describe('ExecuteRunUseCase', () => {
     });
 
     it('should store session file in repository after creation', async () => {
-      await useCase.execute({
+      await service.execute({
         repo: 'core',
         prompt: 'hello',
         sessionKey: 'linear-session-1',
@@ -373,7 +372,7 @@ describe('ExecuteRunUseCase', () => {
     it('should not query repository when no sessionKey is provided', async () => {
       const { SessionManager } = await import('@mariozechner/pi-coding-agent');
 
-      await useCase.execute({ repo: 'core', prompt: 'hello' });
+      await service.execute({ repo: 'core', prompt: 'hello' });
 
       expect(linearSessionRepository.findFilePath).not.toHaveBeenCalled();
       expect(linearSessionRepository.saveFilePath).not.toHaveBeenCalled();
@@ -384,7 +383,7 @@ describe('ExecuteRunUseCase', () => {
 
   describe('active session tracking', () => {
     it('should track and untrack active session via tracker', async () => {
-      await useCase.execute({
+      await service.execute({
         repo: 'core',
         prompt: 'hello',
         sessionKey: 'linear-session-1',
@@ -403,7 +402,7 @@ describe('ExecuteRunUseCase', () => {
       mockSession.prompt.mockRejectedValueOnce(new Error('boom'));
 
       await expect(
-        useCase.execute({
+        service.execute({
           repo: 'core',
           prompt: 'hello',
           sessionKey: 'linear-session-1',
@@ -416,7 +415,7 @@ describe('ExecuteRunUseCase', () => {
     });
 
     it('should delegate abort to the tracker', async () => {
-      await useCase.abortSession('linear-session-1');
+      await service.abortSession('linear-session-1');
 
       expect(activeSessionTracker.abort).toHaveBeenCalledWith(
         'linear-session-1',

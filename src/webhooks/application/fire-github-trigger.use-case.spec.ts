@@ -1,7 +1,7 @@
 import { Test } from '@nestjs/testing';
 import { FireGithubTriggerUseCase } from './fire-github-trigger.use-case.js';
 import { AgentfilesConfigService } from '../../config/agentfiles-config.service.js';
-import { ExecuteRunUseCase } from '../../runs/application/execute-run.use-case.js';
+import { RunsService } from '../../runs/runs.service.js';
 import { BeforeHookService } from '../../triggers/before-hook.service.js';
 import type { GithubTrigger } from '../../triggers/trigger-config.interface.js';
 import { UnexpectedWebhookError } from './webhooks.errors.js';
@@ -33,7 +33,7 @@ const basePayload = {
 describe('FireGithubTriggerUseCase', () => {
   let useCase: FireGithubTriggerUseCase;
   let agentfilesConfigService: AgentfilesConfigService;
-  let executeRunUseCase: ExecuteRunUseCase;
+  let runsService: RunsService;
   let beforeHookService: BeforeHookService;
 
   beforeEach(async () => {
@@ -47,7 +47,7 @@ describe('FireGithubTriggerUseCase', () => {
           },
         },
         {
-          provide: ExecuteRunUseCase,
+          provide: RunsService,
           useValue: { execute: jest.fn().mockResolvedValue({ success: true }) },
         },
         {
@@ -61,14 +61,14 @@ describe('FireGithubTriggerUseCase', () => {
 
     useCase = module.get(FireGithubTriggerUseCase);
     agentfilesConfigService = module.get(AgentfilesConfigService);
-    executeRunUseCase = module.get(ExecuteRunUseCase);
+    runsService = module.get(RunsService);
     beforeHookService = module.get(BeforeHookService);
   });
 
   it('should interpolate the target and prompt and dispatch the run', async () => {
     await useCase.execute({ trigger: baseTrigger, payload: basePayload });
 
-    expect(executeRunUseCase.execute).toHaveBeenCalledWith(
+    expect(runsService.execute).toHaveBeenCalledWith(
       expect.objectContaining({
         repo: 'my-repo',
         prompt: 'Address review on PR #42 by alice.',
@@ -85,7 +85,7 @@ describe('FireGithubTriggerUseCase', () => {
 
     await useCase.execute({ trigger: baseTrigger, payload: basePayload });
 
-    expect(executeRunUseCase.execute).not.toHaveBeenCalled();
+    expect(runsService.execute).not.toHaveBeenCalled();
   });
 
   it('should skip when prompt exceeds the max length', async () => {
@@ -94,7 +94,7 @@ describe('FireGithubTriggerUseCase', () => {
 
     await useCase.execute({ trigger, payload: basePayload });
 
-    expect(executeRunUseCase.execute).not.toHaveBeenCalled();
+    expect(runsService.execute).not.toHaveBeenCalled();
   });
 
   it('should interpolate system prompts when provided', async () => {
@@ -106,7 +106,7 @@ describe('FireGithubTriggerUseCase', () => {
 
     await useCase.execute({ trigger, payload: basePayload });
 
-    expect(executeRunUseCase.execute).toHaveBeenCalledWith(
+    expect(runsService.execute).toHaveBeenCalledWith(
       expect.objectContaining({
         prependSystemPrompt: 'You are working on org/my-repo.',
         appendSystemPrompt: 'PR URL: https://github.com/org/my-repo/pull/42',
@@ -139,7 +139,7 @@ describe('FireGithubTriggerUseCase', () => {
         '/scripts/check.sh',
         'github trigger "address-review"',
       );
-      expect(executeRunUseCase.execute).toHaveBeenCalledWith(
+      expect(runsService.execute).toHaveBeenCalledWith(
         expect.objectContaining({
           prompt: 'PR review context: gathered context',
         }),
@@ -155,12 +155,12 @@ describe('FireGithubTriggerUseCase', () => {
       await useCase.execute({ trigger: triggerWithHook, payload: basePayload });
 
       expect(beforeHookService.run).toHaveBeenCalled();
-      expect(executeRunUseCase.execute).not.toHaveBeenCalled();
+      expect(runsService.execute).not.toHaveBeenCalled();
     });
   });
 
-  it('should wrap unexpected ExecuteRunUseCase errors in UnexpectedWebhookError', async () => {
-    (executeRunUseCase.execute as jest.Mock).mockRejectedValueOnce(
+  it('should wrap unexpected RunsService errors in UnexpectedWebhookError', async () => {
+    (runsService.execute as jest.Mock).mockRejectedValueOnce(
       new Error('pi crashed'),
     );
 

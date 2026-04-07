@@ -9,7 +9,7 @@ import { TriggerConfigService } from './trigger-config.service.js';
 import { interpolateTemplate } from './trigger-config.interface.js';
 import type { CronTrigger } from './trigger-config.interface.js';
 import { BeforeHookService } from './before-hook.service.js';
-import { ExecuteRunUseCase } from '../runs/application/execute-run.use-case.js';
+import { RunsService } from '../runs/runs.service.js';
 
 @Injectable()
 export class CronSchedulerService implements OnModuleInit, OnModuleDestroy {
@@ -18,7 +18,7 @@ export class CronSchedulerService implements OnModuleInit, OnModuleDestroy {
 
   constructor(
     private readonly triggerConfigService: TriggerConfigService,
-    private readonly executeRunUseCase: ExecuteRunUseCase,
+    private readonly runsService: RunsService,
     private readonly beforeHookService: BeforeHookService,
   ) {}
 
@@ -90,7 +90,7 @@ export class CronSchedulerService implements OnModuleInit, OnModuleDestroy {
       : undefined;
 
     try {
-      const result = await this.executeRunUseCase.execute({
+      const result = await this.runsService.execute({
         repo: trigger.target,
         prompt,
         prependSystemPrompt,

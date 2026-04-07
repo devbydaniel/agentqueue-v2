@@ -11,7 +11,7 @@ import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { TriggerConfigService } from '../../triggers/trigger-config.service.js';
 import { interpolateTemplate } from '../../triggers/trigger-config.interface.js';
 import { AgentfilesConfigService } from '../../config/agentfiles-config.service.js';
-import { ExecuteRunUseCase } from '../../runs/application/execute-run.use-case.js';
+import { RunsService } from '../../runs/runs.service.js';
 import { LinearWebhookService } from '../infrastructure/linear-webhook.service.js';
 import { GithubSignatureVerifierService } from '../infrastructure/github/github-signature-verifier.service.js';
 import { HandleGithubWebhookUseCase } from '../application/handle-github-webhook.use-case.js';
@@ -46,7 +46,7 @@ export class WebhooksController {
     private readonly linearWebhookService: LinearWebhookService,
     private readonly githubSignatureVerifier: GithubSignatureVerifierService,
     private readonly handleGithubWebhookUseCase: HandleGithubWebhookUseCase,
-    private readonly executeRunUseCase: ExecuteRunUseCase,
+    private readonly runsService: RunsService,
   ) {}
 
   @Get('linear/:agentName')
@@ -138,7 +138,7 @@ export class WebhooksController {
         linearClient,
       );
 
-      void this.executeRunUseCase
+      void this.runsService
         .abortSession(payload.agentSessionId)
         .then(async (aborted) => {
           const message = aborted
@@ -197,7 +197,7 @@ export class WebhooksController {
       agentSessionId: payload.agentSessionId,
     });
 
-    void this.executeRunUseCase
+    void this.runsService
       .execute({
         repo,
         prompt,
