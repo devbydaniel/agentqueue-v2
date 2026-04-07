@@ -7,11 +7,11 @@ import { LinearWebhooksService } from './linear-webhooks.service.js';
 import { GithubWebhooksService } from './github-webhooks.service.js';
 import { LinearWebhookParserService } from './linear-webhook-parser.service.js';
 import { GithubSignatureVerifierService } from './github-signature-verifier.service.js';
-import { TriggerConfigService } from '../triggers/trigger-config.service.js';
+import { TriggerConfigService } from '../config/trigger-config.service.js';
 import { BeforeHookService } from '../triggers/before-hook.service.js';
 import { AgentfilesConfigService } from '../config/agentfiles-config.service.js';
 import { RunsService } from '../runs/runs.service.js';
-import type { LinearTrigger } from '../triggers/trigger-config.interface.js';
+import type { LinearTrigger } from '../config/trigger-config.interface.js';
 
 describe('WebhooksController', () => {
   let app: INestApplication;

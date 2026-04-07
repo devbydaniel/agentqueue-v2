@@ -5,9 +5,9 @@ import {
   type OnModuleDestroy,
 } from '@nestjs/common';
 import * as cron from 'node-cron';
-import { TriggerConfigService } from './trigger-config.service.js';
-import { interpolateTemplate } from './trigger-config.interface.js';
-import type { CronTrigger } from './trigger-config.interface.js';
+import { TriggerConfigService } from '../config/trigger-config.service.js';
+import { interpolateTemplate } from '../config/trigger-config.interface.js';
+import type { CronTrigger } from '../config/trigger-config.interface.js';
 import { BeforeHookService } from './before-hook.service.js';
 import { RunsService } from '../runs/runs.service.js';
 

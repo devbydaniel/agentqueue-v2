@@ -1,4 +1,4 @@
-import type { WebhookFilter } from '../triggers/trigger-config.interface.js';
+import type { WebhookFilter } from '../config/trigger-config.interface.js';
 import { getNestedValue } from './github-payload-template.js';
 
 /**

@@ -1,9 +1,9 @@
 import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
-import { TriggerConfigService } from '../triggers/trigger-config.service.js';
+import { TriggerConfigService } from '../config/trigger-config.service.js';
 import { AgentfilesConfigService } from '../config/agentfiles-config.service.js';
 import { RunsService } from '../runs/runs.service.js';
 import { BeforeHookService } from '../triggers/before-hook.service.js';
-import type { GithubTrigger } from '../triggers/trigger-config.interface.js';
+import type { GithubTrigger } from '../config/trigger-config.interface.js';
 import { GithubSignatureVerifierService } from './github-signature-verifier.service.js';
 import { interpolatePayloadTemplate } from './github-payload-template.js';
 import { matchesFilters } from './github-webhook-filter.js';

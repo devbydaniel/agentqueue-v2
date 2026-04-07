@@ -4,8 +4,8 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { TriggerConfigService } from '../triggers/trigger-config.service.js';
-import { interpolateTemplate } from '../triggers/trigger-config.interface.js';
+import { TriggerConfigService } from '../config/trigger-config.service.js';
+import { interpolateTemplate } from '../config/trigger-config.interface.js';
 import { AgentfilesConfigService } from '../config/agentfiles-config.service.js';
 import { RunsService } from '../runs/runs.service.js';
 import { LinearCallbackHandler } from '../callbacks/handlers/linear.callback-handler.js';

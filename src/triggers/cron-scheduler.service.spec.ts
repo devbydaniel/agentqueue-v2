@@ -1,8 +1,8 @@
 import * as cron from 'node-cron';
 import { CronSchedulerService } from './cron-scheduler.service.js';
-import type { TriggerConfigService } from './trigger-config.service.js';
+import type { TriggerConfigService } from '../config/trigger-config.service.js';
 import type { RunsService } from '../runs/runs.service.js';
-import type { CronTrigger } from './trigger-config.interface.js';
+import type { CronTrigger } from '../config/trigger-config.interface.js';
 import type { BeforeHookService } from './before-hook.service.js';
 
 jest.mock('node-cron');
