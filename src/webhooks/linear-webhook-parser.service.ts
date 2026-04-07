@@ -1,7 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { LinearClient } from '@linear/sdk';
-import { WebhookPayloadError } from '../application/webhooks.errors.js';
 
 export interface LinearWebhookPayload {
   action: string;
@@ -13,7 +12,7 @@ export interface LinearWebhookPayload {
 }
 
 @Injectable()
-export class LinearWebhookService {
+export class LinearWebhookParserService {
   verifySignature(rawBody: Buffer, signature: string, secret: string): boolean {
     const expected = createHmac('sha256', secret).update(rawBody).digest('hex');
 
@@ -35,7 +34,9 @@ export class LinearWebhookService {
 
   parsePayload(body: unknown): LinearWebhookPayload {
     if (!body || typeof body !== 'object') {
-      throw new WebhookPayloadError('body must be an object');
+      throw new BadRequestException(
+        'Invalid webhook payload: body must be an object',
+      );
     }
 
     const payload = body as Record<string, unknown>;
@@ -67,14 +68,16 @@ export class LinearWebhookService {
   private validateTypeAndAction(payload: Record<string, unknown>): void {
     const type = payload['type'];
     if (type !== 'AgentSession' && type !== 'AgentSessionEvent') {
-      throw new WebhookPayloadError(
-        `unsupported webhook type: ${String(type)}`,
+      throw new BadRequestException(
+        `Invalid webhook payload: unsupported webhook type: ${String(type)}`,
       );
     }
 
     const action = payload['action'];
     if (action !== 'created' && action !== 'prompted') {
-      throw new WebhookPayloadError(`unsupported action: ${String(action)}`);
+      throw new BadRequestException(
+        `Invalid webhook payload: unsupported action: ${String(action)}`,
+      );
     }
   }
 
@@ -86,11 +89,15 @@ export class LinearWebhookService {
       | Record<string, unknown>
       | undefined;
     if (!data) {
-      throw new WebhookPayloadError('missing agentSession/data field');
+      throw new BadRequestException(
+        'Invalid webhook payload: missing agentSession/data field',
+      );
     }
 
     if (!data['id']) {
-      throw new WebhookPayloadError('missing data.id (agentSessionId)');
+      throw new BadRequestException(
+        'Invalid webhook payload: missing data.id (agentSessionId)',
+      );
     }
 
     const action = payload['action'] as string;
@@ -112,7 +119,9 @@ export class LinearWebhookService {
       (data['promptContext'] as string | undefined) ??
       (payload['promptContext'] as string | undefined);
     if (!promptContext) {
-      throw new WebhookPayloadError('missing promptContext for created action');
+      throw new BadRequestException(
+        'Invalid webhook payload: missing promptContext for created action',
+      );
     }
     data['promptContext'] = promptContext;
   }
@@ -136,8 +145,8 @@ export class LinearWebhookService {
     }
     const signal = agentActivity?.['signal'] as string | undefined;
     if (!data['agentActivityBody'] && signal !== 'stop') {
-      throw new WebhookPayloadError(
-        'missing agentActivity.content.body for prompted action',
+      throw new BadRequestException(
+        'Invalid webhook payload: missing agentActivity.content.body for prompted action',
       );
     }
   }

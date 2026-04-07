@@ -1,5 +1,5 @@
-import type { WebhookFilter } from '../../../triggers/trigger-config.interface.js';
-import { getNestedValue } from './payload-template.js';
+import type { WebhookFilter } from '../triggers/trigger-config.interface.js';
+import { getNestedValue } from './github-payload-template.js';
 
 /**
  * Evaluate a single filter against a webhook payload.

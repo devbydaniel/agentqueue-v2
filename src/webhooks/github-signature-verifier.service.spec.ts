@@ -1,7 +1,7 @@
 import { createHmac } from 'node:crypto';
 import { GithubSignatureVerifierService } from './github-signature-verifier.service.js';
-import { WebhookSignatureError } from '../../application/webhooks.errors.js';
-import type { AppConfigService } from '../../../config/app-config.service.js';
+import { UnauthorizedException } from '@nestjs/common';
+import type { AppConfigService } from '../config/app-config.service.js';
 
 describe('GithubSignatureVerifierService', () => {
   const secret = 'test-webhook-secret';
@@ -23,20 +23,20 @@ describe('GithubSignatureVerifierService', () => {
     const service = makeService(secret);
     const sig = `sha256=${createHmac('sha256', 'wrong').update(body).digest('hex')}`;
 
-    expect(() => service.verify(body, sig)).toThrow(WebhookSignatureError);
+    expect(() => service.verify(body, sig)).toThrow(UnauthorizedException);
   });
 
   it('should throw when secret is not configured', () => {
     const service = makeService(undefined);
 
     expect(() => service.verify(body, 'sha256=abc')).toThrow(
-      WebhookSignatureError,
+      UnauthorizedException,
     );
   });
 
   it('should throw for an empty signature header', () => {
     const service = makeService(secret);
 
-    expect(() => service.verify(body, '')).toThrow(WebhookSignatureError);
+    expect(() => service.verify(body, '')).toThrow(UnauthorizedException);
   });
 });

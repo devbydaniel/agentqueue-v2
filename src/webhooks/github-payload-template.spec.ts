@@ -1,7 +1,7 @@
 import {
   getNestedValue,
   interpolatePayloadTemplate,
-} from './payload-template.js';
+} from './github-payload-template.js';
 
 describe('getNestedValue', () => {
   it('should resolve a top-level key', () => {

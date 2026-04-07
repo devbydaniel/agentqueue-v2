@@ -1,12 +1,12 @@
 import { createHmac } from 'node:crypto';
-import { LinearWebhookService } from './linear-webhook.service.js';
-import { WebhookPayloadError } from '../application/webhooks.errors.js';
+import { LinearWebhookParserService } from './linear-webhook-parser.service.js';
+import { BadRequestException } from '@nestjs/common';
 
-describe('LinearWebhookService', () => {
-  let service: LinearWebhookService;
+describe('LinearWebhookParserService', () => {
+  let service: LinearWebhookParserService;
 
   beforeEach(() => {
-    service = new LinearWebhookService();
+    service = new LinearWebhookParserService();
   });
 
   describe('verifySignature', () => {
@@ -98,11 +98,11 @@ describe('LinearWebhookService', () => {
     });
 
     it('should throw for null body', () => {
-      expect(() => service.parsePayload(null)).toThrow(WebhookPayloadError);
+      expect(() => service.parsePayload(null)).toThrow(BadRequestException);
     });
 
     it('should throw for non-object body', () => {
-      expect(() => service.parsePayload('string')).toThrow(WebhookPayloadError);
+      expect(() => service.parsePayload('string')).toThrow(BadRequestException);
     });
 
     it('should throw for unsupported type', () => {
@@ -112,7 +112,7 @@ describe('LinearWebhookService', () => {
           type: 'Issue',
           data: { id: 'x' },
         }),
-      ).toThrow(WebhookPayloadError);
+      ).toThrow(BadRequestException);
     });
 
     it('should throw for unsupported action', () => {
@@ -122,7 +122,7 @@ describe('LinearWebhookService', () => {
           type: 'AgentSession',
           data: { id: 'x' },
         }),
-      ).toThrow(WebhookPayloadError);
+      ).toThrow(BadRequestException);
     });
 
     it('should throw when data is missing', () => {
@@ -131,7 +131,7 @@ describe('LinearWebhookService', () => {
           action: 'created',
           type: 'AgentSession',
         }),
-      ).toThrow(WebhookPayloadError);
+      ).toThrow(BadRequestException);
     });
 
     it('should throw when data.id is missing', () => {
@@ -141,7 +141,7 @@ describe('LinearWebhookService', () => {
           type: 'AgentSession',
           data: { promptContext: 'hello' },
         }),
-      ).toThrow(WebhookPayloadError);
+      ).toThrow(BadRequestException);
     });
 
     it('should throw when promptContext is missing for created action', () => {
@@ -151,7 +151,7 @@ describe('LinearWebhookService', () => {
           type: 'AgentSession',
           data: { id: 'session-123' },
         }),
-      ).toThrow(WebhookPayloadError);
+      ).toThrow(BadRequestException);
     });
 
     it('should throw when agentActivity.content.body is missing for prompted action', () => {
@@ -161,7 +161,7 @@ describe('LinearWebhookService', () => {
           type: 'AgentSession',
           data: { id: 'session-123' },
         }),
-      ).toThrow(WebhookPayloadError);
+      ).toThrow(BadRequestException);
     });
 
     it('should throw when agentActivity.content is empty for prompted action', () => {
@@ -172,7 +172,7 @@ describe('LinearWebhookService', () => {
           data: { id: 'session-123' },
           agentActivity: { content: {} },
         }),
-      ).toThrow(WebhookPayloadError);
+      ).toThrow(BadRequestException);
     });
   });
 

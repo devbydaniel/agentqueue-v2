@@ -1,5 +1,5 @@
-import { evaluateFilter, matchesFilters } from './webhook-filter.js';
-import type { WebhookFilter } from '../../../triggers/trigger-config.interface.js';
+import { evaluateFilter, matchesFilters } from './github-webhook-filter.js';
+import type { WebhookFilter } from '../triggers/trigger-config.interface.js';
 
 describe('evaluateFilter', () => {
   const body = {
