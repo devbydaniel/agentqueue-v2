@@ -88,6 +88,15 @@ describe('WebhooksController', () => {
       ],
     }).compile();
 
+    // Stub createLinearClient on the real parser service so the
+    // LinearCallbackHandler instantiated inside LinearWebhooksService doesn't
+    // hit the real Linear API. Returns a fake LinearClient with just the
+    // method LinearCallbackHandler actually calls.
+    const parser = module.get(LinearWebhookParserService);
+    jest.spyOn(parser, 'createLinearClient').mockReturnValue({
+      createAgentActivity: jest.fn().mockResolvedValue(undefined),
+    } as never);
+
     app = module.createNestApplication({ rawBody: true });
     app.useGlobalPipes(
       new ValidationPipe({
