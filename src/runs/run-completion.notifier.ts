@@ -12,7 +12,10 @@ export class RunCompletionNotifier {
 
   async notify(runId: string): Promise<void> {
     try {
-      await this.pool.query(`NOTIFY ${RUN_COMPLETED_CHANNEL}, $1`, [runId]);
+      await this.pool.query('SELECT pg_notify($1, $2)', [
+        RUN_COMPLETED_CHANNEL,
+        runId,
+      ]);
       this.logger.debug('Sent run completion notification', { runId });
     } catch (error) {
       this.logger.warn('Failed to send run completion notification', {

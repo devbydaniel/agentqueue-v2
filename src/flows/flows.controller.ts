@@ -1,9 +1,15 @@
 import { Body, Controller, Get, HttpCode, Param, Post } from '@nestjs/common';
-import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { FlowsService } from './flows.service.js';
 import { StartFlowDto } from './dto/start-flow.dto.js';
 
 @ApiTags('Flows')
+@ApiBearerAuth()
 @Controller('flows')
 export class FlowsController {
   constructor(private readonly flowsService: FlowsService) {}

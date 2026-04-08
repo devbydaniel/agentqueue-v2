@@ -8,13 +8,19 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { EnqueueRunDto } from './dto/enqueue-run.dto.js';
 import { ListRunEventsDto } from './dto/list-run-events.dto.js';
 import { ListRunsDto } from './dto/list-runs.dto.js';
 import { RunsService } from './runs.service.js';
 
 @ApiTags('Runs')
+@ApiBearerAuth()
 @Controller('runs')
 export class RunsController {
   constructor(private readonly runsService: RunsService) {}
