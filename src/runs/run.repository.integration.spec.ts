@@ -52,14 +52,14 @@ describe('RunRepository (integration)', () => {
         ...baseCommand,
         source: 'linear',
         triggerName: 'coding-agent',
-        sessionKey: 'session-123',
+        externalSessionId: 'session-123',
         prependSystemPrompt: 'You are a code reviewer.',
         appendSystemPrompt: 'Be thorough.',
       });
 
       expect(run.source).toBe('linear');
       expect(run.triggerName).toBe('coding-agent');
-      expect(run.sessionKey).toBe('session-123');
+      expect(run.externalSessionId).toBe('session-123');
       expect(run.prependSystemPrompt).toBe('You are a code reviewer.');
       expect(run.appendSystemPrompt).toBe('Be thorough.');
     });

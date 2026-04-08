@@ -157,7 +157,7 @@ export class LinearWebhooksService {
         triggerName: params.agentName,
         repo,
         prompt,
-        sessionKey: payload.agentSessionId,
+        externalSessionId: payload.agentSessionId,
         prependSystemPrompt,
         appendSystemPrompt,
         timeoutMs: linearConfig.timeout_ms,

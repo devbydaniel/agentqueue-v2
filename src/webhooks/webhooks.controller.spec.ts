@@ -139,7 +139,7 @@ describe('WebhooksController', () => {
         triggerName: 'coding-agent',
         repo: 'my-repo',
         prompt: 'Fix the auth bug',
-        sessionKey: 'session-123',
+        externalSessionId: 'session-123',
       }),
     );
   });

@@ -39,7 +39,7 @@ export const runs = pgTable('runs', {
   startedAt: timestamp('started_at', { withTimezone: true }),
   completedAt: timestamp('completed_at', { withTimezone: true }),
   errorMessage: text('error_message'),
-  sessionKey: varchar('session_key', { length: 255 }),
+  externalSessionId: varchar('session_key', { length: 255 }),
   prependSystemPrompt: text('prepend_system_prompt'),
   appendSystemPrompt: text('append_system_prompt'),
   timeoutMs: integer('timeout_ms'),

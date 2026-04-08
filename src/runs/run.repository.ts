@@ -21,7 +21,7 @@ export interface CreateRunCommand {
   parentFlowRunId?: string;
   repo: string;
   prompt: string;
-  sessionKey?: string;
+  externalSessionId?: string;
   prependSystemPrompt?: string;
   appendSystemPrompt?: string;
   timeoutMs?: number;
@@ -41,7 +41,7 @@ export class RunRepository {
       repo: command.repo,
       prompt: command.prompt,
       promptPreview: command.prompt.slice(0, 500),
-      sessionKey: command.sessionKey,
+      externalSessionId: command.externalSessionId,
       prependSystemPrompt: command.prependSystemPrompt,
       appendSystemPrompt: command.appendSystemPrompt,
       timeoutMs: command.timeoutMs,

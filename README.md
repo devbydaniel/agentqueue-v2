@@ -47,8 +47,8 @@ npm install
 # Copy env file and fill in values
 cp .env.example .env
 
-# Start Postgres (Docker required)
-docker compose up -d postgres
+# Start dev Postgres (Docker required)
+docker compose -f docker-compose.dev.yml up -d
 
 # Run database migrations
 npm run db:migrate
@@ -66,7 +66,7 @@ AgentQueue uses Postgres for run persistence and job queueing.
 
 ```bash
 # Start local Postgres
-docker compose up -d postgres
+docker compose -f docker-compose.dev.yml up -d
 
 # Apply migrations
 npm run db:migrate
@@ -117,9 +117,19 @@ Swagger docs are available at `/docs` when the server is running.
 
 ### POST /runs
 
-> **Breaking change:** `POST /runs` is now async-first. It returns `202 Accepted` immediately with `{ runId, status: 'waiting' }`. The run is processed in the background by the queue worker. To check the result, poll `GET /runs/:id` (coming soon).
+> **Breaking change:** `POST /runs` is async-first. It returns `202 Accepted` immediately with `{ runId, status: 'waiting' }`. The run is processed in the background by the queue worker. To check the result, poll `GET /runs/:id`.
 
-Enqueue an async agent run against a configured repo:
+Enqueue an async agent run against a configured repo.
+
+Accepted request fields:
+
+- `repo` (required)
+- `prompt` (required)
+- `prependSystemPrompt` (optional)
+- `appendSystemPrompt` (optional)
+- `timeoutMs` (optional)
+
+> `POST /runs` does **not** accept `externalSessionId`. Session resumption IDs are internal integration fields populated by webhook-based sources such as Linear.
 
 ```bash
 # Step 1: Enqueue the run
@@ -279,6 +289,8 @@ triggers:
 
 The `${VAR}` syntax interpolates from environment variables. The webhook URL is `POST /webhooks/linear/<name>`.
 
+For Linear-triggered runs, AgentQueue stores the incoming Linear `agentSessionId` as an internal `externalSessionId` so follow-up webhook events can resume or abort the same underlying pi session.
+
 #### GitHub Triggers
 
 Receive GitHub webhooks with flexible event and payload filtering:
@@ -353,39 +365,24 @@ src/
 ├── main.ts                           # Entry point, Swagger setup
 ├── app.module.ts                     # Root module
 ├── instrumentation.ts                # OpenTelemetry / Langfuse init
-├── auth/
-│   ├── auth.guard.ts                 # Bearer token guard (global)
-│   └── public.decorator.ts           # @Public() to skip auth
-├── config/
-│   ├── app-config.service.ts         # Centralized env var access
-│   ├── agentfiles-config.service.ts  # Repo resolution from agentfiles config
-│   └── config.errors.ts
-├── runs/
-│   ├── runs.controller.ts            # POST /runs
-│   ├── application/
-│   │   └── execute-run.use-case.ts   # Core: create pi session, run prompt
-│   ├── session-registry.service.ts   # Track sessions for resumption/abort
+├── auth/                             # Bearer auth guard + @Public()
+├── callbacks/                        # Event handlers (logger, Langfuse, Linear, run events)
+├── config/                           # Env + trigger config + repo resolution
+├── database/                         # Drizzle schemas + DB wiring + migrations
+├── flows/                            # Multi-step flow orchestration
+├── queue/                            # pg-boss integration
+├── runs/                             # Run API, persistence, processor, queue worker
+│   ├── runs.controller.ts
+│   ├── runs.service.ts
+│   ├── run.repository.ts
+│   ├── run-processor.service.ts
+│   ├── run-queue-worker.service.ts
+│   ├── active-session-tracker.service.ts
+│   ├── pi-session.factory.ts
+│   ├── linear-session.repository.ts
 │   └── dto/
-├── triggers/
-│   ├── trigger-config.service.ts     # Load triggers from YAML
-│   ├── trigger-config.interface.ts   # CronTrigger, LinearTrigger, GithubTrigger types
-│   └── cron-scheduler.service.ts     # node-cron scheduler
-├── webhooks/
-│   ├── webhooks.controller.ts        # Webhook endpoints (Linear + GitHub)
-│   ├── linear-webhook.service.ts     # Linear signature verification & parsing
-│   └── github/
-│       ├── github-webhook.service.ts # GitHub signature verification & trigger matching
-│       ├── webhook-filter.ts         # Filter engine (equals/contains/in/pattern)
-│       └── payload-template.ts       # {{dotted.path}} template interpolation
-├── callbacks/
-│   ├── callback-handler.interface.ts # CallbackHandler contract
-│   └── handlers/
-│       ├── logger.callback-handler.ts
-│       ├── langfuse.callback-handler.ts
-│       └── linear.callback-handler.ts
-└── common/
-    ├── errors/base.error.ts          # ApplicationError base class
-    └── filters/                      # Global exception filter
+├── triggers/                         # Cron scheduler
+└── webhooks/                         # Linear + GitHub webhook entrypoints/services
 ```
 
 ## Running Tests
@@ -405,18 +402,37 @@ npm run start:dev       # Development with hot-reload
 npm run build           # Production build
 npm run start:prod      # Run production build
 npm run test            # Run unit tests
+npm run test:integration# Integration tests
 npm run test:coverage   # Tests with coverage
 npm run lint            # ESLint
 npm run lint:fix        # ESLint with auto-fix
 npm run typecheck       # TypeScript type checking
 npm run format          # Prettier formatting
 npm run format:check    # Check formatting
+npm run deps:check      # Dependency-cruiser architecture checks
 
-# Deployment (production)
+# Local quality scripts
+./scripts/check-complexity.sh
+./scripts/check-duplication.sh
+./scripts/check-file-size.sh
+
+# Deployment (production — bare-metal)
 ./scripts/deploy.sh     # Pull, build, restart with health check
 ./scripts/stop.sh       # Stop the running process
 ./scripts/status.sh     # Check if running and healthy
 ```
+
+## Docker
+
+```bash
+# Development — start supporting services (Postgres)
+docker compose -f docker-compose.dev.yml up -d
+
+# Production — full stack (app + Postgres)
+docker compose up -d
+```
+
+The production compose builds the app from the `Dockerfile`, wires it to Postgres, and includes health checks on both services. It reads additional env vars from `.env` (e.g. `AUTH_TOKEN`, `LANGFUSE_*`), while `DATABASE_URL` is overridden to use the internal Postgres service.
 
 ## CI Pipelines
 

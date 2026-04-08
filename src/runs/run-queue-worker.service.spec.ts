@@ -8,7 +8,7 @@ import { ActiveSessionTrackerService } from './active-session-tracker.service.js
 
 describe('RunQueueWorkerService', () => {
   let service: RunQueueWorkerService;
-  let mockBoss: { work: jest.Mock };
+  let mockBoss: { createQueue: jest.Mock; work: jest.Mock };
   let mockProcessorService: { processRun: jest.Mock };
   let mockSessionTracker: { abortAll: jest.Mock };
   let registeredHandler: (
@@ -17,6 +17,7 @@ describe('RunQueueWorkerService', () => {
 
   beforeEach(async () => {
     mockBoss = {
+      createQueue: jest.fn().mockResolvedValue(undefined),
       work: jest.fn().mockImplementation((_queue, _opts, handler) => {
         registeredHandler = handler;
       }),

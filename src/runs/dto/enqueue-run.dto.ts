@@ -17,10 +17,6 @@ export class EnqueueRunDto {
 
   @IsString()
   @IsOptional()
-  sessionKey?: string;
-
-  @IsString()
-  @IsOptional()
   prependSystemPrompt?: string;
 
   @IsString()

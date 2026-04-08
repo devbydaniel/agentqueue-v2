@@ -19,8 +19,8 @@ export interface RunSessionParams {
   repo: string;
   prompt: string;
   additionalHandlers?: CallbackHandler[];
-  /** Optional key to track the session for later cancellation (e.g. Linear agentSessionId) */
-  sessionKey?: string;
+  /** Optional external ID to track the session for later cancellation (e.g. Linear agentSessionId) */
+  externalSessionId?: string;
   /** Run ID for dual-indexed tracker (enables abort-by-runId from dashboard) */
   runId?: string;
   /** System prompt snippet to prepend before the base system prompt */
@@ -53,11 +53,11 @@ export class RunProcessorService {
   ) {}
 
   /**
-   * Abort a tracked session by its key (e.g. Linear agentSessionId).
+   * Abort a tracked session by its external session ID (e.g. Linear agentSessionId).
    * Returns true if the session was found and aborted.
    */
-  async abortSession(sessionKey: string): Promise<boolean> {
-    return this.activeSessionTracker.abort(sessionKey);
+  async abortSession(externalSessionId: string): Promise<boolean> {
+    return this.activeSessionTracker.abort(externalSessionId);
   }
 
   /**
@@ -110,7 +110,7 @@ export class RunProcessorService {
       await this.runSession({
         repo: run.repo,
         prompt: run.prompt,
-        sessionKey: run.sessionKey ?? undefined,
+        externalSessionId: run.externalSessionId ?? undefined,
         runId,
         prependSystemPrompt: run.prependSystemPrompt ?? undefined,
         appendSystemPrompt: run.appendSystemPrompt ?? undefined,
@@ -200,7 +200,7 @@ export class RunProcessorService {
 
   private buildLinearHandlers(run: {
     source: string;
-    sessionKey: string | null;
+    externalSessionId: string | null;
     triggerName: string | null;
   }): {
     additionalHandlers: CallbackHandler[];
@@ -209,7 +209,7 @@ export class RunProcessorService {
     const additionalHandlers: CallbackHandler[] = [];
     let linearHandler: LinearCallbackHandler | undefined;
 
-    if (run.source === 'linear' && run.sessionKey && run.triggerName) {
+    if (run.source === 'linear' && run.externalSessionId && run.triggerName) {
       const linearConfig = this.triggerConfigService.getLinearTrigger(
         run.triggerName,
       );
@@ -217,7 +217,10 @@ export class RunProcessorService {
         const linearClient = new LinearClient({
           apiKey: linearConfig.api_key,
         });
-        linearHandler = new LinearCallbackHandler(run.sessionKey, linearClient);
+        linearHandler = new LinearCallbackHandler(
+          run.externalSessionId,
+          linearClient,
+        );
         additionalHandlers.push(linearHandler);
       }
     }
@@ -245,7 +248,7 @@ export class RunProcessorService {
 
     const { session, dispose } = await this.piSessionFactory.create({
       cwd,
-      sessionKey: params.sessionKey,
+      externalSessionId: params.externalSessionId,
       prependSystemPrompt: params.prependSystemPrompt,
       appendSystemPrompt: params.appendSystemPrompt,
     });
@@ -255,8 +258,8 @@ export class RunProcessorService {
       params.additionalHandlers,
     );
 
-    if (params.sessionKey || params.runId) {
-      const trackKey = params.sessionKey ?? params.runId!;
+    if (params.externalSessionId || params.runId) {
+      const trackKey = params.externalSessionId ?? params.runId!;
       this.activeSessionTracker.track(trackKey, session, params.runId);
     }
 
@@ -285,8 +288,8 @@ export class RunProcessorService {
       if (onAbort && params.abortSignal) {
         params.abortSignal.removeEventListener('abort', onAbort);
       }
-      if (params.sessionKey || params.runId) {
-        const trackKey = params.sessionKey ?? params.runId!;
+      if (params.externalSessionId || params.runId) {
+        const trackKey = params.externalSessionId ?? params.runId!;
         this.activeSessionTracker.untrack(trackKey, params.runId);
       }
       detachCallbacks();

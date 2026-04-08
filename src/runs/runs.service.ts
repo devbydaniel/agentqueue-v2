@@ -22,7 +22,7 @@ export interface EnqueueRunCommand {
   parentFlowRunId?: string;
   repo: string;
   prompt: string;
-  sessionKey?: string;
+  externalSessionId?: string;
   prependSystemPrompt?: string;
   appendSystemPrompt?: string;
   timeoutMs?: number;
@@ -53,11 +53,11 @@ export class RunsService {
   ) {}
 
   /**
-   * Abort a tracked session by its key (e.g. Linear agentSessionId).
+   * Abort a tracked session by its external session ID (e.g. Linear agentSessionId).
    * Returns true if the session was found and aborted.
    */
-  async abortSession(sessionKey: string): Promise<boolean> {
-    return this.runProcessorService.abortSession(sessionKey);
+  async abortSession(externalSessionId: string): Promise<boolean> {
+    return this.runProcessorService.abortSession(externalSessionId);
   }
 
   async enqueue(command: EnqueueRunCommand): Promise<EnqueueRunResult> {
@@ -72,7 +72,7 @@ export class RunsService {
       parentFlowRunId: command.parentFlowRunId,
       repo: command.repo,
       prompt: command.prompt,
-      sessionKey: command.sessionKey,
+      externalSessionId: command.externalSessionId,
       prependSystemPrompt: command.prependSystemPrompt,
       appendSystemPrompt: command.appendSystemPrompt,
       timeoutMs: command.timeoutMs,

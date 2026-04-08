@@ -58,7 +58,7 @@ describe('PiSessionFactory', () => {
     linearSessionRepository = module.get(LinearSessionRepository);
   });
 
-  it('should create a fresh session when no sessionKey is provided', async () => {
+  it('should create a fresh session when no externalSessionId is provided', async () => {
     const { SessionManager, createAgentSession } = await import(
       '@mariozechner/pi-coding-agent'
     );
@@ -156,7 +156,7 @@ describe('PiSessionFactory', () => {
 
       await factory.create({
         cwd: '/home/user/dev/my-repo',
-        sessionKey: 'linear-session-1',
+        externalSessionId: 'linear-session-1',
       });
 
       expect(linearSessionRepository.findFilePath).toHaveBeenCalledWith(
@@ -179,7 +179,7 @@ describe('PiSessionFactory', () => {
 
       await factory.create({
         cwd: '/home/user/dev/my-repo',
-        sessionKey: 'linear-session-1',
+        externalSessionId: 'linear-session-1',
       });
 
       expect(SessionManager.open).toHaveBeenCalled();
@@ -189,7 +189,7 @@ describe('PiSessionFactory', () => {
     it('should store session file in repository after creation', async () => {
       await factory.create({
         cwd: '/home/user/dev/my-repo',
-        sessionKey: 'linear-session-1',
+        externalSessionId: 'linear-session-1',
       });
 
       expect(linearSessionRepository.saveFilePath).toHaveBeenCalledWith(
@@ -198,7 +198,7 @@ describe('PiSessionFactory', () => {
       );
     });
 
-    it('should not query repository when no sessionKey is provided', async () => {
+    it('should not query repository when no externalSessionId is provided', async () => {
       const { SessionManager } = await import('@mariozechner/pi-coding-agent');
 
       await factory.create({ cwd: '/home/user/dev/my-repo' });

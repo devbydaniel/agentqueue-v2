@@ -4,8 +4,8 @@ import { LinearSessionRepository } from './linear-session.repository.js';
 
 export interface CreatePiSessionOptions {
   cwd: string;
-  /** Optional key to resume / store the underlying pi session file under */
-  sessionKey?: string;
+  /** Optional external ID to resume / store the underlying pi session file under */
+  externalSessionId?: string;
   /** System prompt snippet to prepend before the base system prompt */
   prependSystemPrompt?: string;
   /** System prompt snippet to append after the base system prompt */
@@ -71,8 +71,10 @@ export class PiSessionFactory {
     await resourceLoader.reload();
 
     // Resume existing pi session or create a new one
-    const existingSessionFile = options.sessionKey
-      ? await this.linearSessionRepository.findFilePath(options.sessionKey)
+    const existingSessionFile = options.externalSessionId
+      ? await this.linearSessionRepository.findFilePath(
+          options.externalSessionId,
+        )
       : null;
 
     let sessionMgr: ReturnType<typeof SessionManager.create>;
@@ -80,12 +82,12 @@ export class PiSessionFactory {
       try {
         sessionMgr = SessionManager.open(existingSessionFile);
         this.logger.log('Resuming pi session', {
-          sessionKey: options.sessionKey,
+          externalSessionId: options.externalSessionId,
           sessionFile: existingSessionFile,
         });
       } catch (error) {
         this.logger.warn('Failed to resume pi session, starting new', {
-          sessionKey: options.sessionKey,
+          externalSessionId: options.externalSessionId,
           error: error as Error,
         });
         sessionMgr = SessionManager.create(options.cwd);
@@ -104,11 +106,11 @@ export class PiSessionFactory {
     });
 
     // Store session file path for future resumption
-    if (options.sessionKey) {
+    if (options.externalSessionId) {
       const sessionFile = sessionMgr.getSessionFile();
       if (sessionFile) {
         await this.linearSessionRepository.saveFilePath(
-          options.sessionKey,
+          options.externalSessionId,
           sessionFile,
         );
       }

@@ -17,7 +17,7 @@ function makeRun(overrides: Partial<Run> = {}): Run {
     startedAt: new Date(),
     completedAt: new Date(),
     errorMessage: null,
-    sessionKey: null,
+    externalSessionId: null,
     prependSystemPrompt: null,
     appendSystemPrompt: null,
     timeoutMs: null,

@@ -6,7 +6,7 @@ import type { AgentSession } from '@mariozechner/pi-coding-agent';
  * (e.g. Linear `agentSessionId` or `runId`) so they can be aborted on demand.
  *
  * Supports dual-indexing: a single session can be tracked under both a
- * `runId` and a `sessionKey`. Both keys point at the same session reference.
+ * `runId` and an `externalSessionId`. Both keys point at the same session reference.
  *
  * This is intentionally an in-memory service (not a repository): an
  * `AgentSession` is bound to the running process and cannot be persisted.
@@ -19,10 +19,14 @@ export class ActiveSessionTrackerService {
   /**
    * Track a session under one or more keys.
    * Pass `runId` to enable abort-by-runId from the dashboard.
-   * Pass `sessionKey` to enable abort-by-sessionKey from Linear stop signals.
+   * Pass `externalSessionId` to enable abort-by-externalSessionId from webhook stop signals.
    */
-  track(sessionKey: string, session: AgentSession, runId?: string): void {
-    this.activeSessions.set(sessionKey, session);
+  track(
+    externalSessionId: string,
+    session: AgentSession,
+    runId?: string,
+  ): void {
+    this.activeSessions.set(externalSessionId, session);
     if (runId) {
       this.activeSessions.set(runId, session);
     }
@@ -32,15 +36,15 @@ export class ActiveSessionTrackerService {
    * Remove a session from all tracked keys.
    * Pass `runId` to also remove the runId-indexed entry.
    */
-  untrack(sessionKey: string, runId?: string): void {
-    this.activeSessions.delete(sessionKey);
+  untrack(externalSessionId: string, runId?: string): void {
+    this.activeSessions.delete(externalSessionId);
     if (runId) {
       this.activeSessions.delete(runId);
     }
   }
 
   /**
-   * Abort an in-flight session by any tracked key (runId or sessionKey).
+   * Abort an in-flight session by any tracked key (runId or externalSessionId).
    * Returns true if a session was found and aborted, false otherwise.
    */
   async abort(key: string): Promise<boolean> {

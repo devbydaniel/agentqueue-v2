@@ -69,13 +69,12 @@ describe('RunsController', () => {
       });
     });
 
-    it('should forward optional fields to enqueue', async () => {
+    it('should forward supported optional fields to enqueue', async () => {
       await request(app.getHttpServer())
         .post('/runs')
         .send({
           repo: 'core',
           prompt: 'do something',
-          sessionKey: 'sk-1',
           prependSystemPrompt: 'prepend',
           appendSystemPrompt: 'append',
         })
@@ -85,10 +84,19 @@ describe('RunsController', () => {
         source: 'manual',
         repo: 'core',
         prompt: 'do something',
-        sessionKey: 'sk-1',
         prependSystemPrompt: 'prepend',
         appendSystemPrompt: 'append',
       });
+    });
+
+    it('should return 400 when externalSessionId is provided', async () => {
+      const response = await request(app.getHttpServer()).post('/runs').send({
+        repo: 'core',
+        prompt: 'do something',
+        externalSessionId: 'external-1',
+      });
+
+      expect(response.status).toBe(400);
     });
 
     it('should return 400 when repo is missing', async () => {

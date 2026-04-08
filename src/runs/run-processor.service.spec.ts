@@ -147,14 +147,14 @@ describe('RunProcessorService', () => {
       await service.runSession({
         repo: 'core',
         prompt: 'do something',
-        sessionKey: 'session-1',
+        externalSessionId: 'session-1',
         prependSystemPrompt: 'prepend',
         appendSystemPrompt: 'append',
       });
 
       expect(piSessionFactory.create).toHaveBeenCalledWith({
         cwd: '/home/user/dev/my-repo',
-        sessionKey: 'session-1',
+        externalSessionId: 'session-1',
         prependSystemPrompt: 'prepend',
         appendSystemPrompt: 'append',
       });
@@ -282,7 +282,7 @@ describe('RunProcessorService', () => {
       await service.runSession({
         repo: 'core',
         prompt: 'hello',
-        sessionKey: 'linear-session-1',
+        externalSessionId: 'linear-session-1',
       });
 
       expect(activeSessionTracker.track).toHaveBeenCalledWith(
@@ -303,7 +303,7 @@ describe('RunProcessorService', () => {
         service.runSession({
           repo: 'core',
           prompt: 'hello',
-          sessionKey: 'linear-session-1',
+          externalSessionId: 'linear-session-1',
         }),
       ).rejects.toThrow();
 
@@ -313,7 +313,7 @@ describe('RunProcessorService', () => {
       );
     });
 
-    it('should not track when no sessionKey is provided', async () => {
+    it('should not track when no externalSessionId is provided', async () => {
       await service.runSession({ repo: 'core', prompt: 'hello' });
 
       expect(activeSessionTracker.track).not.toHaveBeenCalled();
@@ -334,11 +334,11 @@ describe('RunProcessorService', () => {
       expect(activeSessionTracker.abort).toHaveBeenCalledWith('run-123');
     });
 
-    it('should track by both sessionKey and runId when both are provided', async () => {
+    it('should track by both externalSessionId and runId when both are provided', async () => {
       await service.runSession({
         repo: 'core',
         prompt: 'hello',
-        sessionKey: 'linear-session-1',
+        externalSessionId: 'linear-session-1',
         runId: 'run-abc',
       });
 
@@ -353,7 +353,7 @@ describe('RunProcessorService', () => {
       );
     });
 
-    it('should track by runId alone when no sessionKey', async () => {
+    it('should track by runId alone when no externalSessionId', async () => {
       await service.runSession({
         repo: 'core',
         prompt: 'hello',
@@ -387,7 +387,7 @@ describe('RunProcessorService', () => {
         startedAt: null,
         completedAt: null,
         errorMessage: null,
-        sessionKey: null,
+        externalSessionId: null,
         prependSystemPrompt: null,
         appendSystemPrompt: null,
         timeoutMs: null,
@@ -485,7 +485,7 @@ describe('RunProcessorService', () => {
     it('should reconstruct LinearCallbackHandler for linear source', async () => {
       const run = makeRun({
         source: 'linear',
-        sessionKey: 'linear-session-id',
+        externalSessionId: 'linear-session-id',
         triggerName: 'my-agent',
       });
       (runRepository.findById as jest.Mock).mockResolvedValue(run);
@@ -499,9 +499,9 @@ describe('RunProcessorService', () => {
 
       await service.processRun('run-123');
 
-      // Verify factory was called with sessionKey
+      // Verify factory was called with externalSessionId
       expect(piSessionFactory.create).toHaveBeenCalledWith(
-        expect.objectContaining({ sessionKey: 'linear-session-id' }),
+        expect.objectContaining({ externalSessionId: 'linear-session-id' }),
       );
 
       // The linear handler should have been attached — we can verify
@@ -512,7 +512,7 @@ describe('RunProcessorService', () => {
     it('should not attach linear handler when trigger config not found', async () => {
       const run = makeRun({
         source: 'linear',
-        sessionKey: 'linear-session-id',
+        externalSessionId: 'linear-session-id',
         triggerName: 'missing-agent',
       });
       (runRepository.findById as jest.Mock).mockResolvedValue(run);
@@ -530,7 +530,7 @@ describe('RunProcessorService', () => {
     it('should not re-throw when emitResponse fails on success path', async () => {
       const run = makeRun({
         source: 'linear',
-        sessionKey: 'linear-session-id',
+        externalSessionId: 'linear-session-id',
         triggerName: 'my-agent',
       });
       (runRepository.findById as jest.Mock).mockResolvedValue(run);

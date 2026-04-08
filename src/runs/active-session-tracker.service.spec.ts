@@ -35,7 +35,7 @@ describe('ActiveSessionTrackerService', () => {
   });
 
   describe('dual-indexing', () => {
-    it('should track by both sessionKey and runId', async () => {
+    it('should track by both externalSessionId and runId', async () => {
       const mockSession = { abort: jest.fn().mockResolvedValue(undefined) };
       tracker.track('session-1', mockSession as never, 'run-abc');
 

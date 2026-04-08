@@ -26,6 +26,7 @@ export class RunQueueWorkerService
   ) {}
 
   async onModuleInit(): Promise<void> {
+    await this.boss.createQueue(RUNS_QUEUE_NAME);
     await this.boss.work(
       RUNS_QUEUE_NAME,
       {

@@ -28,7 +28,7 @@ describe('RunsService', () => {
       startedAt: null,
       completedAt: null,
       errorMessage: null,
-      sessionKey: null,
+      externalSessionId: null,
       prependSystemPrompt: null,
       appendSystemPrompt: null,
       timeoutMs: null,
@@ -112,7 +112,7 @@ describe('RunsService', () => {
         parentFlowRunId: undefined,
         repo: 'core',
         prompt: 'do something',
-        sessionKey: undefined,
+        externalSessionId: undefined,
         prependSystemPrompt: undefined,
         appendSystemPrompt: undefined,
       });
@@ -135,7 +135,7 @@ describe('RunsService', () => {
         triggerName: 'my-agent',
         repo: 'core',
         prompt: 'fix bug',
-        sessionKey: 'session-key-1',
+        externalSessionId: 'session-key-1',
         prependSystemPrompt: 'prepend',
         appendSystemPrompt: 'append',
       });
@@ -144,7 +144,7 @@ describe('RunsService', () => {
         expect.objectContaining({
           source: 'linear',
           triggerName: 'my-agent',
-          sessionKey: 'session-key-1',
+          externalSessionId: 'session-key-1',
           prependSystemPrompt: 'prepend',
           appendSystemPrompt: 'append',
         }),
