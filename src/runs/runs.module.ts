@@ -9,6 +9,7 @@ import { LinearSessionRepository } from './linear-session.repository.js';
 import { ActiveSessionTrackerService } from './active-session-tracker.service.js';
 import { RunRepository } from './run.repository.js';
 import { RunCompletionNotifier } from './run-completion.notifier.js';
+import { RunEventRepository } from './run-event.repository.js';
 
 @Module({
   imports: [CallbacksModule],
@@ -22,6 +23,7 @@ import { RunCompletionNotifier } from './run-completion.notifier.js';
     ActiveSessionTrackerService,
     RunRepository,
     RunCompletionNotifier,
+    RunEventRepository,
   ],
   exports: [RunsService, RunRepository],
 })

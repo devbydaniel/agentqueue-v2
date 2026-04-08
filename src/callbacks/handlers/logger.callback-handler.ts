@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import type { AgentSessionEvent } from '@mariozechner/pi-coding-agent';
 import { CallbackHandler } from '../callback-handler.interface.js';
+import { FILTERED_EVENT_TYPES } from '../callback.constants.js';
 
 const MAX_LOG_LENGTH = 500;
 
@@ -15,6 +16,8 @@ export class LoggerCallbackHandler implements CallbackHandler {
   private readonly logger = new Logger(LoggerCallbackHandler.name);
 
   onEvent(event: AgentSessionEvent): void {
+    if (!FILTERED_EVENT_TYPES.has(event.type)) return;
+
     switch (event.type) {
       case 'agent_start':
         this.logger.log('Agent started');
@@ -122,11 +125,11 @@ export class LoggerCallbackHandler implements CallbackHandler {
         });
         break;
 
-      // Intentionally not logged — too noisy for default logging.
       case 'message_start':
       case 'message_update':
       case 'tool_execution_update':
       case 'queue_update':
+        // Filtered out by FILTERED_EVENT_TYPES early return above.
         break;
     }
   }

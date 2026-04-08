@@ -8,6 +8,20 @@
       "when": 1775648930723,
       "tag": "0000_foamy_colossus",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1775654764898,
+      "tag": "0001_cheerful_catseye",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1775655636880,
+      "tag": "0002_late_secret_warriors",
+      "breakpoints": true
     }
   ]
 }

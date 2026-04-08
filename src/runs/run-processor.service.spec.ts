@@ -8,6 +8,7 @@ import { PiSessionFactory } from './pi-session.factory.js';
 import { ActiveSessionTrackerService } from './active-session-tracker.service.js';
 import { RunRepository } from './run.repository.js';
 import { RunCompletionNotifier } from './run-completion.notifier.js';
+import { RunEventRepository } from './run-event.repository.js';
 import { CALLBACK_HANDLERS } from '../callbacks/constants.js';
 import type { CallbackHandler } from '../callbacks/callback-handler.interface.js';
 import type { Run } from '../database/runs.schema.js';
@@ -19,6 +20,7 @@ describe('RunProcessorService', () => {
   let activeSessionTracker: ActiveSessionTrackerService;
   let runRepository: RunRepository;
   let runCompletionNotifier: RunCompletionNotifier;
+  let runEventRepository: RunEventRepository;
   let triggerConfigService: TriggerConfigService;
   let mockSession: jest.Mocked<Pick<AgentSession, 'prompt' | 'subscribe'>> & {
     dispose: jest.Mock;
@@ -88,6 +90,13 @@ describe('RunProcessorService', () => {
           },
         },
         {
+          provide: RunEventRepository,
+          useValue: {
+            append: jest.fn().mockResolvedValue(undefined),
+            findByRunId: jest.fn().mockResolvedValue([]),
+          },
+        },
+        {
           provide: TriggerConfigService,
           useValue: {
             getLinearTrigger: jest.fn(),
@@ -106,6 +115,7 @@ describe('RunProcessorService', () => {
     activeSessionTracker = module.get(ActiveSessionTrackerService);
     runRepository = module.get(RunRepository);
     runCompletionNotifier = module.get(RunCompletionNotifier);
+    runEventRepository = module.get(RunEventRepository);
     triggerConfigService = module.get(TriggerConfigService);
   });
 
@@ -511,6 +521,29 @@ describe('RunProcessorService', () => {
       );
 
       expect(runCompletionNotifier.notify).toHaveBeenCalledWith('run-123');
+    });
+
+    it('should attach a registry callback handler that writes events to the repo', async () => {
+      const run = makeRun();
+      (runRepository.findById as jest.Mock).mockResolvedValue(run);
+
+      mockSession.prompt.mockImplementationOnce(async () => {
+        // Simulate a session event while prompt is running
+        subscribeFn?.({ type: 'agent_start' });
+        subscribeFn?.({ type: 'message_update', content: 'noisy' });
+        subscribeFn?.({ type: 'turn_end', toolResults: [] });
+      });
+
+      await service.processRun('run-123');
+
+      // Registry handler should have persisted agent_start and turn_end but NOT message_update
+      const appendCalls = (runEventRepository.append as jest.Mock).mock.calls;
+      const persistedTypes = appendCalls.map(
+        (call: [string, string, unknown]) => call[1],
+      );
+      expect(persistedTypes).toContain('agent_start');
+      expect(persistedTypes).toContain('turn_end');
+      expect(persistedTypes).not.toContain('message_update');
     });
 
     it('should increment attemptsMade on each processRun call', async () => {

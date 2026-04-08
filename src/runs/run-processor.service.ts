@@ -9,6 +9,8 @@ import { ActiveSessionTrackerService } from './active-session-tracker.service.js
 import { PiSessionFactory } from './pi-session.factory.js';
 import { RunRepository } from './run.repository.js';
 import { RunCompletionNotifier } from './run-completion.notifier.js';
+import { RunEventRepository } from './run-event.repository.js';
+import { RunEventCallbackHandler } from '../callbacks/handlers/run-event.callback-handler.js';
 import type { AgentSession } from '@mariozechner/pi-coding-agent';
 
 export interface RunSessionParams {
@@ -37,6 +39,7 @@ export class RunProcessorService {
     private readonly activeSessionTracker: ActiveSessionTrackerService,
     private readonly runRepository: RunRepository,
     private readonly runCompletionNotifier: RunCompletionNotifier,
+    private readonly runEventRepository: RunEventRepository,
     private readonly triggerConfigService: TriggerConfigService,
     @Inject(CALLBACK_HANDLERS)
     private readonly globalHandlers: CallbackHandler[],
@@ -75,8 +78,13 @@ export class RunProcessorService {
     run.attemptsMade = run.attemptsMade + 1;
     await this.runRepository.save(run);
 
-    // Build additional handlers for Linear source
+    // Build additional handlers
     const { additionalHandlers, linearHandler } = this.buildLinearHandlers(run);
+
+    // Attach registry handler to persist filtered events
+    additionalHandlers.push(
+      new RunEventCallbackHandler(runId, this.runEventRepository),
+    );
 
     try {
       await this.runSession({
