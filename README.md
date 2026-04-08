@@ -4,7 +4,7 @@ Centralized agent orchestrator for AI agent workloads. Receives triggers (cron s
 
 ## Architecture
 
-NestJS modular backend. No database — job state is in-memory. Runs are executed synchronously via the pi SDK, with webhook endpoints returning `200` immediately and firing runs in the background.
+NestJS modular backend backed by Postgres (via Drizzle ORM) and pg-boss for job queueing. Runs are enqueued asynchronously — `POST /runs` returns `202` immediately with a `runId`, and the run is processed by a background queue worker.
 
 ```text
 ┌─────────────┐   ┌──────────────┐   ┌──────────────┐
@@ -103,7 +103,7 @@ All endpoints except health and webhooks require `Authorization: Bearer <AUTH_TO
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | `GET` | `/health` | Public | Health check |
-| `POST` | `/runs` | Bearer | Execute a synchronous agent run |
+| `POST` | `/runs` | Bearer | Enqueue an async agent run (returns 202) |
 | `POST` | `/webhooks/linear/:agentName` | Signature | Receive Linear Agent Interaction webhooks |
 | `GET` | `/webhooks/linear/:agentName` | Public | Linear webhook URL verification |
 | `POST` | `/webhooks/github` | Signature | Receive GitHub webhooks |
@@ -112,13 +112,20 @@ Swagger docs are available at `/docs` when the server is running.
 
 ### POST /runs
 
-Execute a synchronous agent run against a configured repo:
+> **Breaking change:** `POST /runs` is now async-first. It returns `202 Accepted` immediately with `{ runId, status: 'waiting' }`. The run is processed in the background by the queue worker. To check the result, poll `GET /runs/:id` (coming soon).
+
+Enqueue an async agent run against a configured repo:
 
 ```bash
-curl -X POST http://localhost:3000/runs \
+# Step 1: Enqueue the run
+curl -s -X POST http://localhost:3000/runs \
   -H "Authorization: Bearer $AUTH_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"repo": "my-repo", "prompt": "Fix the failing tests"}'
+# => { "runId": "abc-123", "status": "waiting" }
+
+# Step 2: Check status (endpoint coming in a future step)
+# curl -s http://localhost:3000/runs/abc-123 -H "Authorization: Bearer $AUTH_TOKEN"
 ```
 
 ### POST /webhooks/github

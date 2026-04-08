@@ -24,9 +24,9 @@ export interface HandleLinearWebhookParams {
  *  1. Looks up the Linear trigger config for the route's agent name
  *  2. Verifies signature + timestamp
  *  3. Parses the payload
- *  4. Either aborts an in-flight session (stop signal) or dispatches a fresh
- *     agent run via `RunsService` (fire-and-forget) with a `LinearCallbackHandler`
- *     attached to stream events back to Linear.
+ *  4. Either aborts an in-flight session (stop signal) or enqueues a fresh
+ *     agent run via `RunsService` (fire-and-forget). Callback handling
+ *     (streaming events back to Linear) is delegated to `RunProcessorService`.
  *
  * Returns synchronously after dispatch — the caller (controller) can return
  * 200 immediately.
@@ -128,16 +128,7 @@ export class LinearWebhooksService {
         ? payload.promptContext!
         : payload.agentActivityBody!;
 
-    // 8. Create LinearCallbackHandler
-    const linearClient = this.linearWebhookParserService.createLinearClient(
-      linearConfig.api_key,
-    );
-    const linearHandler = new LinearCallbackHandler(
-      payload.agentSessionId,
-      linearClient,
-    );
-
-    // 9. Interpolate system prompt templates
+    // 8. Interpolate system prompt templates
     const templateVars = {
       issueId: payload.issueId ?? '',
       agentSessionId: payload.agentSessionId,
@@ -153,41 +144,29 @@ export class LinearWebhooksService {
       ? interpolateTemplate(linearConfig.append_system_prompt, templateVars)
       : undefined;
 
-    // 10. Fire run in background
-    this.logger.log('Firing async agent run from Linear webhook', {
+    // 9. Enqueue run (processing + Linear callback handled by RunProcessorService)
+    this.logger.log('Enqueueing agent run from Linear webhook', {
       agentName: params.agentName,
       action: payload.action,
       agentSessionId: payload.agentSessionId,
     });
 
     void this.runsService
-      .execute({
+      .enqueue({
+        source: 'linear',
+        triggerName: params.agentName,
         repo,
         prompt,
         sessionKey: payload.agentSessionId,
-        additionalHandlers: [linearHandler],
         prependSystemPrompt,
         appendSystemPrompt,
       })
-      .then(async () => {
-        const message = linearHandler.getLastAssistantMessage() ?? 'Completed.';
-        await linearHandler.emitResponse(message);
-      })
-      .catch(async (error: unknown) => {
-        this.logger.error('Agent run from Linear webhook failed', {
+      .catch((error: unknown) => {
+        this.logger.error('Failed to enqueue Linear agent run', {
           error: error as Error,
           agentName: params.agentName,
           agentSessionId: payload.agentSessionId,
         });
-        try {
-          await linearHandler.emitError(
-            error instanceof Error ? error.message : 'Agent run failed',
-          );
-        } catch (emitErr) {
-          this.logger.error('Failed to emit error to Linear', {
-            error: emitErr as Error,
-          });
-        }
       });
   }
 }

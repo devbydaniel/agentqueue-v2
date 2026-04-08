@@ -26,7 +26,9 @@ describe('CronSchedulerService', () => {
     } as unknown as jest.Mocked<TriggerConfigService>;
 
     runsService = {
-      execute: jest.fn().mockResolvedValue({ success: true }),
+      enqueue: jest
+        .fn()
+        .mockResolvedValue({ runId: 'run-abc', status: 'waiting' }),
     } as unknown as jest.Mocked<RunsService>;
 
     beforeHookService = {
@@ -140,7 +142,9 @@ describe('CronSchedulerService', () => {
 
       await tickHandler!();
 
-      expect(runsService.execute).toHaveBeenCalledWith({
+      expect(runsService.enqueue).toHaveBeenCalledWith({
+        source: 'cron',
+        triggerName: 'test-trigger',
         repo: 'myrepo',
         prompt: 'Do something',
         prependSystemPrompt: undefined,
@@ -148,10 +152,10 @@ describe('CronSchedulerService', () => {
       });
     });
 
-    it('should not throw when runsService fails', async () => {
+    it('should swallow enqueue errors (logged, not thrown)', async () => {
       triggerConfigService.getCronTriggers.mockReturnValue([makeTrigger()]);
       (cron.validate as jest.Mock).mockReturnValue(true);
-      runsService.execute.mockRejectedValue(new Error('Run failed'));
+      runsService.enqueue.mockRejectedValue(new Error('Run failed'));
 
       let tickHandler: () => Promise<void>;
       (cron.schedule as jest.Mock).mockImplementation((_schedule, handler) => {
@@ -160,14 +164,11 @@ describe('CronSchedulerService', () => {
       });
 
       scheduler.onModuleInit();
-      // Should not throw — errors are caught and logged internally
 
-      await tickHandler!();
-
-      expect(runsService.execute).toHaveBeenCalled();
+      await expect(tickHandler!()).resolves.toBeUndefined();
     });
 
-    it('should pass interpolated prepend_system_prompt to execute', async () => {
+    it('should pass interpolated prepend_system_prompt to enqueue', async () => {
       triggerConfigService.getCronTriggers.mockReturnValue([
         makeTrigger({
           target: 'myrepo',
@@ -186,14 +187,14 @@ describe('CronSchedulerService', () => {
       scheduler.onModuleInit();
       await tickHandler!();
 
-      expect(runsService.execute).toHaveBeenCalledWith(
+      expect(runsService.enqueue).toHaveBeenCalledWith(
         expect.objectContaining({
           prependSystemPrompt: 'Trigger: test-trigger, target: myrepo',
         }),
       );
     });
 
-    it('should pass interpolated append_system_prompt to execute', async () => {
+    it('should pass interpolated append_system_prompt to enqueue', async () => {
       triggerConfigService.getCronTriggers.mockReturnValue([
         makeTrigger({
           target: 'myrepo',
@@ -212,7 +213,7 @@ describe('CronSchedulerService', () => {
       scheduler.onModuleInit();
       await tickHandler!();
 
-      expect(runsService.execute).toHaveBeenCalledWith(
+      expect(runsService.enqueue).toHaveBeenCalledWith(
         expect.objectContaining({
           appendSystemPrompt: 'Schedule: 0 8 * * *',
         }),
@@ -234,7 +235,7 @@ describe('CronSchedulerService', () => {
       scheduler.onModuleInit();
       await tickHandler!();
 
-      const call = runsService.execute.mock.calls[0][0] as unknown as Record<
+      const call = runsService.enqueue.mock.calls[0][0] as unknown as Record<
         string,
         unknown
       >;
@@ -262,7 +263,7 @@ describe('CronSchedulerService', () => {
       await tick();
 
       expect(beforeHookService.run).not.toHaveBeenCalled();
-      expect(runsService.execute).toHaveBeenCalled();
+      expect(runsService.enqueue).toHaveBeenCalled();
     });
 
     it('runs the hook before executing when trigger.before is set', async () => {
@@ -284,7 +285,7 @@ describe('CronSchedulerService', () => {
         '/scripts/check.sh',
         'cron trigger "meeting-prep"',
       );
-      expect(runsService.execute).toHaveBeenCalled();
+      expect(runsService.enqueue).toHaveBeenCalled();
     });
 
     it('substitutes {{before_output}} in the prompt with the hook stdout', async () => {
@@ -302,7 +303,7 @@ describe('CronSchedulerService', () => {
 
       await tick();
 
-      expect(runsService.execute).toHaveBeenCalledWith(
+      expect(runsService.enqueue).toHaveBeenCalledWith(
         expect.objectContaining({
           prompt: 'Prepare for: standup at 10am',
         }),
@@ -320,7 +321,7 @@ describe('CronSchedulerService', () => {
 
       await tick();
 
-      expect(runsService.execute).toHaveBeenCalledWith(
+      expect(runsService.enqueue).toHaveBeenCalledWith(
         expect.objectContaining({ prompt: 'Info:  end' }),
       );
     });
@@ -338,7 +339,7 @@ describe('CronSchedulerService', () => {
       await tick();
 
       expect(beforeHookService.run).toHaveBeenCalled();
-      expect(runsService.execute).not.toHaveBeenCalled();
+      expect(runsService.enqueue).not.toHaveBeenCalled();
     });
   });
 });

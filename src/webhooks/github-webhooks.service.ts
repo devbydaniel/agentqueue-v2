@@ -148,13 +148,17 @@ export class GithubWebhooksService {
       event: payload['action'],
     });
 
-    await this.runsService.execute({
+    const { runId } = await this.runsService.enqueue({
+      source: 'github',
+      triggerName: trigger.name,
       repo,
       prompt,
       prependSystemPrompt,
       appendSystemPrompt,
     });
 
-    this.logger.log(`Run completed for GitHub trigger "${trigger.name}"`);
+    this.logger.log(`Run enqueued for GitHub trigger "${trigger.name}"`, {
+      runId,
+    });
   }
 }

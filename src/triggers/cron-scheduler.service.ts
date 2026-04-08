@@ -34,7 +34,14 @@ export class CronSchedulerService implements OnModuleInit, OnModuleDestroy {
       }
 
       const task = cron.schedule(trigger.schedule, async () => {
-        await this.handleCronTick(trigger);
+        try {
+          await this.handleCronTick(trigger);
+        } catch (error) {
+          this.logger.error(
+            `Cron trigger "${trigger.name}" failed`,
+            error as Error,
+          );
+        }
       });
 
       this.tasks.push(task);
@@ -89,20 +96,14 @@ export class CronSchedulerService implements OnModuleInit, OnModuleDestroy {
       ? interpolateTemplate(trigger.append_system_prompt, templateVars)
       : undefined;
 
-    try {
-      const result = await this.runsService.execute({
-        repo: trigger.target,
-        prompt,
-        prependSystemPrompt,
-        appendSystemPrompt,
-      });
-      this.logger.log(`Cron trigger "${trigger.name}" completed`, {
-        success: result.success,
-      });
-    } catch (error) {
-      this.logger.error(
-        `Cron trigger "${trigger.name}" failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
+    const { runId } = await this.runsService.enqueue({
+      source: 'cron',
+      triggerName: trigger.name,
+      repo: trigger.target,
+      prompt,
+      prependSystemPrompt,
+      appendSystemPrompt,
+    });
+    this.logger.log(`Cron trigger "${trigger.name}" enqueued`, { runId });
   }
 }

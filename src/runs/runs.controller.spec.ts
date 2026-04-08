@@ -15,7 +15,9 @@ describe('RunsController', () => {
         {
           provide: RunsService,
           useValue: {
-            execute: jest.fn().mockResolvedValue({ success: true }),
+            enqueue: jest
+              .fn()
+              .mockResolvedValue({ runId: 'run-abc', status: 'waiting' }),
           },
         },
       ],
@@ -38,16 +40,39 @@ describe('RunsController', () => {
     await app.close();
   });
 
-  it('should return success when given valid input', async () => {
+  it('should return 202 with runId and status when given valid input', async () => {
     const response = await request(app.getHttpServer())
       .post('/runs')
       .send({ repo: 'core', prompt: 'do something' })
-      .expect(201);
+      .expect(202);
 
-    expect(response.body).toEqual({ success: true });
-    expect(runsService.execute).toHaveBeenCalledWith({
+    expect(response.body).toEqual({ runId: 'run-abc', status: 'waiting' });
+    expect(runsService.enqueue).toHaveBeenCalledWith({
+      source: 'manual',
       repo: 'core',
       prompt: 'do something',
+    });
+  });
+
+  it('should forward optional fields to enqueue', async () => {
+    await request(app.getHttpServer())
+      .post('/runs')
+      .send({
+        repo: 'core',
+        prompt: 'do something',
+        sessionKey: 'sk-1',
+        prependSystemPrompt: 'prepend',
+        appendSystemPrompt: 'append',
+      })
+      .expect(202);
+
+    expect(runsService.enqueue).toHaveBeenCalledWith({
+      source: 'manual',
+      repo: 'core',
+      prompt: 'do something',
+      sessionKey: 'sk-1',
+      prependSystemPrompt: 'prepend',
+      appendSystemPrompt: 'append',
     });
   });
 

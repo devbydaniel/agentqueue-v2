@@ -71,7 +71,11 @@ describe('GithubWebhooksService', () => {
         },
         {
           provide: RunsService,
-          useValue: { execute: jest.fn().mockResolvedValue({ success: true }) },
+          useValue: {
+            enqueue: jest
+              .fn()
+              .mockResolvedValue({ runId: 'run-abc', status: 'waiting' }),
+          },
         },
         {
           provide: BeforeHookService,
@@ -158,8 +162,10 @@ describe('GithubWebhooksService', () => {
       await flush();
 
       expect(result.triggered).toBe(1);
-      expect(runsService.execute).toHaveBeenCalledWith(
+      expect(runsService.enqueue).toHaveBeenCalledWith(
         expect.objectContaining({
+          source: 'github',
+          triggerName: 'address-review',
           repo: 'my-repo',
           prompt: 'Address review on PR #42 by alice.',
         }),
@@ -179,7 +185,7 @@ describe('GithubWebhooksService', () => {
       });
 
       expect(result.triggered).toBe(0);
-      expect(runsService.execute).not.toHaveBeenCalled();
+      expect(runsService.enqueue).not.toHaveBeenCalled();
     });
 
     it('should not match when filters do not pass', () => {
@@ -200,7 +206,7 @@ describe('GithubWebhooksService', () => {
       });
 
       expect(result.triggered).toBe(0);
-      expect(runsService.execute).not.toHaveBeenCalled();
+      expect(runsService.enqueue).not.toHaveBeenCalled();
     });
 
     it('should match and fire multiple triggers', async () => {
@@ -225,14 +231,14 @@ describe('GithubWebhooksService', () => {
       await flush();
 
       expect(result.triggered).toBe(2);
-      expect(runsService.execute).toHaveBeenCalledTimes(2);
+      expect(runsService.enqueue).toHaveBeenCalledTimes(2);
     });
 
     it('should swallow per-trigger fire failures (fire-and-forget)', async () => {
       (triggerConfigService.getGithubTriggers as jest.Mock).mockReturnValue([
         prReviewTrigger,
       ]);
-      (runsService.execute as jest.Mock).mockRejectedValueOnce(
+      (runsService.enqueue as jest.Mock).mockRejectedValueOnce(
         new Error('boom'),
       );
 
@@ -265,7 +271,7 @@ describe('GithubWebhooksService', () => {
       });
       await flush();
 
-      expect(runsService.execute).toHaveBeenCalledWith(
+      expect(runsService.enqueue).toHaveBeenCalledWith(
         expect.objectContaining({
           repo: 'my-repo',
           prompt: 'Address review on PR #42 by alice.',
@@ -288,7 +294,7 @@ describe('GithubWebhooksService', () => {
       });
       await flush();
 
-      expect(runsService.execute).not.toHaveBeenCalled();
+      expect(runsService.enqueue).not.toHaveBeenCalled();
     });
 
     it('should skip when prompt exceeds the max length', async () => {
@@ -305,7 +311,7 @@ describe('GithubWebhooksService', () => {
       });
       await flush();
 
-      expect(runsService.execute).not.toHaveBeenCalled();
+      expect(runsService.enqueue).not.toHaveBeenCalled();
     });
 
     it('should interpolate system prompts when provided', async () => {
@@ -325,7 +331,7 @@ describe('GithubWebhooksService', () => {
       });
       await flush();
 
-      expect(runsService.execute).toHaveBeenCalledWith(
+      expect(runsService.enqueue).toHaveBeenCalledWith(
         expect.objectContaining({
           prependSystemPrompt: 'You are working on org/my-repo.',
           appendSystemPrompt: 'PR URL: https://github.com/org/my-repo/pull/42',
@@ -373,7 +379,7 @@ describe('GithubWebhooksService', () => {
           '/scripts/check.sh',
           'github trigger "address-review"',
         );
-        expect(runsService.execute).toHaveBeenCalledWith(
+        expect(runsService.enqueue).toHaveBeenCalledWith(
           expect.objectContaining({
             prompt: 'PR review context: gathered context',
           }),
@@ -398,12 +404,12 @@ describe('GithubWebhooksService', () => {
         await flush();
 
         expect(beforeHookService.run).toHaveBeenCalled();
-        expect(runsService.execute).not.toHaveBeenCalled();
+        expect(runsService.enqueue).not.toHaveBeenCalled();
       });
     });
 
     it('should propagate unexpected errors from RunsService unchanged (logged, not thrown)', async () => {
-      (runsService.execute as jest.Mock).mockRejectedValueOnce(
+      (runsService.enqueue as jest.Mock).mockRejectedValueOnce(
         new Error('pi crashed'),
       );
 

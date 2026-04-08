@@ -15,7 +15,7 @@ import type { LinearTrigger } from '../config/trigger-config.interface.js';
 
 describe('WebhooksController', () => {
   let app: INestApplication;
-  let executeRunMock: jest.Mock;
+  let enqueueRunMock: jest.Mock;
   let getLinearTriggerMock: jest.Mock;
 
   const linearConfig: LinearTrigger = {
@@ -42,7 +42,9 @@ describe('WebhooksController', () => {
   }
 
   beforeEach(async () => {
-    executeRunMock = jest.fn().mockResolvedValue({ success: true });
+    enqueueRunMock = jest
+      .fn()
+      .mockResolvedValue({ runId: 'run-abc', status: 'waiting' });
     getLinearTriggerMock = jest.fn().mockImplementation((name: string) => {
       if (name === 'coding-agent') return linearConfig;
       return undefined;
@@ -76,7 +78,8 @@ describe('WebhooksController', () => {
         {
           provide: RunsService,
           useValue: {
-            execute: executeRunMock,
+            enqueue: enqueueRunMock,
+            abortSession: jest.fn().mockResolvedValue(true),
           },
         },
         {
@@ -87,15 +90,6 @@ describe('WebhooksController', () => {
         },
       ],
     }).compile();
-
-    // Stub createLinearClient on the real parser service so the
-    // LinearCallbackHandler instantiated inside LinearWebhooksService doesn't
-    // hit the real Linear API. Returns a fake LinearClient with just the
-    // method LinearCallbackHandler actually calls.
-    const parser = module.get(LinearWebhookParserService);
-    jest.spyOn(parser, 'createLinearClient').mockReturnValue({
-      createAgentActivity: jest.fn().mockResolvedValue(undefined),
-    } as never);
 
     app = module.createNestApplication({ rawBody: true });
     app.useGlobalPipes(
@@ -139,13 +133,13 @@ describe('WebhooksController', () => {
     // Wait for the async fire-and-forget to be called
     await new Promise((r) => setTimeout(r, 50));
 
-    expect(executeRunMock).toHaveBeenCalledWith(
+    expect(enqueueRunMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        repo: 'my-repo', // target, not "coding-agent"
+        source: 'linear',
+        triggerName: 'coding-agent',
+        repo: 'my-repo',
         prompt: 'Fix the auth bug',
-        additionalHandlers: expect.arrayContaining([
-          expect.objectContaining({ name: 'linear' }),
-        ]),
+        sessionKey: 'session-123',
       }),
     );
   });
@@ -192,7 +186,7 @@ describe('WebhooksController', () => {
 
     await new Promise((r) => setTimeout(r, 50));
 
-    expect(executeRunMock).toHaveBeenCalledWith(
+    expect(enqueueRunMock).toHaveBeenCalledWith(
       expect.objectContaining({
         prompt: 'Also fix the tests',
       }),
@@ -309,8 +303,8 @@ describe('WebhooksController', () => {
   });
 
   it('should return 200 before the run completes (async execution)', async () => {
-    // Make execute take a long time
-    executeRunMock.mockImplementation(
+    // Make enqueue take a long time
+    enqueueRunMock.mockImplementation(
       () => new Promise((resolve) => setTimeout(resolve, 5000)),
     );
 
@@ -347,7 +341,7 @@ describe('WebhooksController', () => {
 
     await new Promise((r) => setTimeout(r, 50));
 
-    expect(executeRunMock).toHaveBeenCalledWith(
+    expect(enqueueRunMock).toHaveBeenCalledWith(
       expect.objectContaining({
         prependSystemPrompt:
           'You are working on issue issue-456 (session session-123).',
@@ -373,7 +367,7 @@ describe('WebhooksController', () => {
 
     await new Promise((r) => setTimeout(r, 50));
 
-    expect(executeRunMock).toHaveBeenCalledWith(
+    expect(enqueueRunMock).toHaveBeenCalledWith(
       expect.objectContaining({
         appendSystemPrompt: 'Agent: coding-agent, target: my-repo.',
       }),
@@ -392,7 +386,7 @@ describe('WebhooksController', () => {
 
     await new Promise((r) => setTimeout(r, 50));
 
-    const call = executeRunMock.mock.calls[0][0] as Record<string, unknown>;
+    const call = enqueueRunMock.mock.calls[0][0] as Record<string, unknown>;
     expect(call['prependSystemPrompt']).toBeUndefined();
     expect(call['appendSystemPrompt']).toBeUndefined();
   });
