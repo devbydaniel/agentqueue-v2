@@ -27,7 +27,9 @@ export function getTestPool(): pg.Pool {
 
 export async function truncateAll(): Promise<void> {
   const testDb = getTestDb();
-  await testDb.execute(sql`TRUNCATE TABLE runs, run_events CASCADE`);
+  await testDb.execute(
+    sql`TRUNCATE TABLE linear_sessions, flow_steps, flow_runs, run_events, runs CASCADE`,
+  );
 }
 
 export async function closeTestDb(): Promise<void> {

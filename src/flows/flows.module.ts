@@ -9,6 +9,7 @@ import { FlowRunRepository } from './flow-run.repository.js';
 import { FlowRunnerService } from './flow-runner.service.js';
 import { FlowAbortTrackerService } from './flow-abort-tracker.service.js';
 import { FlowRunCompletionListener } from './flow-run-completion.listener.js';
+import { FlowRunStartupRecoveryService } from './flow-run-startup-recovery.service.js';
 
 @Module({
   imports: [ConfigModule, RunsModule],
@@ -21,6 +22,7 @@ import { FlowRunCompletionListener } from './flow-run-completion.listener.js';
     FlowRunRepository,
     FlowAbortTrackerService,
     FlowRunCompletionListener,
+    FlowRunStartupRecoveryService,
   ],
 })
 export class FlowsModule {}

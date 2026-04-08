@@ -21,7 +21,7 @@ describe('RunStartupRecoveryService', () => {
     service = module.get(RunStartupRecoveryService);
   });
 
-  it('should call markRunningAsInterrupted on init', async () => {
+  it('should call markRunningAsInterrupted on run repository', async () => {
     mockRunRepository.markRunningAsInterrupted.mockResolvedValueOnce([
       { id: 'run-1' },
       { id: 'run-2' },
@@ -33,19 +33,16 @@ describe('RunStartupRecoveryService', () => {
   });
 
   it('should do nothing when no abandoned runs exist', async () => {
-    mockRunRepository.markRunningAsInterrupted.mockResolvedValueOnce([]);
-
     await service.onModuleInit();
 
     expect(mockRunRepository.markRunningAsInterrupted).toHaveBeenCalled();
   });
 
-  it('should catch and log errors without throwing', async () => {
+  it('should catch run recovery errors without throwing', async () => {
     mockRunRepository.markRunningAsInterrupted.mockRejectedValueOnce(
       new Error('DB unreachable'),
     );
 
-    // Should not throw
     await expect(service.onModuleInit()).resolves.toBeUndefined();
   });
 });

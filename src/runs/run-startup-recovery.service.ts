@@ -8,9 +8,6 @@ import { RunRepository } from './run.repository.js';
  * those rows will be stuck in `running` status forever. This service
  * recovers them so the dashboard surfaces them and the user can decide
  * whether to retry.
- *
- * Only covers `runs` for now. Flow run recovery will be added when
- * `flow_runs` is migrated to Drizzle (step 13).
  */
 @Injectable()
 export class RunStartupRecoveryService implements OnModuleInit {

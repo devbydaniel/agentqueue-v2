@@ -1,10 +1,42 @@
 import { FlowRunnerService } from './flow-runner.service.js';
 import type { Resolver } from './flow-resolver-loader.service.js';
-import { FlowRunRepository } from './flow-run.repository.js';
+import type { FlowRunRepository } from './flow-run.repository.js';
+import { type FlowRun } from './flow-run.repository.js';
 import { FlowAbortTrackerService } from './flow-abort-tracker.service.js';
 import type { RunsService } from '../runs/runs.service.js';
 import type { FlowRunCompletionListener } from './flow-run-completion.listener.js';
 import type { FlowConfig } from './flow-config.service.js';
+import { randomUUID } from 'node:crypto';
+
+/**
+ * In-memory mock that mirrors the old in-memory FlowRunRepository.
+ * Needed because the real one now requires a Drizzle DB connection.
+ */
+function createInMemoryFlowRunRepository(): FlowRunRepository {
+  const runs = new Map<string, FlowRun>();
+  return {
+    create: jest.fn(async (flowName: string, vars: Record<string, string>) => {
+      const run: FlowRun = {
+        flowRunId: randomUUID(),
+        flowName,
+        status: 'running',
+        vars: { ...vars },
+        steps: [],
+        startedAt: new Date(),
+      };
+      runs.set(run.flowRunId, run);
+      return run;
+    }),
+    findById: jest.fn(async (id: string) => runs.get(id) ?? null),
+    findByFlowName: jest.fn(async (name: string) =>
+      [...runs.values()].filter((r) => r.flowName === name),
+    ),
+    save: jest.fn(async (run: FlowRun) => {
+      runs.set(run.flowRunId, run);
+    }),
+    markRunningAsInterrupted: jest.fn(async () => []),
+  } as unknown as FlowRunRepository;
+}
 
 /** Wait for all microtasks / async work in the fire-and-forget loop to settle */
 function settle(ms = 50): Promise<void> {
@@ -64,7 +96,7 @@ describe('FlowRunnerService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     runIdCounter = 0;
-    repository = new FlowRunRepository();
+    repository = createInMemoryFlowRunRepository();
     abortTracker = new FlowAbortTrackerService();
     mockResolver = jest.fn();
 

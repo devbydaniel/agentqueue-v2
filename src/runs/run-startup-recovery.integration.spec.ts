@@ -16,8 +16,7 @@ describe('RunStartupRecoveryService (integration)', () => {
     await truncateAll();
   });
 
-  it('should mark running rows as interrupted on init', async () => {
-    // Create two runs: one running (abandoned), one waiting (should stay)
+  it('should mark running run rows as interrupted on init', async () => {
     const runningRun = await runRepo.create({
       source: 'manual',
       repo: 'test-repo',
@@ -34,10 +33,8 @@ describe('RunStartupRecoveryService (integration)', () => {
       prompt: 'waiting run',
     });
 
-    // Run recovery
     await recoveryService.onModuleInit();
 
-    // Running run should now be interrupted
     const recovered = await runRepo.findById(runningRun.id);
     expect(recovered!.status).toBe('interrupted');
     expect(recovered!.errorMessage).toBe(
@@ -45,7 +42,6 @@ describe('RunStartupRecoveryService (integration)', () => {
     );
     expect(recovered!.completedAt).toBeInstanceOf(Date);
 
-    // Waiting run should be unchanged
     const stillWaiting = await runRepo.findById(waitingRun.id);
     expect(stillWaiting!.status).toBe('waiting');
   });
@@ -67,7 +63,6 @@ describe('RunStartupRecoveryService (integration)', () => {
   });
 
   it('should handle no abandoned runs gracefully', async () => {
-    // Empty database — should not throw
     await recoveryService.onModuleInit();
   });
 });
