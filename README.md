@@ -104,6 +104,10 @@ All endpoints except health and webhooks require `Authorization: Bearer <AUTH_TO
 |---|---|---|---|
 | `GET` | `/health` | Public | Health check |
 | `POST` | `/runs` | Bearer | Enqueue an async agent run (returns 202) |
+| `GET` | `/runs` | Bearer | List runs with optional filters |
+| `GET` | `/runs/:id` | Bearer | Get run details by ID |
+| `GET` | `/runs/:id/events` | Bearer | List filtered events for a run |
+| `POST` | `/runs/:id/abort` | Bearer | Abort a running or waiting run |
 | `POST` | `/webhooks/linear/:agentName` | Signature | Receive Linear Agent Interaction webhooks |
 | `GET` | `/webhooks/linear/:agentName` | Public | Linear webhook URL verification |
 | `POST` | `/webhooks/github` | Signature | Receive GitHub webhooks |
@@ -124,8 +128,54 @@ curl -s -X POST http://localhost:3000/runs \
   -d '{"repo": "my-repo", "prompt": "Fix the failing tests"}'
 # => { "runId": "abc-123", "status": "waiting" }
 
-# Step 2: Check status (endpoint coming in a future step)
-# curl -s http://localhost:3000/runs/abc-123 -H "Authorization: Bearer $AUTH_TOKEN"
+# Step 2: Check status
+curl -s http://localhost:3000/runs/abc-123 \
+  -H "Authorization: Bearer $AUTH_TOKEN"
+# => { "id": "abc-123", "status": "running", ... }
+```
+
+### GET /runs
+
+List runs with optional filters:
+
+```bash
+# All runs
+curl -s http://localhost:3000/runs \
+  -H "Authorization: Bearer $AUTH_TOKEN"
+
+# Filter by status and source
+curl -s 'http://localhost:3000/runs?status=running&source=cron&limit=10' \
+  -H "Authorization: Bearer $AUTH_TOKEN"
+```
+
+Query parameters: `status`, `source`, `repo`, `trigger`, `since`, `limit`, `offset`.
+
+### GET /runs/:id
+
+Get full details for a specific run:
+
+```bash
+curl -s http://localhost:3000/runs/abc-123 \
+  -H "Authorization: Bearer $AUTH_TOKEN"
+```
+
+### GET /runs/:id/events
+
+Get the filtered event log for a run (agent lifecycle events, tool calls, etc.):
+
+```bash
+curl -s 'http://localhost:3000/runs/abc-123/events?limit=50' \
+  -H "Authorization: Bearer $AUTH_TOKEN"
+```
+
+### POST /runs/:id/abort
+
+Abort a running or waiting run. Returns `409` if the run is already in a terminal state.
+
+```bash
+curl -s -X POST http://localhost:3000/runs/abc-123/abort \
+  -H "Authorization: Bearer $AUTH_TOKEN"
+# => { "aborted": true }
 ```
 
 ### POST /webhooks/github

@@ -271,9 +271,11 @@ describe('RunProcessorService', () => {
       expect(activeSessionTracker.track).toHaveBeenCalledWith(
         'linear-session-1',
         mockSession,
+        undefined,
       );
       expect(activeSessionTracker.untrack).toHaveBeenCalledWith(
         'linear-session-1',
+        undefined,
       );
     });
 
@@ -290,6 +292,7 @@ describe('RunProcessorService', () => {
 
       expect(activeSessionTracker.untrack).toHaveBeenCalledWith(
         'linear-session-1',
+        undefined,
       );
     });
 
@@ -305,6 +308,49 @@ describe('RunProcessorService', () => {
 
       expect(activeSessionTracker.abort).toHaveBeenCalledWith(
         'linear-session-1',
+      );
+    });
+
+    it('should delegate abortByRunId to the tracker', async () => {
+      await service.abortByRunId('run-123');
+
+      expect(activeSessionTracker.abort).toHaveBeenCalledWith('run-123');
+    });
+
+    it('should track by both sessionKey and runId when both are provided', async () => {
+      await service.runSession({
+        repo: 'core',
+        prompt: 'hello',
+        sessionKey: 'linear-session-1',
+        runId: 'run-abc',
+      });
+
+      expect(activeSessionTracker.track).toHaveBeenCalledWith(
+        'linear-session-1',
+        mockSession,
+        'run-abc',
+      );
+      expect(activeSessionTracker.untrack).toHaveBeenCalledWith(
+        'linear-session-1',
+        'run-abc',
+      );
+    });
+
+    it('should track by runId alone when no sessionKey', async () => {
+      await service.runSession({
+        repo: 'core',
+        prompt: 'hello',
+        runId: 'run-abc',
+      });
+
+      expect(activeSessionTracker.track).toHaveBeenCalledWith(
+        'run-abc',
+        mockSession,
+        'run-abc',
+      );
+      expect(activeSessionTracker.untrack).toHaveBeenCalledWith(
+        'run-abc',
+        'run-abc',
       );
     });
   });
@@ -544,6 +590,26 @@ describe('RunProcessorService', () => {
       expect(persistedTypes).toContain('agent_start');
       expect(persistedTypes).toContain('turn_end');
       expect(persistedTypes).not.toContain('message_update');
+    });
+
+    it('should skip errored write when run is already in terminal state (abort race)', async () => {
+      const run = makeRun();
+      (runRepository.findById as jest.Mock).mockResolvedValue(run);
+      mockSession.prompt.mockRejectedValueOnce(new Error('session aborted'));
+
+      // On the second findById call (in the catch block), return a run that's already aborted
+      (runRepository.findById as jest.Mock)
+        .mockResolvedValueOnce(run) // first call in processRun
+        .mockResolvedValueOnce(makeRun({ status: 'aborted' })); // re-read in catch
+
+      await expect(service.processRun('run-123')).rejects.toThrow(
+        'session aborted',
+      );
+
+      // save should only be called once (mark running), NOT for errored
+      const saveCalls = (runRepository.save as jest.Mock).mock.calls;
+      expect(saveCalls).toHaveLength(1);
+      expect(saveCalls[0][0].status).toBe('running');
     });
 
     it('should increment attemptsMade on each processRun call', async () => {

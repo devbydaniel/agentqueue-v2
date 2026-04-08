@@ -19,6 +19,8 @@ export interface RunSessionParams {
   additionalHandlers?: CallbackHandler[];
   /** Optional key to track the session for later cancellation (e.g. Linear agentSessionId) */
   sessionKey?: string;
+  /** Run ID for dual-indexed tracker (enables abort-by-runId from dashboard) */
+  runId?: string;
   /** System prompt snippet to prepend before the base system prompt */
   prependSystemPrompt?: string;
   /** System prompt snippet to append after the base system prompt */
@@ -51,6 +53,14 @@ export class RunProcessorService {
    */
   async abortSession(sessionKey: string): Promise<boolean> {
     return this.activeSessionTracker.abort(sessionKey);
+  }
+
+  /**
+   * Abort a tracked session by its run ID.
+   * Returns true if a session was found and aborted.
+   */
+  async abortByRunId(runId: string): Promise<boolean> {
+    return this.activeSessionTracker.abort(runId);
   }
 
   /**
@@ -91,6 +101,7 @@ export class RunProcessorService {
         repo: run.repo,
         prompt: run.prompt,
         sessionKey: run.sessionKey ?? undefined,
+        runId,
         prependSystemPrompt: run.prependSystemPrompt ?? undefined,
         appendSystemPrompt: run.appendSystemPrompt ?? undefined,
         additionalHandlers,
@@ -112,18 +123,34 @@ export class RunProcessorService {
         'Failed to emit success response to Linear',
       );
     } catch (error) {
-      run.status = 'errored';
-      run.errorMessage =
-        error instanceof Error ? error.message : 'Unknown error';
-      run.completedAt = new Date();
-      try {
-        await this.runRepository.save(run);
-        await this.runCompletionNotifier.notify(runId);
-      } catch (saveErr) {
-        this.logger.error('Failed to save errored run status', {
-          runId,
-          error: saveErr as Error,
-        });
+      // Re-read run from DB to avoid overwriting a terminal state set by abort
+      const freshRun = await this.runRepository.findById(runId);
+      const terminalStatuses = new Set([
+        'succeeded',
+        'errored',
+        'aborted',
+        'timed_out',
+        'interrupted',
+      ]);
+      if (freshRun && terminalStatuses.has(freshRun.status)) {
+        this.logger.warn(
+          'Skipping errored write — run already in terminal state',
+          { runId, status: freshRun.status },
+        );
+      } else {
+        run.status = 'errored';
+        run.errorMessage =
+          error instanceof Error ? error.message : 'Unknown error';
+        run.completedAt = new Date();
+        try {
+          await this.runRepository.save(run);
+          await this.runCompletionNotifier.notify(runId);
+        } catch (saveErr) {
+          this.logger.error('Failed to save errored run status', {
+            runId,
+            error: saveErr as Error,
+          });
+        }
       }
 
       await this.emitLinearSafe(
@@ -193,16 +220,18 @@ export class RunProcessorService {
       params.additionalHandlers,
     );
 
-    if (params.sessionKey) {
-      this.activeSessionTracker.track(params.sessionKey, session);
+    if (params.sessionKey || params.runId) {
+      const trackKey = params.sessionKey ?? params.runId!;
+      this.activeSessionTracker.track(trackKey, session, params.runId);
     }
 
     try {
       await session.prompt(params.prompt);
       return { success: true };
     } finally {
-      if (params.sessionKey) {
-        this.activeSessionTracker.untrack(params.sessionKey);
+      if (params.sessionKey || params.runId) {
+        const trackKey = params.sessionKey ?? params.runId!;
+        this.activeSessionTracker.untrack(trackKey, params.runId);
       }
       detachCallbacks();
       dispose();

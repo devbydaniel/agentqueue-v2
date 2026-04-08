@@ -139,6 +139,105 @@ describe('RunRepository (integration)', () => {
     });
   });
 
+  describe('findMany', () => {
+    it('should return runs ordered by createdAt desc', async () => {
+      await repo.create({ ...baseCommand, prompt: 'first' });
+      const run2 = await repo.create({ ...baseCommand, prompt: 'second' });
+
+      const results = await repo.findMany();
+
+      expect(results).toHaveLength(2);
+      // Most recent first
+      expect(results[0].id).toBe(run2.id);
+    });
+
+    it('should filter by status', async () => {
+      await repo.create(baseCommand);
+      const run2 = await repo.create(baseCommand);
+      run2.status = 'running';
+      run2.startedAt = new Date();
+      run2.attemptsMade = 1;
+      await repo.save(run2);
+
+      const results = await repo.findMany({ status: 'running' });
+
+      expect(results).toHaveLength(1);
+      expect(results[0].id).toBe(run2.id);
+    });
+
+    it('should filter by source', async () => {
+      await repo.create({ ...baseCommand, source: 'manual' });
+      const cronRun = await repo.create({ ...baseCommand, source: 'cron' });
+
+      const results = await repo.findMany({ source: 'cron' });
+
+      expect(results).toHaveLength(1);
+      expect(results[0].id).toBe(cronRun.id);
+    });
+
+    it('should filter by repo', async () => {
+      await repo.create({ ...baseCommand, repo: 'other-repo' });
+      const myRun = await repo.create({ ...baseCommand, repo: 'my-repo' });
+
+      const results = await repo.findMany({ repo: 'my-repo' });
+
+      expect(results).toHaveLength(1);
+      expect(results[0].id).toBe(myRun.id);
+    });
+
+    it('should filter by trigger name', async () => {
+      await repo.create({ ...baseCommand, triggerName: 'other-trigger' });
+      const myRun = await repo.create({
+        ...baseCommand,
+        triggerName: 'my-trigger',
+      });
+
+      const results = await repo.findMany({ trigger: 'my-trigger' });
+
+      expect(results).toHaveLength(1);
+      expect(results[0].id).toBe(myRun.id);
+    });
+
+    it('should respect limit and offset', async () => {
+      await repo.create({ ...baseCommand, prompt: 'first' });
+      await repo.create({ ...baseCommand, prompt: 'second' });
+      await repo.create({ ...baseCommand, prompt: 'third' });
+
+      const results = await repo.findMany({ limit: 1, offset: 1 });
+
+      expect(results).toHaveLength(1);
+      // Offset 1 from desc order = second run
+      expect(results[0].prompt).toBe('second');
+    });
+
+    it('should combine multiple filters', async () => {
+      const run = await repo.create({
+        ...baseCommand,
+        source: 'cron',
+        triggerName: 'daily',
+      });
+      run.status = 'succeeded';
+      run.completedAt = new Date();
+      await repo.save(run);
+
+      await repo.create({ ...baseCommand, source: 'cron' }); // waiting, no match
+      await repo.create({ ...baseCommand, source: 'manual' }); // wrong source
+
+      const results = await repo.findMany({
+        source: 'cron',
+        status: 'succeeded',
+      });
+
+      expect(results).toHaveLength(1);
+      expect(results[0].id).toBe(run.id);
+    });
+
+    it('should return empty array when no runs match', async () => {
+      const results = await repo.findMany({ status: 'running' });
+      expect(results).toEqual([]);
+    });
+  });
+
   describe('markWaitingQueueJob', () => {
     it('should throw NotFoundException when run does not exist', async () => {
       await expect(

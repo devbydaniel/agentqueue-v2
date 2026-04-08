@@ -1,9 +1,19 @@
 import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { and, desc, eq, gte, type SQL } from 'drizzle-orm';
 import type { DrizzleDb } from '../database/database.tokens.js';
 import { DRIZZLE } from '../database/database.tokens.js';
-import { runs, runSourceEnum } from '../database/runs.schema.js';
+import { runs, runSourceEnum, runStatusEnum } from '../database/runs.schema.js';
 import type { Run, NewRun } from '../database/runs.schema.js';
+
+export interface ListRunsFilters {
+  status?: string;
+  source?: string;
+  repo?: string;
+  trigger?: string;
+  since?: string;
+  limit?: number;
+  offset?: number;
+}
 
 export interface CreateRunCommand {
   source: (typeof runSourceEnum.enumValues)[number];
@@ -67,6 +77,47 @@ export class RunRepository {
     if (result.length === 0) {
       throw new NotFoundException(`Run "${run.id}" not found`);
     }
+  }
+
+  async findMany(filters: ListRunsFilters = {}): Promise<Run[]> {
+    const conditions: SQL[] = [];
+
+    if (filters.status) {
+      conditions.push(
+        eq(
+          runs.status,
+          filters.status as (typeof runStatusEnum.enumValues)[number],
+        ),
+      );
+    }
+    if (filters.source) {
+      conditions.push(
+        eq(
+          runs.source,
+          filters.source as (typeof runSourceEnum.enumValues)[number],
+        ),
+      );
+    }
+    if (filters.repo) {
+      conditions.push(eq(runs.repo, filters.repo));
+    }
+    if (filters.trigger) {
+      conditions.push(eq(runs.triggerName, filters.trigger));
+    }
+    if (filters.since) {
+      conditions.push(gte(runs.createdAt, new Date(filters.since)));
+    }
+
+    const limit = Math.min(filters.limit ?? 50, 200);
+    const offset = filters.offset ?? 0;
+
+    return this.db
+      .select()
+      .from(runs)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(desc(runs.createdAt))
+      .limit(limit)
+      .offset(offset);
   }
 
   async markWaitingQueueJob(runId: string, queueJobId: string): Promise<void> {
