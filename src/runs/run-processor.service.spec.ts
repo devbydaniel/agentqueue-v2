@@ -7,6 +7,7 @@ import { TriggerConfigService } from '../config/trigger-config.service.js';
 import { PiSessionFactory } from './pi-session.factory.js';
 import { ActiveSessionTrackerService } from './active-session-tracker.service.js';
 import { RunRepository } from './run.repository.js';
+import { RunCompletionNotifier } from './run-completion.notifier.js';
 import { CALLBACK_HANDLERS } from '../callbacks/constants.js';
 import type { CallbackHandler } from '../callbacks/callback-handler.interface.js';
 import type { Run } from '../database/runs.schema.js';
@@ -17,6 +18,7 @@ describe('RunProcessorService', () => {
   let piSessionFactory: PiSessionFactory;
   let activeSessionTracker: ActiveSessionTrackerService;
   let runRepository: RunRepository;
+  let runCompletionNotifier: RunCompletionNotifier;
   let triggerConfigService: TriggerConfigService;
   let mockSession: jest.Mocked<Pick<AgentSession, 'prompt' | 'subscribe'>> & {
     dispose: jest.Mock;
@@ -80,6 +82,12 @@ describe('RunProcessorService', () => {
           },
         },
         {
+          provide: RunCompletionNotifier,
+          useValue: {
+            notify: jest.fn().mockResolvedValue(undefined),
+          },
+        },
+        {
           provide: TriggerConfigService,
           useValue: {
             getLinearTrigger: jest.fn(),
@@ -97,6 +105,7 @@ describe('RunProcessorService', () => {
     piSessionFactory = module.get(PiSessionFactory);
     activeSessionTracker = module.get(ActiveSessionTrackerService);
     runRepository = module.get(RunRepository);
+    runCompletionNotifier = module.get(RunCompletionNotifier);
     triggerConfigService = module.get(TriggerConfigService);
   });
 
@@ -481,6 +490,27 @@ describe('RunProcessorService', () => {
       await expect(service.processRun('run-123')).rejects.toThrow(
         'session crashed',
       );
+    });
+
+    it('should notify on successful completion', async () => {
+      const run = makeRun();
+      (runRepository.findById as jest.Mock).mockResolvedValue(run);
+
+      await service.processRun('run-123');
+
+      expect(runCompletionNotifier.notify).toHaveBeenCalledWith('run-123');
+    });
+
+    it('should notify on error completion', async () => {
+      const run = makeRun();
+      (runRepository.findById as jest.Mock).mockResolvedValue(run);
+      mockSession.prompt.mockRejectedValueOnce(new Error('session crashed'));
+
+      await expect(service.processRun('run-123')).rejects.toThrow(
+        'session crashed',
+      );
+
+      expect(runCompletionNotifier.notify).toHaveBeenCalledWith('run-123');
     });
 
     it('should increment attemptsMade on each processRun call', async () => {

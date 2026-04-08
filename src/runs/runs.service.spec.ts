@@ -53,31 +53,6 @@ describe('RunsService', () => {
     runRepository = module.get(RunRepository);
   });
 
-  describe('execute', () => {
-    it('should delegate to runProcessorService.runSession', async () => {
-      const command = { repo: 'core', prompt: 'do something' };
-
-      const result = await service.execute(command);
-
-      expect(runProcessorService.runSession).toHaveBeenCalledWith(command);
-      expect(result).toEqual({ success: true });
-    });
-
-    it('should forward all command fields to runSession', async () => {
-      const command = {
-        repo: 'core',
-        prompt: 'hello',
-        sessionKey: 'session-1',
-        prependSystemPrompt: 'prepend',
-        appendSystemPrompt: 'append',
-      };
-
-      await service.execute(command);
-
-      expect(runProcessorService.runSession).toHaveBeenCalledWith(command);
-    });
-  });
-
   describe('abortSession', () => {
     it('should delegate abort to the processor', async () => {
       const result = await service.abortSession('linear-session-1');

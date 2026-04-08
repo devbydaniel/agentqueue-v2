@@ -15,6 +15,7 @@ export interface FlowStepRecord {
   startedAt: Date;
   completedAt?: Date;
   success?: boolean;
+  runId?: string;
 }
 
 export interface FlowRun {

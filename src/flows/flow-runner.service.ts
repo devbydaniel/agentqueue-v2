@@ -13,6 +13,10 @@ import {
   type FlowStepRecord,
 } from './flow-run.repository.js';
 import { FlowAbortTrackerService } from './flow-abort-tracker.service.js';
+import { FlowRunCompletionListener } from './flow-run-completion.listener.js';
+
+/** Timeout for waiting on a single agent step completion (30 minutes) */
+const FLOW_STEP_TIMEOUT_MS = 30 * 60 * 1000;
 
 export interface RunFlowLoopOptions {
   run: FlowRun;
@@ -52,6 +56,7 @@ export class FlowRunnerService {
     private readonly flowRunRepository: FlowRunRepository,
     private readonly flowAbortTracker: FlowAbortTrackerService,
     private readonly runsService: RunsService,
+    private readonly flowRunCompletionListener: FlowRunCompletionListener,
   ) {}
 
   /**
@@ -163,14 +168,39 @@ export class FlowRunnerService {
     );
 
     try {
-      await this.runsService.execute({
+      const { runId } = await this.runsService.enqueue({
+        source: 'flow',
+        parentFlowRunId: ctx.run.flowRunId,
         repo: agentConfig.target,
         prompt: renderedPrompt,
       });
-      step.completedAt = new Date();
-      step.success = true;
+
+      // Register the waiter BEFORE saving to avoid a race where the run
+      // completes before waitFor() is called and the notification is dropped.
+      const completionPromise = this.flowRunCompletionListener.waitFor(
+        runId,
+        FLOW_STEP_TIMEOUT_MS,
+      );
+
+      step.runId = runId;
       await this.flowRunRepository.save(ctx.run);
-      return true;
+
+      const result = await completionPromise;
+
+      step.completedAt = new Date();
+
+      if (result.status === 'succeeded') {
+        step.success = true;
+        await this.flowRunRepository.save(ctx.run);
+        return true;
+      }
+
+      step.success = false;
+      const suffix = result.errorMessage ? ': ' + result.errorMessage : '';
+      const msg = `Agent "${agentName}" run ${runId} ended with status "${result.status}"${suffix}`;
+      this.logger.error(`Flow run ${ctx.run.flowRunId}: ${msg}`);
+      await this.completeRun(ctx, 'errored', msg);
+      return false;
     } catch (error) {
       step.completedAt = new Date();
       step.success = false;

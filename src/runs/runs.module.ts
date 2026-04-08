@@ -8,6 +8,7 @@ import { PiSessionFactory } from './pi-session.factory.js';
 import { LinearSessionRepository } from './linear-session.repository.js';
 import { ActiveSessionTrackerService } from './active-session-tracker.service.js';
 import { RunRepository } from './run.repository.js';
+import { RunCompletionNotifier } from './run-completion.notifier.js';
 
 @Module({
   imports: [CallbacksModule],
@@ -20,7 +21,8 @@ import { RunRepository } from './run.repository.js';
     LinearSessionRepository,
     ActiveSessionTrackerService,
     RunRepository,
+    RunCompletionNotifier,
   ],
-  exports: [RunsService],
+  exports: [RunsService, RunRepository],
 })
 export class RunsModule {}

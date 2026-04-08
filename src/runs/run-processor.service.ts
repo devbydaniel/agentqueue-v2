@@ -8,6 +8,7 @@ import { TriggerConfigService } from '../config/trigger-config.service.js';
 import { ActiveSessionTrackerService } from './active-session-tracker.service.js';
 import { PiSessionFactory } from './pi-session.factory.js';
 import { RunRepository } from './run.repository.js';
+import { RunCompletionNotifier } from './run-completion.notifier.js';
 import type { AgentSession } from '@mariozechner/pi-coding-agent';
 
 export interface RunSessionParams {
@@ -35,6 +36,7 @@ export class RunProcessorService {
     private readonly piSessionFactory: PiSessionFactory,
     private readonly activeSessionTracker: ActiveSessionTrackerService,
     private readonly runRepository: RunRepository,
+    private readonly runCompletionNotifier: RunCompletionNotifier,
     private readonly triggerConfigService: TriggerConfigService,
     @Inject(CALLBACK_HANDLERS)
     private readonly globalHandlers: CallbackHandler[],
@@ -89,6 +91,7 @@ export class RunProcessorService {
       run.status = 'succeeded';
       run.completedAt = new Date();
       await this.runRepository.save(run);
+      await this.runCompletionNotifier.notify(runId);
 
       // Emit Linear response on success
       await this.emitLinearSafe(
@@ -107,6 +110,7 @@ export class RunProcessorService {
       run.completedAt = new Date();
       try {
         await this.runRepository.save(run);
+        await this.runCompletionNotifier.notify(runId);
       } catch (saveErr) {
         this.logger.error('Failed to save errored run status', {
           runId,
