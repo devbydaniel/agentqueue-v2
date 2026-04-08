@@ -6,8 +6,12 @@ const config: Config = {
   testRegex: '.*\\.integration\\.spec\\.ts$',
   transform: {
     '^.+\\.ts$': 'ts-jest',
+    '^.+\\.js$': 'ts-jest',
   },
   testEnvironment: 'node',
+  transformIgnorePatterns: [
+    'node_modules/(?!(pg-boss)/)',
+  ],
   moduleNameMapper: {
     '^(\\.{1,2}/.*)\\.js$': '$1',
   },

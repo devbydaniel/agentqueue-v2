@@ -1,10 +1,11 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { CALLBACK_HANDLERS } from '../callbacks/constants.js';
 import type { CallbackHandler } from '../callbacks/callback-handler.interface.js';
-import { AgentfilesConfigService } from '../config/agentfiles-config.service.js';
-import { ActiveSessionTrackerService } from './active-session-tracker.service.js';
-import { PiSessionFactory } from './pi-session.factory.js';
-import type { AgentSession } from '@mariozechner/pi-coding-agent';
+import { BOSS } from '../queue/queue.tokens.js';
+import type { Boss } from '../queue/queue.tokens.js';
+import { RunProcessorService } from './run-processor.service.js';
+import { RunRepository } from './run.repository.js';
+import type { CreateRunCommand } from './run.repository.js';
+import { RUNS_QUEUE_NAME } from './runs.constants.js';
 
 export interface ExecuteRunCommand {
   repo: string;
@@ -22,16 +23,30 @@ export interface ExecuteRunResult {
   success: boolean;
 }
 
+export interface EnqueueRunCommand {
+  source: 'manual' | 'cron' | 'linear' | 'github' | 'flow';
+  triggerName?: string;
+  parentFlowRunId?: string;
+  repo: string;
+  prompt: string;
+  sessionKey?: string;
+  prependSystemPrompt?: string;
+  appendSystemPrompt?: string;
+}
+
+export interface EnqueueRunResult {
+  runId: string;
+  status: 'waiting';
+}
+
 @Injectable()
 export class RunsService {
   private readonly logger = new Logger(RunsService.name);
 
   constructor(
-    private readonly agentfilesConfigService: AgentfilesConfigService,
-    private readonly piSessionFactory: PiSessionFactory,
-    private readonly activeSessionTracker: ActiveSessionTrackerService,
-    @Inject(CALLBACK_HANDLERS)
-    private readonly globalHandlers: CallbackHandler[],
+    private readonly runProcessorService: RunProcessorService,
+    private readonly runRepository: RunRepository,
+    @Inject(BOSS) private readonly boss: Boss,
   ) {}
 
   /**
@@ -39,73 +54,54 @@ export class RunsService {
    * Returns true if the session was found and aborted.
    */
   async abortSession(sessionKey: string): Promise<boolean> {
-    return this.activeSessionTracker.abort(sessionKey);
+    return this.runProcessorService.abortSession(sessionKey);
   }
 
   async execute(command: ExecuteRunCommand): Promise<ExecuteRunResult> {
     this.logger.log('Executing run', { repo: command.repo });
+    return this.runProcessorService.runSession(command);
+  }
 
-    const cwd = this.agentfilesConfigService.resolveRepo(command.repo);
+  async enqueue(command: EnqueueRunCommand): Promise<EnqueueRunResult> {
+    this.logger.log('Enqueueing run', {
+      repo: command.repo,
+      source: command.source,
+    });
 
-    const { session, dispose } = await this.piSessionFactory.create({
-      cwd,
+    const createCommand: CreateRunCommand = {
+      source: command.source,
+      triggerName: command.triggerName,
+      parentFlowRunId: command.parentFlowRunId,
+      repo: command.repo,
+      prompt: command.prompt,
       sessionKey: command.sessionKey,
       prependSystemPrompt: command.prependSystemPrompt,
       appendSystemPrompt: command.appendSystemPrompt,
-    });
+    };
 
-    const detachCallbacks = this.attachHandlers(
-      session,
-      command.additionalHandlers,
-    );
+    const run = await this.runRepository.create(createCommand);
 
-    if (command.sessionKey) {
-      this.activeSessionTracker.track(command.sessionKey, session);
-    }
-
+    let jobId: string | null;
     try {
-      await session.prompt(command.prompt);
-      return { success: true };
-    } finally {
-      if (command.sessionKey) {
-        this.activeSessionTracker.untrack(command.sessionKey);
-      }
-      detachCallbacks();
-      dispose();
+      jobId = await this.boss.send(RUNS_QUEUE_NAME, { runId: run.id });
+    } catch (error) {
+      run.status = 'errored';
+      run.errorMessage =
+        error instanceof Error ? error.message : 'Unknown error';
+      run.completedAt = new Date();
+      await this.runRepository.save(run);
+      throw error;
     }
-  }
 
-  private attachHandlers(
-    session: AgentSession,
-    additionalHandlers?: CallbackHandler[],
-  ): () => void {
-    const handlers = [...this.globalHandlers, ...(additionalHandlers ?? [])];
+    if (jobId) {
+      await this.runRepository.markWaitingQueueJob(run.id, jobId);
+    }
 
-    const unsubscribe = session.subscribe((event) => {
-      for (const handler of handlers) {
-        try {
-          const result = handler.onEvent(event);
-          if (result instanceof Promise) {
-            result.catch((err) => {
-              this.logger.error(
-                `Async callback handler "${handler.name}" rejected`,
-                { error: err as Error, eventType: event.type },
-              );
-            });
-          }
-        } catch (error) {
-          this.logger.error(`Callback handler "${handler.name}" threw`, {
-            error: error as Error,
-            eventType: event.type,
-          });
-        }
-      }
+    this.logger.log('Run enqueued', {
+      runId: run.id,
+      queueJobId: jobId,
     });
 
-    this.logger.debug('Attached callback handlers to session', {
-      count: handlers.length,
-    });
-
-    return unsubscribe;
+    return { runId: run.id, status: 'waiting' };
   }
 }
