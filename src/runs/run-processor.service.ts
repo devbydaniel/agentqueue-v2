@@ -3,12 +3,14 @@ import { LinearClient } from '@linear/sdk';
 import { CALLBACK_HANDLERS } from '../callbacks/constants.js';
 import type { CallbackHandler } from '../callbacks/callback-handler.interface.js';
 import { LinearCallbackHandler } from '../callbacks/handlers/linear.callback-handler.js';
+import { AppConfigService } from '../config/app-config.service.js';
 import { AgentfilesConfigService } from '../config/agentfiles-config.service.js';
 import { TriggerConfigService } from '../config/trigger-config.service.js';
 import { ActiveSessionTrackerService } from './active-session-tracker.service.js';
 import { PiSessionFactory } from './pi-session.factory.js';
 import { RunRepository } from './run.repository.js';
 import { RunCompletionNotifier } from './run-completion.notifier.js';
+import type { Run } from '../database/runs.schema.js';
 import { RunEventRepository } from './run-event.repository.js';
 import { RunEventCallbackHandler } from '../callbacks/handlers/run-event.callback-handler.js';
 import type { AgentSession } from '@mariozechner/pi-coding-agent';
@@ -25,6 +27,8 @@ export interface RunSessionParams {
   prependSystemPrompt?: string;
   /** System prompt snippet to append after the base system prompt */
   appendSystemPrompt?: string;
+  /** AbortSignal for per-run timeout */
+  abortSignal?: AbortSignal;
 }
 
 export interface RunSessionResult {
@@ -36,6 +40,7 @@ export class RunProcessorService {
   private readonly logger = new Logger(RunProcessorService.name);
 
   constructor(
+    private readonly appConfigService: AppConfigService,
     private readonly agentfilesConfigService: AgentfilesConfigService,
     private readonly piSessionFactory: PiSessionFactory,
     private readonly activeSessionTracker: ActiveSessionTrackerService,
@@ -96,6 +101,11 @@ export class RunProcessorService {
       new RunEventCallbackHandler(runId, this.runEventRepository),
     );
 
+    // Per-run timeout: use the run's configured timeout, fall back to global default
+    const timeoutMs = run.timeoutMs ?? this.appConfigService.runTimeoutMs;
+    const abortController = new AbortController();
+    const timer = setTimeout(() => abortController.abort(), timeoutMs);
+
     try {
       await this.runSession({
         repo: run.repo,
@@ -105,6 +115,7 @@ export class RunProcessorService {
         prependSystemPrompt: run.prependSystemPrompt ?? undefined,
         appendSystemPrompt: run.appendSystemPrompt ?? undefined,
         additionalHandlers,
+        abortSignal: abortController.signal,
       });
 
       run.status = 'succeeded';
@@ -123,44 +134,68 @@ export class RunProcessorService {
         'Failed to emit success response to Linear',
       );
     } catch (error) {
-      // Re-read run from DB to avoid overwriting a terminal state set by abort
-      const freshRun = await this.runRepository.findById(runId);
-      const terminalStatuses = new Set([
-        'succeeded',
-        'errored',
-        'aborted',
-        'timed_out',
-        'interrupted',
-      ]);
-      if (freshRun && terminalStatuses.has(freshRun.status)) {
-        this.logger.warn(
-          'Skipping errored write — run already in terminal state',
-          { runId, status: freshRun.status },
-        );
+      await this.handleRunError(
+        run,
+        runId,
+        error,
+        abortController.signal.aborted,
+        timeoutMs,
+        linearHandler,
+      );
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private async handleRunError(
+    run: Run,
+    runId: string,
+    error: unknown,
+    isTimeout: boolean,
+    timeoutMs: number,
+    linearHandler: LinearCallbackHandler | undefined,
+  ): Promise<void> {
+    // Re-read run from DB to avoid overwriting a terminal state set by abort
+    const freshRun = await this.runRepository.findById(runId);
+    const terminalStatuses = new Set([
+      'succeeded',
+      'errored',
+      'aborted',
+      'timed_out',
+      'interrupted',
+    ]);
+    if (freshRun && terminalStatuses.has(freshRun.status)) {
+      this.logger.warn(
+        'Skipping errored write — run already in terminal state',
+        { runId, status: freshRun.status },
+      );
+    } else {
+      if (isTimeout) {
+        run.status = 'timed_out';
+        run.errorMessage = `Run timed out after ${timeoutMs}ms`;
       } else {
         run.status = 'errored';
         run.errorMessage =
           error instanceof Error ? error.message : 'Unknown error';
-        run.completedAt = new Date();
-        try {
-          await this.runRepository.save(run);
-          await this.runCompletionNotifier.notify(runId);
-        } catch (saveErr) {
-          this.logger.error('Failed to save errored run status', {
-            runId,
-            error: saveErr as Error,
-          });
-        }
       }
-
-      await this.emitLinearSafe(
-        linearHandler,
-        () => linearHandler!.emitError(run.errorMessage!),
-        'Failed to emit error to Linear',
-      );
-
-      throw error;
+      run.completedAt = new Date();
+      try {
+        await this.runRepository.save(run);
+        await this.runCompletionNotifier.notify(runId);
+      } catch (saveErr) {
+        this.logger.error('Failed to save errored run status', {
+          runId,
+          error: saveErr as Error,
+        });
+      }
     }
+
+    await this.emitLinearSafe(
+      linearHandler,
+      () => linearHandler!.emitError(run.errorMessage!),
+      'Failed to emit error to Linear',
+    );
   }
 
   private buildLinearHandlers(run: {
@@ -225,10 +260,31 @@ export class RunProcessorService {
       this.activeSessionTracker.track(trackKey, session, params.runId);
     }
 
+    // Wire abort signal to session abort
+    let onAbort: (() => void) | undefined;
+    if (params.abortSignal) {
+      onAbort = () => {
+        this.logger.log('Abort signal received, aborting session', {
+          runId: params.runId,
+        });
+        void session.abort();
+      };
+      params.abortSignal.addEventListener('abort', onAbort, { once: true });
+
+      // If the signal was already aborted (e.g. timeout fired during session creation),
+      // the listener above won't fire — trigger abort manually.
+      if (params.abortSignal.aborted) {
+        void session.abort();
+      }
+    }
+
     try {
       await session.prompt(params.prompt);
       return { success: true };
     } finally {
+      if (onAbort && params.abortSignal) {
+        params.abortSignal.removeEventListener('abort', onAbort);
+      }
       if (params.sessionKey || params.runId) {
         const trackKey = params.sessionKey ?? params.runId!;
         this.activeSessionTracker.untrack(trackKey, params.runId);

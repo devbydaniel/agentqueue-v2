@@ -7,6 +7,7 @@ export interface CronTrigger {
   before?: string;
   prepend_system_prompt?: string;
   append_system_prompt?: string;
+  timeout_ms?: number;
 }
 
 export interface LinearTrigger {
@@ -17,6 +18,7 @@ export interface LinearTrigger {
   api_key: string;
   prepend_system_prompt?: string;
   append_system_prompt?: string;
+  timeout_ms?: number;
 }
 
 export interface WebhookFilter {
@@ -37,6 +39,7 @@ export interface GithubTrigger {
   before?: string;
   prepend_system_prompt?: string;
   append_system_prompt?: string;
+  timeout_ms?: number;
 }
 
 export interface TriggersFile {

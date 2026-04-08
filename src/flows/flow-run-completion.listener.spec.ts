@@ -20,6 +20,7 @@ function makeRun(overrides: Partial<Run> = {}): Run {
     sessionKey: null,
     prependSystemPrompt: null,
     appendSystemPrompt: null,
+    timeoutMs: null,
     queueJobId: 'job-1',
     createdAt: new Date(),
     updatedAt: new Date(),

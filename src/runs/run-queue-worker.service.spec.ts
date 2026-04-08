@@ -4,11 +4,13 @@ import { RUNS_QUEUE_NAME } from './runs.constants.js';
 import { BOSS } from '../queue/queue.tokens.js';
 import { AppConfigService } from '../config/app-config.service.js';
 import { RunProcessorService } from './run-processor.service.js';
+import { ActiveSessionTrackerService } from './active-session-tracker.service.js';
 
 describe('RunQueueWorkerService', () => {
   let service: RunQueueWorkerService;
   let mockBoss: { work: jest.Mock };
   let mockProcessorService: { processRun: jest.Mock };
+  let mockSessionTracker: { abortAll: jest.Mock };
   let registeredHandler: (
     jobs: Array<{ id: string; data: { runId: string } }>,
   ) => Promise<void>;
@@ -24,6 +26,10 @@ describe('RunQueueWorkerService', () => {
       processRun: jest.fn().mockResolvedValue(undefined),
     };
 
+    mockSessionTracker = {
+      abortAll: jest.fn().mockResolvedValue(0),
+    };
+
     const module = await Test.createTestingModule({
       providers: [
         RunQueueWorkerService,
@@ -35,6 +41,10 @@ describe('RunQueueWorkerService', () => {
         {
           provide: RunProcessorService,
           useValue: mockProcessorService,
+        },
+        {
+          provide: ActiveSessionTrackerService,
+          useValue: mockSessionTracker,
         },
       ],
     }).compile();
@@ -94,5 +104,13 @@ describe('RunQueueWorkerService', () => {
       2,
       'run-ok',
     );
+  });
+
+  describe('onApplicationShutdown', () => {
+    it('should abort all active sessions on shutdown', async () => {
+      await service.onApplicationShutdown();
+
+      expect(mockSessionTracker.abortAll).toHaveBeenCalled();
+    });
   });
 });

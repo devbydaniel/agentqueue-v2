@@ -112,6 +112,55 @@ describe('AppConfigService', () => {
     });
   });
 
+  describe('runTimeoutMs', () => {
+    it('should default to 30 minutes (1800000ms)', () => {
+      delete process.env.RUN_TIMEOUT_MS;
+      expect(service.runTimeoutMs).toBe(1800000);
+    });
+
+    it('should read from RUN_TIMEOUT_MS env var', () => {
+      process.env.RUN_TIMEOUT_MS = '60000';
+      expect(service.runTimeoutMs).toBe(60000);
+      delete process.env.RUN_TIMEOUT_MS;
+    });
+
+    it('should fall back to default for empty string', () => {
+      process.env.RUN_TIMEOUT_MS = '';
+      expect(service.runTimeoutMs).toBe(1800000);
+      delete process.env.RUN_TIMEOUT_MS;
+    });
+
+    it('should fall back to default and log warning for non-numeric value', () => {
+      const warnSpy = jest.spyOn(service['logger'], 'warn');
+      process.env.RUN_TIMEOUT_MS = 'abc';
+      expect(service.runTimeoutMs).toBe(1800000);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Invalid RUN_TIMEOUT_MS'),
+      );
+      delete process.env.RUN_TIMEOUT_MS;
+    });
+
+    it('should fall back to default and log warning for negative value', () => {
+      const warnSpy = jest.spyOn(service['logger'], 'warn');
+      process.env.RUN_TIMEOUT_MS = '-100';
+      expect(service.runTimeoutMs).toBe(1800000);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Invalid RUN_TIMEOUT_MS'),
+      );
+      delete process.env.RUN_TIMEOUT_MS;
+    });
+
+    it('should fall back to default and log warning for zero', () => {
+      const warnSpy = jest.spyOn(service['logger'], 'warn');
+      process.env.RUN_TIMEOUT_MS = '0';
+      expect(service.runTimeoutMs).toBe(1800000);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Invalid RUN_TIMEOUT_MS'),
+      );
+      delete process.env.RUN_TIMEOUT_MS;
+    });
+  });
+
   describe('langfuseEnabled', () => {
     it('should return false when not set', () => {
       delete process.env.LANGFUSE_SECRET_KEY;

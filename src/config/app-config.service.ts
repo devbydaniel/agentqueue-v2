@@ -61,6 +61,23 @@ export class AppConfigService {
     return Number(process.env.QUEUE_RETRY_LIMIT ?? 3);
   }
 
+  // ── Runs ─────────────────────────────────────────────────────────
+
+  /** Default per-run timeout in milliseconds (default: 30 minutes) */
+  get runTimeoutMs(): number {
+    const defaultMs = 30 * 60 * 1000;
+    const raw = process.env.RUN_TIMEOUT_MS;
+    if (raw === undefined || raw === '') return defaultMs;
+    const parsed = Number(raw);
+    if (isNaN(parsed) || parsed <= 0) {
+      this.logger.warn(
+        `Invalid RUN_TIMEOUT_MS value "${raw}", falling back to default (${defaultMs}ms)`,
+      );
+      return defaultMs;
+    }
+    return parsed;
+  }
+
   // ── Langfuse ─────────────────────────────────────────────────────
 
   get langfuseEnabled(): boolean {

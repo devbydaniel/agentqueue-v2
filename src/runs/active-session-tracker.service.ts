@@ -53,4 +53,25 @@ export class ActiveSessionTrackerService {
     await session.abort();
     return true;
   }
+
+  /**
+   * Abort all currently tracked sessions. Used during graceful shutdown.
+   * Deduplicates sessions that are tracked under multiple keys.
+   */
+  async abortAll(): Promise<number> {
+    const uniqueSessions = new Set(this.activeSessions.values());
+    this.logger.log(`Aborting all ${uniqueSessions.size} active session(s)`);
+    const abortPromises = [...uniqueSessions].map(async (session) => {
+      try {
+        await session.abort();
+      } catch (error) {
+        this.logger.error('Failed to abort session during shutdown', {
+          error: error as Error,
+        });
+      }
+    });
+    await Promise.all(abortPromises);
+    this.activeSessions.clear();
+    return uniqueSessions.size;
+  }
 }

@@ -10,6 +10,7 @@ import { ActiveSessionTrackerService } from './active-session-tracker.service.js
 import { RunRepository } from './run.repository.js';
 import { RunCompletionNotifier } from './run-completion.notifier.js';
 import { RunEventRepository } from './run-event.repository.js';
+import { RunStartupRecoveryService } from './run-startup-recovery.service.js';
 
 @Module({
   imports: [CallbacksModule],
@@ -24,6 +25,7 @@ import { RunEventRepository } from './run-event.repository.js';
     RunRepository,
     RunCompletionNotifier,
     RunEventRepository,
+    RunStartupRecoveryService,
   ],
   exports: [RunsService, RunRepository],
 })

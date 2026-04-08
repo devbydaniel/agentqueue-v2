@@ -25,6 +25,7 @@ export interface EnqueueRunCommand {
   sessionKey?: string;
   prependSystemPrompt?: string;
   appendSystemPrompt?: string;
+  timeoutMs?: number;
 }
 
 export interface EnqueueRunResult {
@@ -74,6 +75,7 @@ export class RunsService {
       sessionKey: command.sessionKey,
       prependSystemPrompt: command.prependSystemPrompt,
       appendSystemPrompt: command.appendSystemPrompt,
+      timeoutMs: command.timeoutMs,
     };
 
     const run = await this.runRepository.create(createCommand);

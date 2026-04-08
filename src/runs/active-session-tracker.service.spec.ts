@@ -82,4 +82,49 @@ describe('ActiveSessionTrackerService', () => {
       expect(result).toBe(true);
     });
   });
+
+  describe('abortAll', () => {
+    it('should abort all tracked sessions and clear the map', async () => {
+      const mockSession1 = { abort: jest.fn().mockResolvedValue(undefined) };
+      const mockSession2 = { abort: jest.fn().mockResolvedValue(undefined) };
+      tracker.track('key-1', mockSession1 as never);
+      tracker.track('key-2', mockSession2 as never);
+
+      const count = await tracker.abortAll();
+
+      expect(count).toBe(2);
+      expect(mockSession1.abort).toHaveBeenCalledTimes(1);
+      expect(mockSession2.abort).toHaveBeenCalledTimes(1);
+
+      // After abortAll, no sessions should remain
+      const result = await tracker.abort('key-1');
+      expect(result).toBe(false);
+    });
+
+    it('should deduplicate sessions tracked under multiple keys', async () => {
+      const mockSession = { abort: jest.fn().mockResolvedValue(undefined) };
+      tracker.track('session-1', mockSession as never, 'run-abc');
+
+      const count = await tracker.abortAll();
+
+      expect(count).toBe(1); // Only one unique session
+      expect(mockSession.abort).toHaveBeenCalledTimes(1);
+    });
+
+    it('should return 0 when no sessions are tracked', async () => {
+      const count = await tracker.abortAll();
+      expect(count).toBe(0);
+    });
+
+    it('should not throw when a session abort fails', async () => {
+      const mockSession = {
+        abort: jest.fn().mockRejectedValue(new Error('abort failed')),
+      };
+      tracker.track('key-1', mockSession as never);
+
+      // Should not throw
+      const count = await tracker.abortAll();
+      expect(count).toBe(1);
+    });
+  });
 });

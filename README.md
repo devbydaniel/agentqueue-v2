@@ -93,6 +93,7 @@ In production, set the `DATABASE_URL` environment variable.
 | `DATABASE_URL` | No* | Postgres connection string (default: local dev; **required** in production) |
 | `QUEUE_CONCURRENCY` | No | Max concurrent queue jobs per worker (default: `5`) |
 | `QUEUE_RETRY_LIMIT` | No | Max retry attempts for failed queue jobs (default: `3`) |
+| `RUN_TIMEOUT_MS` | No | Default per-run timeout in milliseconds (default: `1800000` / 30 min) |
 | `LINEAR_SIGNING_SECRET` | No | Referenced via `${VAR}` in trigger config |
 | `LINEAR_API_KEY` | No | Referenced via `${VAR}` in trigger config |
 
@@ -328,6 +329,12 @@ All GitHub triggers share a single endpoint: `POST /webhooks/github`. When a web
 | `pattern` | Regex match | `field: pull_request.head.ref`, `pattern: "^feat/"` |
 
 **Template interpolation** uses `{{dotted.path}}` syntax to access any nested field in the GitHub webhook payload (e.g., `{{pull_request.head.ref}}`, `{{review.user.login}}`).
+
+## Robustness
+
+- **Per-run timeout:** Each run has a configurable timeout (default: 30 minutes via `RUN_TIMEOUT_MS`). Per-trigger overrides are supported via `timeout_ms` in `triggers.yaml`. When a run times out, it is marked `timed_out`.
+- **Startup recovery:** On boot, any `runs` rows left in `running` status (from a previous crash) are automatically marked `interrupted`. They appear in the dashboard for manual review.
+- **Graceful shutdown:** On `SIGTERM`, the queue worker aborts all in-flight sessions before the process exits.
 
 ## Callback Handlers
 

@@ -1,4 +1,10 @@
-import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import {
+  IsInt,
+  IsNotEmpty,
+  IsOptional,
+  IsPositive,
+  IsString,
+} from 'class-validator';
 
 export class EnqueueRunDto {
   @IsString()
@@ -20,4 +26,9 @@ export class EnqueueRunDto {
   @IsString()
   @IsOptional()
   appendSystemPrompt?: string;
+
+  @IsInt()
+  @IsPositive()
+  @IsOptional()
+  timeoutMs?: number;
 }

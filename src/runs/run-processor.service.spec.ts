@@ -2,6 +2,7 @@ import { Test } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
 import type { AgentSession } from '@mariozechner/pi-coding-agent';
 import { RunProcessorService } from './run-processor.service.js';
+import { AppConfigService } from '../config/app-config.service.js';
 import { AgentfilesConfigService } from '../config/agentfiles-config.service.js';
 import { TriggerConfigService } from '../config/trigger-config.service.js';
 import { PiSessionFactory } from './pi-session.factory.js';
@@ -13,6 +14,13 @@ import { CALLBACK_HANDLERS } from '../callbacks/constants.js';
 import type { CallbackHandler } from '../callbacks/callback-handler.interface.js';
 import type { Run } from '../database/runs.schema.js';
 
+/** Prompt mock that delays 50ms then rejects — used to test timeout behavior */
+function delayedReject(): Promise<void> {
+  return new Promise((_, reject) =>
+    setTimeout(reject, 50, new Error('aborted')),
+  );
+}
+
 describe('RunProcessorService', () => {
   let service: RunProcessorService;
   let configService: AgentfilesConfigService;
@@ -22,7 +30,9 @@ describe('RunProcessorService', () => {
   let runCompletionNotifier: RunCompletionNotifier;
   let runEventRepository: RunEventRepository;
   let triggerConfigService: TriggerConfigService;
-  let mockSession: jest.Mocked<Pick<AgentSession, 'prompt' | 'subscribe'>> & {
+  let mockSession: jest.Mocked<
+    Pick<AgentSession, 'prompt' | 'subscribe' | 'abort'>
+  > & {
     dispose: jest.Mock;
   };
   let mockDispose: jest.Mock;
@@ -46,6 +56,7 @@ describe('RunProcessorService', () => {
           subscribeFn = fn;
           return unsubscribe;
         }),
+      abort: jest.fn().mockResolvedValue(undefined),
       dispose: jest.fn(),
     };
     mockDispose = jest.fn();
@@ -53,6 +64,12 @@ describe('RunProcessorService', () => {
     const module = await Test.createTestingModule({
       providers: [
         RunProcessorService,
+        {
+          provide: AppConfigService,
+          useValue: {
+            runTimeoutMs: 1800000,
+          },
+        },
         {
           provide: AgentfilesConfigService,
           useValue: {
@@ -373,6 +390,7 @@ describe('RunProcessorService', () => {
         sessionKey: null,
         prependSystemPrompt: null,
         appendSystemPrompt: null,
+        timeoutMs: null,
         queueJobId: null,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -610,6 +628,37 @@ describe('RunProcessorService', () => {
       const saveCalls = (runRepository.save as jest.Mock).mock.calls;
       expect(saveCalls).toHaveLength(1);
       expect(saveCalls[0][0].status).toBe('running');
+    });
+
+    it('should use run-level timeoutMs when set', async () => {
+      const run = makeRun({ timeoutMs: 5000 });
+      (runRepository.findById as jest.Mock).mockResolvedValue(run);
+
+      await service.processRun('run-123');
+
+      // Run succeeds normally — just verify it doesn't crash with a custom timeout
+      const lastSave = (runRepository.save as jest.Mock).mock.calls.at(-1)?.[0];
+      expect(lastSave.status).toBe('succeeded');
+    });
+
+    it('should mark run as timed_out when abort signal fires', async () => {
+      const run = makeRun({ timeoutMs: 1 }); // 1ms timeout — will fire immediately
+      (runRepository.findById as jest.Mock).mockResolvedValue(run);
+
+      // Make prompt hang longer than the 1ms timeout, then reject
+      mockSession.prompt.mockImplementation(delayedReject);
+
+      await expect(service.processRun('run-123')).rejects.toThrow();
+
+      const savedStates = (runRepository.save as jest.Mock).mock.calls.map(
+        (call: [Run]) => ({
+          status: call[0].status,
+          errorMessage: call[0].errorMessage,
+        }),
+      );
+      const lastState = savedStates.at(-1);
+      expect(lastState?.status).toBe('timed_out');
+      expect(lastState?.errorMessage).toContain('timed out');
     });
 
     it('should increment attemptsMade on each processRun call', async () => {

@@ -155,6 +155,7 @@ export class GithubWebhooksService {
       prompt,
       prependSystemPrompt,
       appendSystemPrompt,
+      timeoutMs: trigger.timeout_ms,
     });
 
     this.logger.log(`Run enqueued for GitHub trigger "${trigger.name}"`, {

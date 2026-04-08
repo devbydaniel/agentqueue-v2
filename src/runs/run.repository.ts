@@ -24,6 +24,7 @@ export interface CreateRunCommand {
   sessionKey?: string;
   prependSystemPrompt?: string;
   appendSystemPrompt?: string;
+  timeoutMs?: number;
 }
 
 @Injectable()
@@ -43,6 +44,7 @@ export class RunRepository {
       sessionKey: command.sessionKey,
       prependSystemPrompt: command.prependSystemPrompt,
       appendSystemPrompt: command.appendSystemPrompt,
+      timeoutMs: command.timeoutMs,
     };
 
     const [row] = await this.db.insert(runs).values(newRun).returning();
@@ -68,6 +70,7 @@ export class RunRepository {
         startedAt: run.startedAt,
         completedAt: run.completedAt,
         errorMessage: run.errorMessage,
+        timeoutMs: run.timeoutMs,
         queueJobId: run.queueJobId,
         updatedAt: new Date(),
       })
@@ -118,6 +121,19 @@ export class RunRepository {
       .orderBy(desc(runs.createdAt))
       .limit(limit)
       .offset(offset);
+  }
+
+  async markRunningAsInterrupted(): Promise<{ id: string }[]> {
+    return this.db
+      .update(runs)
+      .set({
+        status: 'interrupted',
+        errorMessage: 'Process restarted while run was in progress',
+        completedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(runs.status, 'running'))
+      .returning({ id: runs.id });
   }
 
   async markWaitingQueueJob(runId: string, queueJobId: string): Promise<void> {

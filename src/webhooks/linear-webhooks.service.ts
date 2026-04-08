@@ -160,6 +160,7 @@ export class LinearWebhooksService {
         sessionKey: payload.agentSessionId,
         prependSystemPrompt,
         appendSystemPrompt,
+        timeoutMs: linearConfig.timeout_ms,
       })
       .catch((error: unknown) => {
         this.logger.error('Failed to enqueue Linear agent run', {

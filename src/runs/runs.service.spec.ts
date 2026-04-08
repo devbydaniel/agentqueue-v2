@@ -31,6 +31,7 @@ describe('RunsService', () => {
       sessionKey: null,
       prependSystemPrompt: null,
       appendSystemPrompt: null,
+      timeoutMs: null,
       queueJobId: null,
       createdAt: new Date(),
       updatedAt: new Date(),

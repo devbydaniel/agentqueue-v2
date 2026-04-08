@@ -42,6 +42,7 @@ export const runs = pgTable('runs', {
   sessionKey: varchar('session_key', { length: 255 }),
   prependSystemPrompt: text('prepend_system_prompt'),
   appendSystemPrompt: text('append_system_prompt'),
+  timeoutMs: integer('timeout_ms'),
   queueJobId: varchar('queue_job_id', { length: 255 }),
   createdAt: timestamp('created_at', { withTimezone: true })
     .notNull()

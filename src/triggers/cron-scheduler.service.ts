@@ -103,6 +103,7 @@ export class CronSchedulerService implements OnModuleInit, OnModuleDestroy {
       prompt,
       prependSystemPrompt,
       appendSystemPrompt,
+      timeoutMs: trigger.timeout_ms,
     });
     this.logger.log(`Cron trigger "${trigger.name}" enqueued`, { runId });
   }
