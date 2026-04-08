@@ -61,6 +61,57 @@ describe('AppConfigService', () => {
     });
   });
 
+  describe('databaseUrl', () => {
+    it('should default to local postgres in non-production', () => {
+      delete process.env.DATABASE_URL;
+      delete process.env.NODE_ENV;
+      expect(service.databaseUrl).toBe(
+        'postgres://agentqueue:agentqueue@localhost:5433/agentqueue',
+      );
+    });
+
+    it('should return the url when set', () => {
+      process.env.DATABASE_URL = 'postgres://custom:5432/db';
+      expect(service.databaseUrl).toBe('postgres://custom:5432/db');
+      delete process.env.DATABASE_URL;
+    });
+
+    it('should throw in production when not set', () => {
+      delete process.env.DATABASE_URL;
+      process.env.NODE_ENV = 'production';
+      expect(() => service.databaseUrl).toThrow(
+        'DATABASE_URL environment variable is required',
+      );
+      delete process.env.NODE_ENV;
+    });
+  });
+
+  describe('queueConcurrency', () => {
+    it('should default to 5', () => {
+      delete process.env.QUEUE_CONCURRENCY;
+      expect(service.queueConcurrency).toBe(5);
+    });
+
+    it('should read from QUEUE_CONCURRENCY env var', () => {
+      process.env.QUEUE_CONCURRENCY = '10';
+      expect(service.queueConcurrency).toBe(10);
+      delete process.env.QUEUE_CONCURRENCY;
+    });
+  });
+
+  describe('queueRetryLimit', () => {
+    it('should default to 3', () => {
+      delete process.env.QUEUE_RETRY_LIMIT;
+      expect(service.queueRetryLimit).toBe(3);
+    });
+
+    it('should read from QUEUE_RETRY_LIMIT env var', () => {
+      process.env.QUEUE_RETRY_LIMIT = '5';
+      expect(service.queueRetryLimit).toBe(5);
+      delete process.env.QUEUE_RETRY_LIMIT;
+    });
+  });
+
   describe('langfuseEnabled', () => {
     it('should return false when not set', () => {
       delete process.env.LANGFUSE_SECRET_KEY;

@@ -47,12 +47,37 @@ npm install
 # Copy env file and fill in values
 cp .env.example .env
 
+# Start Postgres (Docker required)
+docker compose up -d postgres
+
+# Run database migrations
+npm run db:migrate
+
 # Development (with hot-reload)
 npm run start:dev
 
 # Health check
 curl http://localhost:${PORT:-3000}/health
 ```
+
+## Database Setup
+
+AgentQueue uses Postgres for run persistence and job queueing.
+
+```bash
+# Start local Postgres
+docker compose up -d postgres
+
+# Apply migrations
+npm run db:migrate
+
+# Browse schema (optional)
+npm run db:studio
+```
+
+Default local connection: `postgres://agentqueue:agentqueue@localhost:5433/agentqueue`
+
+In production, set the `DATABASE_URL` environment variable.
 
 ## Environment Variables
 
@@ -65,6 +90,9 @@ curl http://localhost:${PORT:-3000}/health
 | `LANGFUSE_SECRET_KEY` | No | Enables Langfuse tracing when set |
 | `LANGFUSE_PUBLIC_KEY` | No | Langfuse public key |
 | `LANGFUSE_BASE_URL` | No | Langfuse API URL |
+| `DATABASE_URL` | No* | Postgres connection string (default: local dev; **required** in production) |
+| `QUEUE_CONCURRENCY` | No | Max concurrent queue jobs per worker (default: `5`) |
+| `QUEUE_RETRY_LIMIT` | No | Max retry attempts for failed queue jobs (default: `3`) |
 | `LINEAR_SIGNING_SECRET` | No | Referenced via `${VAR}` in trigger config |
 | `LINEAR_API_KEY` | No | Referenced via `${VAR}` in trigger config |
 
@@ -296,13 +324,23 @@ src/
     └── filters/                      # Global exception filter
 ```
 
+## Running Tests
+
+```bash
+# Unit tests (no Docker required)
+npm test
+
+# Integration tests (requires Docker for testcontainers)
+npm run test:integration
+```
+
 ## Scripts
 
 ```bash
 npm run start:dev       # Development with hot-reload
 npm run build           # Production build
 npm run start:prod      # Run production build
-npm run test            # Run tests
+npm run test            # Run unit tests
 npm run test:coverage   # Tests with coverage
 npm run lint            # ESLint
 npm run lint:fix        # ESLint with auto-fix

@@ -23,6 +23,16 @@ NODE_MAJOR=$(node -v | sed 's/v\([0-9]*\).*/\1/')
 
 [[ -f .env ]] || fail ".env file missing — copy .env.example and fill in values"
 
+# shellcheck disable=SC1091
+source .env 2>/dev/null || true
+[[ -n "${DATABASE_URL:-}" ]] || fail "DATABASE_URL not set — check .env"
+
+info "Checking database reachability"
+if ! node -e "const p=new (require('pg').Pool)({connectionString:process.env.DATABASE_URL});p.query('SELECT 1').then(()=>{p.end();process.exit(0)}).catch(()=>process.exit(1))" 2>/dev/null; then
+  fail "Cannot reach database — check DATABASE_URL in .env"
+fi
+ok "Database reachable"
+
 #─── Pull latest ──────────────────────────────────────────────────────────────
 info "Pulling latest changes"
 git pull --ff-only || fail "git pull failed — resolve manually"
@@ -37,6 +47,10 @@ ok "Dependencies installed"
 info "Building"
 npm run build
 ok "Build complete"
+
+info "Running database migrations"
+npm run db:migrate
+ok "Migrations applied"
 
 # NOTE: do NOT prune devDependencies — transitive deps (e.g. @sinclair/typebox)
 # required at runtime by @mariozechner/pi-coding-agent are listed as devDeps

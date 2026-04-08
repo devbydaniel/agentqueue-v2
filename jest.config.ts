@@ -4,15 +4,20 @@ const config: Config = {
   moduleFileExtensions: ['js', 'json', 'ts'],
   rootDir: '.',
   testRegex: '.*\\.spec\\.ts$',
+  testPathIgnorePatterns: ['.*\\.integration\\.spec\\.ts$'],
   transform: {
     '^.+\\.ts$': 'ts-jest',
+    '^.+\\.js$': 'ts-jest',
   },
+  transformIgnorePatterns: [
+    'node_modules/(?!(pg-boss)/)',
+  ],
   collectCoverageFrom: [
     'src/**/*.ts',
     '!src/main.ts',
     '!src/**/*.module.ts',
     '!src/**/index.ts',
-    '!src/db/migrations/**',
+    '!src/database/migrations/**',
   ],
   coverageDirectory: './coverage',
   coverageThreshold: {

@@ -36,6 +36,31 @@ export class AppConfigService {
     return Number(process.env.BEFORE_HOOK_TIMEOUT ?? 30000);
   }
 
+  // ── Database ─────────────────────────────────────────────────────
+
+  get databaseUrl(): string {
+    const url = process.env.DATABASE_URL;
+    if (!url) {
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error('DATABASE_URL environment variable is required');
+      }
+      return 'postgres://agentqueue:agentqueue@localhost:5433/agentqueue';
+    }
+    return url;
+  }
+
+  // ── Queue ────────────────────────────────────────────────────────
+
+  // Used in step 5 when registering queue workers
+  get queueConcurrency(): number {
+    return Number(process.env.QUEUE_CONCURRENCY ?? 5);
+  }
+
+  // Used in step 5 when registering queue workers
+  get queueRetryLimit(): number {
+    return Number(process.env.QUEUE_RETRY_LIMIT ?? 3);
+  }
+
   // ── Langfuse ─────────────────────────────────────────────────────
 
   get langfuseEnabled(): boolean {

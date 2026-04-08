@@ -5,6 +5,7 @@ import { RunsService } from './runs.service.js';
 import { PiSessionFactory } from './pi-session.factory.js';
 import { LinearSessionRepository } from './linear-session.repository.js';
 import { ActiveSessionTrackerService } from './active-session-tracker.service.js';
+import { RunRepository } from './run.repository.js';
 
 @Module({
   imports: [CallbacksModule],
@@ -14,6 +15,7 @@ import { ActiveSessionTrackerService } from './active-session-tracker.service.js
     PiSessionFactory,
     LinearSessionRepository,
     ActiveSessionTrackerService,
+    RunRepository,
   ],
   exports: [RunsService],
 })
