@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { basename } from 'node:path';
 import type { AgentSessionEvent } from '@mariozechner/pi-coding-agent';
 import { AppConfigService } from '../../config/app-config.service.js';
 import {
@@ -44,8 +45,39 @@ function extractAssistantText(
     .join('\n');
 }
 
+export interface LangfuseTraceContext {
+  traceName: string;
+  tags: string[];
+  metadata: Record<string, string>;
+  sessionId?: string;
+}
+
+export interface LangfuseTraceableRun {
+  id: string;
+  source: string;
+  triggerName: string | null;
+  parentFlowRunId: string | null;
+  cwd: string;
+  externalSessionId: string | null;
+}
+
+function buildSessionId(run: LangfuseTraceableRun): string | undefined {
+  if (
+    (run.source === 'linear' || run.source === 'telegram') &&
+    run.externalSessionId
+  ) {
+    return run.externalSessionId;
+  }
+
+  if (run.source === 'flow' && run.parentFlowRunId) {
+    return run.parentFlowRunId;
+  }
+
+  return undefined;
+}
+
 /**
- * Global callback handler that sends agent run traces to Langfuse.
+ * Per-run callback handler that sends agent run traces to Langfuse.
  *
  * Hierarchy:
  *   Trace (agent run)
@@ -55,7 +87,6 @@ function extractAssistantText(
  *
  * Active only when LANGFUSE_SECRET_KEY is set.
  */
-@Injectable()
 export class LangfuseCallbackHandler implements CallbackHandler {
   readonly name = 'langfuse';
   private readonly logger = new Logger(LangfuseCallbackHandler.name);
@@ -67,17 +98,10 @@ export class LangfuseCallbackHandler implements CallbackHandler {
   /** In-flight tool spans keyed by toolCallId. */
   private readonly toolSpans = new Map<string, LangfuseTool>();
 
-  /** Whether Langfuse credentials are configured. */
-  private readonly enabled: boolean;
-
-  constructor(appConfig: AppConfigService) {
-    this.enabled = appConfig.langfuseEnabled;
-    if (!this.enabled) {
-      this.logger.warn(
-        'LANGFUSE_SECRET_KEY not set — Langfuse tracing disabled',
-      );
-    }
-  }
+  constructor(
+    private readonly traceContext: LangfuseTraceContext,
+    private readonly enabled: boolean,
+  ) {}
 
   onEvent(event: AgentSessionEvent): void {
     if (!this.enabled) return;
@@ -161,8 +185,9 @@ export class LangfuseCallbackHandler implements CallbackHandler {
   // ── Agent lifecycle ──────────────────────────────────────────────
 
   private onAgentStart(): void {
-    this.rootSpan = startObservation('agent-run', {
+    this.rootSpan = startObservation(this.traceContext.traceName, {
       input: { event: 'agent_start' },
+      metadata: this.traceContext.metadata,
     });
     this.logger.debug('Langfuse trace started');
   }
@@ -304,5 +329,71 @@ export class LangfuseCallbackHandler implements CallbackHandler {
       { asType: 'event' },
     );
     event.end();
+  }
+}
+
+@Injectable()
+export class LangfuseCallbackHandlerFactory {
+  private readonly logger = new Logger(LangfuseCallbackHandlerFactory.name);
+  private readonly enabled: boolean;
+
+  constructor(appConfig: AppConfigService) {
+    this.enabled = appConfig.langfuseEnabled;
+    if (!this.enabled) {
+      this.logger.warn(
+        'LANGFUSE_SECRET_KEY not set — Langfuse tracing disabled',
+      );
+    }
+  }
+
+  createForRun(run: LangfuseTraceableRun): {
+    handler: LangfuseCallbackHandler;
+    traceContext: LangfuseTraceContext;
+  } {
+    const traceContext = this.buildTraceContext(run);
+    return {
+      handler: new LangfuseCallbackHandler(traceContext, this.enabled),
+      traceContext,
+    };
+  }
+
+  buildTraceContext(run: LangfuseTraceableRun): LangfuseTraceContext {
+    const sessionId = buildSessionId(run);
+    const tags = [`source:${run.source}`];
+
+    if (run.triggerName) {
+      tags.push(`trigger:${run.triggerName}`);
+    }
+
+    if (run.parentFlowRunId) {
+      tags.push('flow:child');
+    }
+
+    tags.push(sessionId ? 'session:shared' : 'session:ephemeral');
+
+    const metadata: Record<string, string> = {
+      runId: run.id,
+      source: run.source,
+      repoName: basename(run.cwd),
+    };
+
+    if (run.triggerName) {
+      metadata['triggerName'] = run.triggerName;
+    }
+
+    if (run.externalSessionId) {
+      metadata['externalSessionId'] = run.externalSessionId;
+    }
+
+    if (run.parentFlowRunId) {
+      metadata['parentFlowRunId'] = run.parentFlowRunId;
+    }
+
+    return {
+      traceName: `${run.source}-run`,
+      tags,
+      metadata,
+      sessionId,
+    };
   }
 }

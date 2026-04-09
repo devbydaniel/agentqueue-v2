@@ -1,5 +1,6 @@
 import { Test } from '@nestjs/testing';
 import type { AgentSession } from '@mariozechner/pi-coding-agent';
+import { propagateAttributes } from '@langfuse/tracing';
 import { RunProcessorService } from './run-processor.service.js';
 import { AppConfigService } from '../config/app-config.service.js';
 import { TriggerConfigService } from '../config/trigger-config.service.js';
@@ -10,8 +11,18 @@ import { RunCompletionNotifier } from './run-completion.notifier.js';
 import { RunEventRepository } from './run-event.repository.js';
 import { CALLBACK_HANDLERS } from '../callbacks/constants.js';
 import type { CallbackHandler } from '../callbacks/callback-handler.interface.js';
+import { LangfuseCallbackHandlerFactory } from '../callbacks/handlers/langfuse.callback-handler.js';
 import type { Run } from '../database/runs.schema.js';
 import { TelegramService } from '../telegram/telegram.service.js';
+
+jest.mock('@langfuse/tracing', () => ({
+  propagateAttributes: jest.fn(
+    async (
+      params: unknown,
+      fn: (() => Promise<unknown>) | (() => unknown),
+    ): Promise<unknown> => await fn(),
+  ),
+}));
 
 /** Prompt mock that delays 50ms then rejects — used to test timeout behavior */
 function delayedReject(): Promise<void> {
@@ -29,6 +40,7 @@ describe('RunProcessorService', () => {
   let runEventRepository: RunEventRepository;
   let triggerConfigService: TriggerConfigService;
   let telegramService: TelegramService;
+  let langfuseCallbackHandlerFactory: LangfuseCallbackHandlerFactory;
   let mockSession: jest.Mocked<
     Pick<AgentSession, 'prompt' | 'subscribe' | 'abort'>
   > & {
@@ -40,6 +52,15 @@ describe('RunProcessorService', () => {
   const mockGlobalHandler: CallbackHandler = {
     name: 'test-global',
     onEvent: jest.fn(),
+  };
+  const mockLangfuseHandler: CallbackHandler = {
+    name: 'langfuse',
+    onEvent: jest.fn(),
+  };
+  const mockLangfuseTraceContext = {
+    traceName: 'manual-run',
+    tags: ['source:manual', 'session:ephemeral'],
+    metadata: { runId: 'run-123', source: 'manual', repoName: 'my-repo' },
   };
 
   beforeEach(async () => {
@@ -120,6 +141,15 @@ describe('RunProcessorService', () => {
           },
         },
         {
+          provide: LangfuseCallbackHandlerFactory,
+          useValue: {
+            createForRun: jest.fn().mockReturnValue({
+              handler: mockLangfuseHandler,
+              traceContext: mockLangfuseTraceContext,
+            }),
+          },
+        },
+        {
           provide: CALLBACK_HANDLERS,
           useValue: [mockGlobalHandler],
         },
@@ -134,6 +164,7 @@ describe('RunProcessorService', () => {
     runEventRepository = module.get(RunEventRepository);
     triggerConfigService = module.get(TriggerConfigService);
     telegramService = module.get(TelegramService);
+    langfuseCallbackHandlerFactory = module.get(LangfuseCallbackHandlerFactory);
   });
 
   describe('runSession', () => {
@@ -364,6 +395,20 @@ describe('RunProcessorService', () => {
         'run-abc',
       );
     });
+
+    it('should wrap prompt execution in propagateAttributes when Langfuse context is provided', async () => {
+      await service.runSession({
+        cwd: '/home/user/dev/my-repo',
+        prompt: 'hello',
+        langfuseTraceContext: mockLangfuseTraceContext,
+      });
+
+      expect(propagateAttributes).toHaveBeenCalledWith(
+        mockLangfuseTraceContext,
+        expect.any(Function),
+      );
+      expect(mockSession.prompt).toHaveBeenCalledWith('hello');
+    });
   });
 
   describe('processRun', () => {
@@ -444,6 +489,9 @@ describe('RunProcessorService', () => {
 
       // Session was prompted
       expect(mockSession.prompt).toHaveBeenCalledWith('do something');
+      expect(langfuseCallbackHandlerFactory.createForRun).toHaveBeenCalledWith(
+        run,
+      );
     });
 
     it('should mark run as errored when session throws', async () => {

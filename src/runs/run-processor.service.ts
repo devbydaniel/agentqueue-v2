@@ -1,8 +1,13 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { LinearClient } from '@linear/sdk';
+import { propagateAttributes } from '@langfuse/tracing';
 import { CALLBACK_HANDLERS } from '../callbacks/constants.js';
 import type { CallbackHandler } from '../callbacks/callback-handler.interface.js';
 import { AssistantMessageCallbackHandler } from '../callbacks/handlers/assistant-message.callback-handler.js';
+import {
+  LangfuseCallbackHandlerFactory,
+  type LangfuseTraceContext,
+} from '../callbacks/handlers/langfuse.callback-handler.js';
 import { LinearCallbackHandler } from '../callbacks/handlers/linear.callback-handler.js';
 import { AppConfigService } from '../config/app-config.service.js';
 import { TriggerConfigService } from '../config/trigger-config.service.js';
@@ -31,6 +36,8 @@ export interface RunSessionParams {
   appendSystemPrompt?: string;
   /** AbortSignal for per-run timeout */
   abortSignal?: AbortSignal;
+  /** Trace-level Langfuse attributes applied for the duration of the run */
+  langfuseTraceContext?: LangfuseTraceContext;
 }
 
 export interface RunSessionResult {
@@ -50,6 +57,7 @@ export class RunProcessorService {
     private readonly runEventRepository: RunEventRepository,
     private readonly triggerConfigService: TriggerConfigService,
     private readonly telegramService: TelegramService,
+    private readonly langfuseCallbackHandlerFactory: LangfuseCallbackHandlerFactory,
     @Inject(CALLBACK_HANDLERS)
     private readonly globalHandlers: CallbackHandler[],
   ) {}
@@ -98,6 +106,9 @@ export class RunProcessorService {
     // Build additional handlers
     const { additionalHandlers, linearHandler, assistantMessageHandler } =
       this.buildSourceHandlers(run);
+    const { handler: langfuseHandler, traceContext: langfuseTraceContext } =
+      this.langfuseCallbackHandlerFactory.createForRun(run);
+    additionalHandlers.push(langfuseHandler);
 
     // Attach registry handler to persist filtered events
     additionalHandlers.push(
@@ -123,6 +134,7 @@ export class RunProcessorService {
         appendSystemPrompt: run.appendSystemPrompt ?? undefined,
         additionalHandlers,
         abortSignal: abortController.signal,
+        langfuseTraceContext,
       });
 
       run.status = 'succeeded';
@@ -338,7 +350,13 @@ export class RunProcessorService {
     }
 
     try {
-      await session.prompt(params.prompt);
+      if (params.langfuseTraceContext) {
+        await propagateAttributes(params.langfuseTraceContext, async () => {
+          await session.prompt(params.prompt);
+        });
+      } else {
+        await session.prompt(params.prompt);
+      }
       return { success: true };
     } finally {
       if (onAbort && params.abortSignal) {
