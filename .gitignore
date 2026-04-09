@@ -20,5 +20,6 @@ tmp/
 # Agent files — deployed by `af apply-all`, source of truth lives in the agentfiles store
 .pi/
 AGENTS.md
+.agents/
 .agentfiles
 .agentfiles.lock
