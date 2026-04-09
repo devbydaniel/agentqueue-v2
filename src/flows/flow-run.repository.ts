@@ -107,7 +107,9 @@ export class FlowRunRepository {
       [flowRunId],
     );
 
-    const rows = mapRows<FlowRunRow>(runResult.rows as Record<string, unknown>[]);
+    const rows = mapRows<FlowRunRow>(
+      runResult.rows as Record<string, unknown>[],
+    );
     const stepRows = mapRows<FlowStepRow>(
       stepResult.rows as Record<string, unknown>[],
     );

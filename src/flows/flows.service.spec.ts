@@ -1,3 +1,4 @@
+/* eslint-disable sonarjs/publicly-writable-directories */
 import { Test } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { FlowsService } from './flows.service.js';
@@ -17,7 +18,7 @@ describe('FlowsService', () => {
 
   const fakeConfig = {
     resolver: './resolve.ts',
-    agents: [{ name: 'dev', target: 'my-repo', prompt: 'do {{task}}' }],
+    agents: [{ name: 'dev', cwd: '/tmp/my-repo', prompt: 'do {{task}}' }],
   };
 
   const fakeResolver = jest.fn();

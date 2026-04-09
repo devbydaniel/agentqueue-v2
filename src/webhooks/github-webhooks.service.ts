@@ -1,12 +1,12 @@
 import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { TriggerConfigService } from '../config/trigger-config.service.js';
-import { AgentfilesConfigService } from '../config/agentfiles-config.service.js';
 import { RunsService } from '../runs/runs.service.js';
 import { BeforeHookService } from '../triggers/before-hook.service.js';
 import type { GithubTrigger } from '../config/trigger-config.interface.js';
 import { GithubSignatureVerifierService } from './github-signature-verifier.service.js';
 import { interpolatePayloadTemplate } from './github-payload-template.js';
 import { matchesFilters } from './github-webhook-filter.js';
+import { ensureDirectoryExists } from '../common/utils/cwd-path.js';
 
 const MAX_PROMPT_LENGTH = 50_000;
 
@@ -25,7 +25,7 @@ export interface HandleGithubWebhookResult {
  * Handles inbound GitHub webhooks end-to-end:
  *  1. Verifies the HMAC signature
  *  2. Looks up matching triggers from the trigger config
- *  3. For each match: interpolates target/prompt, runs the optional before-hook,
+ *  3. For each match: interpolates cwd/prompt, runs the optional before-hook,
  *     and dispatches the agent run via `RunsService` (fire-and-forget)
  *
  * Returns the number of triggers that matched. Per-trigger failures are logged
@@ -39,7 +39,6 @@ export class GithubWebhooksService {
   constructor(
     private readonly signatureVerifier: GithubSignatureVerifierService,
     private readonly triggerConfigService: TriggerConfigService,
-    private readonly agentfilesConfigService: AgentfilesConfigService,
     private readonly runsService: RunsService,
     private readonly beforeHookService: BeforeHookService,
   ) {}
@@ -88,11 +87,11 @@ export class GithubWebhooksService {
   }
 
   /**
-   * Fires a single GitHub trigger: interpolates target/prompt, validates the
-   * resolved repo, runs the optional before-hook (gate + enrich), and
+   * Fires a single GitHub trigger: interpolates cwd/prompt, validates the
+   * resolved path, runs the optional before-hook (gate + enrich), and
    * dispatches the agent run.
    *
-   * Skip paths (prompt too long, repo not configured, hook said skip) return
+   * Skip paths (prompt too long, invalid cwd, hook said skip) return
    * normally — they are expected business outcomes, not errors.
    */
   private async fireTrigger(
@@ -101,7 +100,7 @@ export class GithubWebhooksService {
   ): Promise<void> {
     this.logger.log('Firing GitHub trigger', { trigger: trigger.name });
 
-    const repo = interpolatePayloadTemplate(trigger.target, payload);
+    const rawCwd = interpolatePayloadTemplate(trigger.cwd, payload);
     let prompt = interpolatePayloadTemplate(trigger.prompt, payload);
 
     if (prompt.length > MAX_PROMPT_LENGTH) {
@@ -111,12 +110,12 @@ export class GithubWebhooksService {
       return;
     }
 
-    // Validate repo exists before firing
+    let cwd: string;
     try {
-      this.agentfilesConfigService.resolveRepo(repo);
+      cwd = ensureDirectoryExists(rawCwd, `GitHub trigger "${trigger.name}" cwd`);
     } catch {
       this.logger.warn(
-        `Trigger "${trigger.name}" resolved target "${repo}" which is not a configured repo, skipping`,
+        `Trigger "${trigger.name}" resolved cwd "${rawCwd}" which is not a usable directory, skipping`,
       );
       return;
     }
@@ -144,14 +143,14 @@ export class GithubWebhooksService {
       : undefined;
 
     this.logger.log(`Firing run for GitHub trigger "${trigger.name}"`, {
-      repo,
+      cwd,
       event: payload['action'],
     });
 
     const { runId } = await this.runsService.enqueue({
       source: 'github',
       triggerName: trigger.name,
-      repo,
+      cwd,
       prompt,
       prependSystemPrompt,
       appendSystemPrompt,

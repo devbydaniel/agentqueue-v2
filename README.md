@@ -1,10 +1,10 @@
 # AgentQueue v2
 
-Centralized agent orchestrator for AI agent workloads. Receives triggers (cron schedules, Linear webhooks, GitHub webhooks), resolves a target repo, and runs a [pi](https://github.com/mariozechner/pi-coding-agent) agent session against it.
+Centralized agent orchestrator for AI agent workloads. Receives triggers (cron schedules, Linear webhooks, GitHub webhooks, Telegram webhooks), resolves a working directory, and runs a [pi](https://github.com/mariozechner/pi-coding-agent) agent session against it.
 
 ## Architecture
 
-NestJS modular backend backed by Postgres (via Drizzle ORM) and pg-boss for job queueing. Runs are enqueued asynchronously — `POST /runs` returns `202` immediately with a `runId`, and the run is processed by a background queue worker.
+NestJS modular backend backed by Postgres (via raw `pg`) and pg-boss for job queueing. Schema changes are managed with `dbmate` SQL migrations. Runs are enqueued asynchronously — `POST /runs` returns `202` immediately with a `runId`, and the run is processed by a background queue worker.
 
 ```text
 ┌─────────────┐   ┌──────────────┐   ┌──────────────┐
@@ -36,7 +36,6 @@ NestJS modular backend backed by Postgres (via Drizzle ORM) and pg-boss for job 
 
 - Node.js >= 20
 - pi agent CLI installed (`@mariozechner/pi-coding-agent`)
-- Agentfiles config at `~/.config/agentfiles/config.toml`
 
 ## Quick Start
 
@@ -70,9 +69,6 @@ docker compose -f docker-compose.dev.yml up -d
 
 # Apply migrations
 npm run db:migrate
-
-# Browse schema (optional)
-npm run db:studio
 ```
 
 Default local connection: `postgres://agentqueue:agentqueue@localhost:5433/agentqueue`
@@ -96,6 +92,8 @@ In production, set the `DATABASE_URL` environment variable.
 | `RUN_TIMEOUT_MS` | No | Default per-run timeout in milliseconds (default: `1800000` / 30 min) |
 | `LINEAR_SIGNING_SECRET` | No | Referenced via `${VAR}` in trigger config |
 | `LINEAR_API_KEY` | No | Referenced via `${VAR}` in trigger config |
+| `TELEGRAM_MAIN_BOT_TOKEN` | No | Optional example variable for Telegram trigger bot tokens |
+| `TELEGRAM_MAIN_WEBHOOK_SECRET` | No | Optional example variable for Telegram webhook secret tokens |
 
 ## API Endpoints
 
@@ -112,6 +110,7 @@ All endpoints except health and webhooks require `Authorization: Bearer <AUTH_TO
 | `POST` | `/webhooks/linear/:agentName` | Signature | Receive Linear Agent Interaction webhooks |
 | `GET` | `/webhooks/linear/:agentName` | Public | Linear webhook URL verification |
 | `POST` | `/webhooks/github` | Signature | Receive GitHub webhooks |
+| `POST` | `/webhooks/telegram/:botName` | Secret header | Receive Telegram bot webhooks |
 
 Swagger docs are available at `/docs` when the server is running.
 
@@ -119,11 +118,11 @@ Swagger docs are available at `/docs` when the server is running.
 
 > **Breaking change:** `POST /runs` is async-first. It returns `202 Accepted` immediately with `{ runId, status: 'waiting' }`. The run is processed in the background by the queue worker. To check the result, poll `GET /runs/:id`.
 
-Enqueue an async agent run against a configured repo.
+Enqueue an async agent run against a repository working directory.
 
 Accepted request fields:
 
-- `repo` (required)
+- `cwd` (required)
 - `prompt` (required)
 - `prependSystemPrompt` (optional)
 - `appendSystemPrompt` (optional)
@@ -136,7 +135,7 @@ Accepted request fields:
 curl -s -X POST http://localhost:3000/runs \
   -H "Authorization: Bearer $AUTH_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"repo": "my-repo", "prompt": "Fix the failing tests"}'
+  -d '{"cwd": "/absolute/path/to/my-repo", "prompt": "Fix the failing tests"}'
 # => { "runId": "abc-123", "status": "waiting" }
 
 # Step 2: Check status
@@ -159,7 +158,7 @@ curl -s 'http://localhost:3000/runs?status=running&source=cron&limit=10' \
   -H "Authorization: Bearer $AUTH_TOKEN"
 ```
 
-Query parameters: `status`, `source`, `repo`, `trigger`, `since`, `limit`, `offset`.
+Query parameters: `status`, `source`, `cwd`, `trigger`, `since`, `limit`, `offset`.
 
 ### GET /runs/:id
 
@@ -191,7 +190,7 @@ curl -s -X POST http://localhost:3000/runs/abc-123/abort \
 
 ### POST /webhooks/github
 
-Single endpoint for all GitHub webhooks. Configure your GitHub repo/org to send webhooks to this URL with a shared secret. The trigger config determines which events match and which repo/agent handles them.
+Single endpoint for all GitHub webhooks. Configure your GitHub repo/org to send webhooks to this URL with a shared secret. The trigger config determines which events match and which working directory/agent handles them.
 
 ```bash
 # GitHub sends this automatically — example for testing:
@@ -210,25 +209,25 @@ Response:
 
 ## Configuration
 
-### Agentfiles Config
+### Migrations
 
-Repos are registered in `~/.config/agentfiles/config.toml`:
+Schema changes use `dbmate` and plain SQL migration files under
+`src/database/migrations`.
 
-```toml
-[[repos]]
-name = "my-repo"
-path = "~/dev/my-repo"
+```bash
+# Create a new migration
+npm run db:new -- add_telegram_support
 
-[[repos]]
-name = "other-repo"
-path = "~/dev/other-repo"
+# Apply pending migrations
+npm run db:migrate
+
+# Roll back the latest migration
+npm run db:rollback
 ```
-
-The `repo` / `target` field in runs and triggers maps to these entries.
 
 ### Trigger Config
 
-Triggers are defined in `~/.agentqueue/triggers.yaml`. Three types are supported:
+Triggers are defined in `~/.agentqueue/triggers.yaml`. Four types are supported:
 
 #### Cron Triggers
 
@@ -238,12 +237,12 @@ Run an agent on a schedule:
 triggers:
   - name: daily-review
     schedule: "0 8 * * *"
-    target: my-repo
+    cwd: ~/dev/my-repo
     prompt: "Run the morning review routine"
     prepend_system_prompt: "Today is {{date}}."
 ```
 
-Template variables for cron: `{{triggerName}}`, `{{schedule}}`, `{{date}}`, `{{target}}`.
+Template variables for cron: `{{triggerName}}`, `{{schedule}}`, `{{date}}`, `{{cwd}}`.
 
 ### Before hooks
 
@@ -256,9 +255,38 @@ into `{{before_output}}`).
 triggers:
   - name: meeting-prep
     schedule: "*/30 8-17 * * 1-5"
-    target: assistant
+    cwd: ~/dev/assistant
     before: "/home/you/scripts/check-calendar.sh"
     prompt: "Prepare for the upcoming meeting: {{before_output}}"
+```
+
+#### Telegram Triggers
+
+Telegram triggers route inbound bot messages by `bot_name` and sender `user_id`.
+Each accepted chat keeps a persistent agent session. Send `/reset` to clear the
+session manually; sessions also reset automatically after 1 hour of inactivity.
+
+```yaml
+triggers:
+  - name: daniel-assistant
+    type: telegram
+    bot_name: main-bot
+    bot_token: ${TELEGRAM_MAIN_BOT_TOKEN}
+    webhook_secret: ${TELEGRAM_MAIN_WEBHOOK_SECRET}
+    user_id: "123456789"
+    cwd: ~/dev/assistant
+    prepend_system_prompt: "You are replying to Daniel on Telegram."
+```
+
+Register the Telegram webhook against AgentQueue with the matching secret token:
+
+```bash
+curl -X POST "https://api.telegram.org/bot$TELEGRAM_MAIN_BOT_TOKEN/setWebhook" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://your-host/webhooks/telegram/main-bot",
+    "secret_token": "'"$TELEGRAM_MAIN_WEBHOOK_SECRET"'"
+  }'
 ```
 
 Contract:
@@ -281,10 +309,10 @@ Receive webhooks from Linear's Agent Interaction API:
 triggers:
   - name: coding-agent
     type: linear
-    target: my-repo
+    cwd: ~/dev/my-repo
     signing_secret: ${LINEAR_SIGNING_SECRET}
     api_key: ${LINEAR_API_KEY}
-    prepend_system_prompt: "You are working on issues in {{target}}."
+    prepend_system_prompt: "You are working in {{cwd}}."
 ```
 
 The `${VAR}` syntax interpolates from environment variables. The webhook URL is `POST /webhooks/linear/<name>`.
@@ -308,7 +336,7 @@ triggers:
         in: ["changes_requested", "commented"]
       - field: repository.full_name
         equals: "myorg/my-repo"
-    target: "{{repository.name}}"
+    cwd: "~/dev/{{repository.name}}"
     prompt: |
       Address review feedback on PR #{{pull_request.number}} in {{repository.full_name}}.
       Reviewer: {{review.user.login}}
@@ -329,7 +357,7 @@ All GitHub triggers share a single endpoint: `POST /webhooks/github`. When a web
 1. Verifies the `x-hub-signature-256` HMAC signature against `GITHUB_WEBHOOK_SECRET`
 2. Extracts the event type from the `x-github-event` header
 3. Matches all triggers where `events` includes the event type AND all `filters` pass
-4. For each match, interpolates `target`, `prompt`, and system prompts using the webhook payload, then fires an agent run
+4. For each match, interpolates `cwd`, `prompt`, and system prompts using the webhook payload, then fires an agent run
 
 **Filter operators** (all filters use AND logic):
 
@@ -367,7 +395,7 @@ src/
 ├── instrumentation.ts                # OpenTelemetry / Langfuse init
 ├── auth/                             # Bearer auth guard + @Public()
 ├── callbacks/                        # Event handlers (logger, Langfuse, Linear, run events)
-├── config/                           # Env + trigger config + repo resolution
+├── config/                           # Env + trigger config
 ├── database/                         # Drizzle schemas + DB wiring + migrations
 ├── flows/                            # Multi-step flow orchestration
 ├── queue/                            # pg-boss integration
@@ -379,7 +407,7 @@ src/
 │   ├── run-queue-worker.service.ts
 │   ├── active-session-tracker.service.ts
 │   ├── pi-session.factory.ts
-│   ├── linear-session.repository.ts
+│   ├── external-session.repository.ts
 │   └── dto/
 ├── triggers/                         # Cron scheduler
 └── webhooks/                         # Linear + GitHub webhook entrypoints/services

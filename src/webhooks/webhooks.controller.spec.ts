@@ -1,7 +1,7 @@
 import { WebhooksController } from './webhooks.controller.js';
-import { LinearWebhooksService } from './linear-webhooks.service.js';
-import { GithubWebhooksService } from './github-webhooks.service.js';
-import { TelegramWebhooksService } from './telegram-webhooks.service.js';
+import type { LinearWebhooksService } from './linear-webhooks.service.js';
+import type { GithubWebhooksService } from './github-webhooks.service.js';
+import type { TelegramWebhooksService } from './telegram-webhooks.service.js';
 
 describe('WebhooksController', () => {
   let controller: WebhooksController;

@@ -1,3 +1,4 @@
+/* eslint-disable sonarjs/publicly-writable-directories */
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -36,8 +37,12 @@ describe('FlowConfigService', () => {
   const validConfig = {
     resolver: './resolve.ts',
     agents: [
-      { name: 'dev', target: 'my-repo', prompt: 'Do the work on {{task}}' },
-      { name: 'qa', target: 'my-repo', prompt: 'Review {{task}}' },
+      {
+        name: 'dev',
+        cwd: '/tmp/my-repo',
+        prompt: 'Do the work on {{task}}',
+      },
+      { name: 'qa', cwd: '/tmp/my-repo', prompt: 'Review {{task}}' },
     ],
   };
 
@@ -86,19 +91,19 @@ describe('FlowConfigService', () => {
       expect(config.agents).toHaveLength(2);
       expect(config.agents[0]).toEqual({
         name: 'dev',
-        target: 'my-repo',
+        cwd: '/tmp/my-repo',
         prompt: 'Do the work on {{task}}',
       });
       expect(config.agents[1]).toEqual({
         name: 'qa',
-        target: 'my-repo',
+        cwd: '/tmp/my-repo',
         prompt: 'Review {{task}}',
       });
     });
 
     it('should throw BadRequestException on missing resolver field', () => {
       createFlowDir('bad', {
-        agents: [{ name: 'dev', target: 'repo', prompt: 'do stuff' }],
+        agents: [{ name: 'dev', cwd: '/tmp/repo', prompt: 'do stuff' }],
       });
 
       expect(() => service.loadFlow('bad')).toThrow(BadRequestException);
@@ -130,14 +135,14 @@ describe('FlowConfigService', () => {
     it('should throw BadRequestException on agent missing name', () => {
       createFlowDir('bad', {
         resolver: './resolve.ts',
-        agents: [{ target: 'repo', prompt: 'do stuff' }],
+        agents: [{ cwd: '/tmp/repo', prompt: 'do stuff' }],
       });
 
       expect(() => service.loadFlow('bad')).toThrow(BadRequestException);
       expect(() => service.loadFlow('bad')).toThrow(/missing required fields/);
     });
 
-    it('should throw BadRequestException on agent missing target', () => {
+    it('should throw BadRequestException on agent missing cwd', () => {
       createFlowDir('bad', {
         resolver: './resolve.ts',
         agents: [{ name: 'dev', prompt: 'do stuff' }],
@@ -149,7 +154,7 @@ describe('FlowConfigService', () => {
     it('should throw BadRequestException on agent missing prompt', () => {
       createFlowDir('bad', {
         resolver: './resolve.ts',
-        agents: [{ name: 'dev', target: 'repo' }],
+        agents: [{ name: 'dev', cwd: '/tmp/repo' }],
       });
 
       expect(() => service.loadFlow('bad')).toThrow(BadRequestException);

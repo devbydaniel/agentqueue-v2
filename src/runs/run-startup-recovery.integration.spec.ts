@@ -1,3 +1,4 @@
+/* eslint-disable sonarjs/publicly-writable-directories */
 import { getTestDb, truncateAll } from '../../test/integration/db.js';
 import { RunRepository } from './run.repository.js';
 import { RunStartupRecoveryService } from './run-startup-recovery.service.js';
@@ -19,7 +20,7 @@ describe('RunStartupRecoveryService (integration)', () => {
   it('should mark running run rows as interrupted on init', async () => {
     const runningRun = await runRepo.create({
       source: 'manual',
-      repo: 'test-repo',
+      cwd: '/tmp/test-repo',
       prompt: 'abandoned run',
     });
     runningRun.status = 'running';
@@ -29,7 +30,7 @@ describe('RunStartupRecoveryService (integration)', () => {
 
     const waitingRun = await runRepo.create({
       source: 'cron',
-      repo: 'test-repo',
+      cwd: '/tmp/test-repo',
       prompt: 'waiting run',
     });
 
@@ -49,7 +50,7 @@ describe('RunStartupRecoveryService (integration)', () => {
   it('should not touch already-terminal runs', async () => {
     const succeededRun = await runRepo.create({
       source: 'manual',
-      repo: 'test-repo',
+      cwd: '/tmp/test-repo',
       prompt: 'completed run',
     });
     succeededRun.status = 'succeeded';

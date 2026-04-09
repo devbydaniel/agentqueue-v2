@@ -102,9 +102,9 @@ export class WebhooksController {
   ): Promise<{ accepted: boolean; handled: boolean }> {
     return this.telegramWebhooksService.handleWebhook({
       botName,
-      secretTokenHeader: req.headers[
-        'x-telegram-bot-api-secret-token'
-      ] as string | undefined,
+      secretTokenHeader: req.headers['x-telegram-bot-api-secret-token'] as
+        | string
+        | undefined,
       body: req.body as Record<string, unknown>,
     });
   }

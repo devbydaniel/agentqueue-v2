@@ -45,7 +45,7 @@ export class RunsController {
   @ApiOperation({
     summary: 'List runs',
     description:
-      'Returns a paginated list of runs, optionally filtered by status, source, repo, or trigger.',
+      'Returns a paginated list of runs, optionally filtered by status, source, cwd, or trigger.',
   })
   @ApiResponse({ status: 200, description: 'List of runs' })
   async listRuns(@Query() query: ListRunsDto) {

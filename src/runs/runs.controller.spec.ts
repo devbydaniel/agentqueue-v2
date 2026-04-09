@@ -1,3 +1,4 @@
+/* eslint-disable sonarjs/publicly-writable-directories */
 import { Test } from '@nestjs/testing';
 import {
   type INestApplication,
@@ -27,7 +28,7 @@ describe('RunsController', () => {
               id: 'run-abc',
               source: 'manual',
               status: 'running',
-              repo: 'core',
+              cwd: '/tmp/core',
             }),
             listRuns: jest.fn().mockResolvedValue([]),
             listRunEvents: jest.fn().mockResolvedValue([]),
@@ -58,13 +59,13 @@ describe('RunsController', () => {
     it('should return 202 with runId and status when given valid input', async () => {
       const response = await request(app.getHttpServer())
         .post('/runs')
-        .send({ repo: 'core', prompt: 'do something' })
+        .send({ cwd: '/tmp/core', prompt: 'do something' })
         .expect(202);
 
       expect(response.body).toEqual({ runId: 'run-abc', status: 'waiting' });
       expect(runsService.enqueue).toHaveBeenCalledWith({
         source: 'manual',
-        repo: 'core',
+        cwd: '/tmp/core',
         prompt: 'do something',
       });
     });
@@ -73,7 +74,7 @@ describe('RunsController', () => {
       await request(app.getHttpServer())
         .post('/runs')
         .send({
-          repo: 'core',
+          cwd: '/tmp/core',
           prompt: 'do something',
           prependSystemPrompt: 'prepend',
           appendSystemPrompt: 'append',
@@ -82,7 +83,7 @@ describe('RunsController', () => {
 
       expect(runsService.enqueue).toHaveBeenCalledWith({
         source: 'manual',
-        repo: 'core',
+        cwd: '/tmp/core',
         prompt: 'do something',
         prependSystemPrompt: 'prepend',
         appendSystemPrompt: 'append',
@@ -91,7 +92,7 @@ describe('RunsController', () => {
 
     it('should return 400 when externalSessionId is provided', async () => {
       const response = await request(app.getHttpServer()).post('/runs').send({
-        repo: 'core',
+        cwd: '/tmp/core',
         prompt: 'do something',
         externalSessionId: 'external-1',
       });
@@ -99,7 +100,7 @@ describe('RunsController', () => {
       expect(response.status).toBe(400);
     });
 
-    it('should return 400 when repo is missing', async () => {
+    it('should return 400 when cwd is missing', async () => {
       const response = await request(app.getHttpServer())
         .post('/runs')
         .send({ prompt: 'do something' });
@@ -109,21 +110,21 @@ describe('RunsController', () => {
     it('should return 400 when prompt is missing', async () => {
       const response = await request(app.getHttpServer())
         .post('/runs')
-        .send({ repo: 'core' });
+        .send({ cwd: '/tmp/core' });
       expect(response.status).toBe(400);
     });
 
-    it('should return 400 when repo is empty string', async () => {
+    it('should return 400 when cwd is empty string', async () => {
       const response = await request(app.getHttpServer())
         .post('/runs')
-        .send({ repo: '', prompt: 'do something' });
+        .send({ cwd: '', prompt: 'do something' });
       expect(response.status).toBe(400);
     });
 
     it('should return 400 when prompt is empty string', async () => {
       const response = await request(app.getHttpServer())
         .post('/runs')
-        .send({ repo: 'core', prompt: '' });
+        .send({ cwd: '/tmp/core', prompt: '' });
       expect(response.status).toBe(400);
     });
 
@@ -147,14 +148,16 @@ describe('RunsController', () => {
 
     it('should forward query params as filters', async () => {
       await request(app.getHttpServer())
-        .get('/runs?status=running&source=cron&repo=core&limit=10&offset=5')
+        .get(
+          '/runs?status=running&source=cron&cwd=%2Ftmp%2Fcore&limit=10&offset=5',
+        )
         .expect(200);
 
       expect(runsService.listRuns).toHaveBeenCalledWith(
         expect.objectContaining({
           status: 'running',
           source: 'cron',
-          repo: 'core',
+          cwd: '/tmp/core',
           limit: 10,
           offset: 5,
         }),

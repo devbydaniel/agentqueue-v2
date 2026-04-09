@@ -1,8 +1,13 @@
 import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import type { PgPool } from '../database/database.tokens.js';
 import { PG_POOL } from '../database/database.tokens.js';
-import { mapRow, mapRows } from '../database/query-helpers.js';
-import { runSources, runStatuses, type Run, type NewRun } from '../database/runs.schema.js';
+import { mapRow } from '../database/query-helpers.js';
+import {
+  runSources,
+  runStatuses,
+  type Run,
+  type NewRun,
+} from '../database/runs.schema.js';
 
 export interface ListRunsFilters {
   status?: string;

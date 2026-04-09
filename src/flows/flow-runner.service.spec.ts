@@ -1,3 +1,4 @@
+/* eslint-disable sonarjs/publicly-writable-directories */
 import { FlowRunnerService } from './flow-runner.service.js';
 import type { Resolver } from './flow-resolver-loader.service.js';
 import type { FlowRunRepository } from './flow-run.repository.js';
@@ -52,8 +53,8 @@ describe('FlowRunnerService', () => {
   const testConfig: FlowConfig = {
     resolver: './resolve.ts',
     agents: [
-      { name: 'dev', target: 'my-repo', prompt: 'Build {{task}}' },
-      { name: 'qa', target: 'my-repo', prompt: 'Review {{task}}' },
+      { name: 'dev', cwd: '/tmp/my-repo', prompt: 'Build {{task}}' },
+      { name: 'qa', cwd: '/tmp/my-repo', prompt: 'Review {{task}}' },
     ],
   };
 
@@ -293,7 +294,7 @@ describe('FlowRunnerService', () => {
       expect.objectContaining({
         source: 'flow',
         parentFlowRunId: flowRunId,
-        repo: 'my-repo',
+        cwd: '/tmp/my-repo',
         prompt: 'Build feat-1',
       }),
     );

@@ -7,22 +7,22 @@ import {
   Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { runSourceEnum, runStatusEnum } from '../../database/runs.schema.js';
+import { runSources, runStatuses } from '../../database/runs.schema.js';
 
 export class ListRunsDto {
   @IsOptional()
   @IsString()
-  @IsIn(runStatusEnum.enumValues)
+  @IsIn(runStatuses)
   status?: string;
 
   @IsOptional()
   @IsString()
-  @IsIn(runSourceEnum.enumValues)
+  @IsIn(runSources)
   source?: string;
 
   @IsOptional()
   @IsString()
-  repo?: string;
+  cwd?: string;
 
   @IsOptional()
   @IsString()

@@ -8,10 +8,11 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as yaml from 'js-yaml';
+import { normalizeCwd } from '../common/utils/cwd-path.js';
 
 export interface FlowAgentConfig {
   name: string;
-  target: string;
+  cwd: string;
   prompt: string;
 }
 
@@ -115,25 +116,25 @@ export class FlowConfigService {
     const validatedAgents: FlowAgentConfig[] = [];
     for (const agent of agents as Record<string, unknown>[]) {
       const agentName = agent['name'];
-      const target = agent['target'];
+      const cwd = agent['cwd'];
       const prompt = agent['prompt'];
 
       if (
         !agentName ||
         typeof agentName !== 'string' ||
-        !target ||
-        typeof target !== 'string' ||
+        !cwd ||
+        typeof cwd !== 'string' ||
         !prompt ||
         typeof prompt !== 'string'
       ) {
         throw new BadRequestException(
-          `Flow "${name}" agent is missing required fields (name, target, prompt): ${JSON.stringify(agent)}`,
+          `Flow "${name}" agent is missing required fields (name, cwd, prompt): ${JSON.stringify(agent)}`,
         );
       }
 
       validatedAgents.push({
         name: agentName,
-        target,
+        cwd: normalizeCwd(cwd, `flow "${name}" agent "${agentName}" cwd`),
         prompt,
       });
     }

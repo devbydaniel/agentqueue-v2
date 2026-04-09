@@ -164,14 +164,14 @@ export class FlowRunnerService {
     await this.flowRunRepository.save(ctx.run);
 
     this.logger.log(
-      `Flow run ${ctx.run.flowRunId}: dispatching agent "${agentName}" → ${agentConfig.target}`,
+      `Flow run ${ctx.run.flowRunId}: dispatching agent "${agentName}" → ${agentConfig.cwd}`,
     );
 
     try {
       const { runId } = await this.runsService.enqueue({
         source: 'flow',
         parentFlowRunId: ctx.run.flowRunId,
-        repo: agentConfig.target,
+        cwd: agentConfig.cwd,
         prompt: renderedPrompt,
       });
 

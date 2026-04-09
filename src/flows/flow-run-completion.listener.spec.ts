@@ -1,3 +1,4 @@
+/* eslint-disable sonarjs/publicly-writable-directories */
 import { FlowRunCompletionListener } from './flow-run-completion.listener.js';
 import type { RunRepository } from '../runs/run.repository.js';
 import type { AppConfigService } from '../config/app-config.service.js';
@@ -9,7 +10,7 @@ function makeRun(overrides: Partial<Run> = {}): Run {
     source: 'flow',
     triggerName: null,
     parentFlowRunId: 'flow-run-1',
-    repo: 'core',
+    cwd: '/tmp/core',
     prompt: 'do something',
     promptPreview: 'do something',
     status: 'succeeded',

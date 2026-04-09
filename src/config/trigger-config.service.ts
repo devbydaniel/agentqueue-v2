@@ -213,29 +213,30 @@ export class TriggerConfigService implements OnModuleInit {
           }),
         );
 
-	      const telegramEntries = raw
-	        .filter((t) => t['type'] === 'telegram')
-	        .filter((t) => this.validateTelegramTrigger(t))
-	        .map(
-	          (entry): TelegramTrigger => ({
+      const telegramEntries = raw
+        .filter((t) => t['type'] === 'telegram')
+        .filter((t) => this.validateTelegramTrigger(t))
+        .map(
+          (entry): TelegramTrigger => ({
             name: entry['name'] as string,
             type: 'telegram',
             bot_name: entry['bot_name'] as string,
             bot_token: interpolateEnvVars(entry['bot_token'] as string),
             webhook_secret: interpolateEnvVars(
               entry['webhook_secret'] as string,
-	            ),
-	            user_id: String(entry['user_id']),
-	            cwd: normalizeCwd(entry['cwd'] as string, 'telegram trigger cwd'),
-	            ...((typeof entry['chat_id'] === 'string' ||
-	              typeof entry['chat_id'] === 'number') && entry['chat_id']
-	              ? { chat_id: String(entry['chat_id']) }
-	              : {}),
-	            ...(entry['prepend_system_prompt']
-	              ? {
-	                  prepend_system_prompt: entry[
-	                    'prepend_system_prompt'
-	                  ] as string,
+            ),
+            user_id: String(entry['user_id']),
+            cwd: normalizeCwd(entry['cwd'] as string, 'telegram trigger cwd'),
+            ...((typeof entry['chat_id'] === 'string' ||
+              typeof entry['chat_id'] === 'number') &&
+            entry['chat_id']
+              ? { chat_id: String(entry['chat_id']) }
+              : {}),
+            ...(entry['prepend_system_prompt']
+              ? {
+                  prepend_system_prompt: entry[
+                    'prepend_system_prompt'
+                  ] as string,
                 }
               : {}),
             ...(entry['append_system_prompt']

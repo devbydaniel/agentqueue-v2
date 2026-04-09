@@ -5,7 +5,7 @@ export const runSources = [
   'github',
   'flow',
   'telegram',
- ] as const;
+] as const;
 
 export const runStatuses = [
   'waiting',

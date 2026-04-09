@@ -1,7 +1,6 @@
-import { eq } from 'drizzle-orm';
+/* eslint-disable sonarjs/publicly-writable-directories */
 import { getTestDb, truncateAll } from '../../test/integration/db.js';
 import { RunRepository } from './run.repository.js';
-import { runs } from '../database/runs.schema.js';
 
 /**
  * Integration test for the enqueue → process lifecycle.
@@ -30,7 +29,7 @@ describe('RunProcessor lifecycle (integration)', () => {
     // 1. Create a run (simulates enqueue)
     const run = await runRepo.create({
       source: 'manual',
-      repo: 'test-repo',
+      cwd: '/tmp/test-repo',
       prompt: 'hello world',
     });
     expect(run.status).toBe('waiting');
@@ -65,7 +64,7 @@ describe('RunProcessor lifecycle (integration)', () => {
     const run = await runRepo.create({
       source: 'cron',
       triggerName: 'daily-check',
-      repo: 'test-repo',
+      cwd: '/tmp/test-repo',
       prompt: 'run check',
     });
 
@@ -91,7 +90,7 @@ describe('RunProcessor lifecycle (integration)', () => {
     const run = await runRepo.create({
       source: 'linear',
       triggerName: 'my-agent',
-      repo: 'core',
+      cwd: '/tmp/core',
       prompt: 'fix the bug',
       externalSessionId: 'linear-session-123',
       prependSystemPrompt: 'You are a helpful agent',
@@ -109,7 +108,7 @@ describe('RunProcessor lifecycle (integration)', () => {
   it('should track attemptsMade across multiple processing attempts', async () => {
     const run = await runRepo.create({
       source: 'manual',
-      repo: 'test-repo',
+      cwd: '/tmp/test-repo',
       prompt: 'retry me',
     });
 
@@ -126,22 +125,23 @@ describe('RunProcessor lifecycle (integration)', () => {
 
     // Simulate retry: reset to running with incremented attempts
     const db = getTestDb();
-    await db
-      .update(runs)
-      .set({
-        status: 'running',
-        attemptsMade: 2,
-        errorMessage: null,
-        completedAt: null,
-        startedAt: new Date(),
-      })
-      .where(eq(runs.id, run.id));
+    await db.query(
+      `UPDATE runs
+      SET
+        status = 'running',
+        attempts_made = 2,
+        error_message = NULL,
+        completed_at = NULL,
+        started_at = $2
+      WHERE id = $1`,
+      [run.id, new Date()],
+    );
 
     // Succeed on second attempt
-    await db
-      .update(runs)
-      .set({ status: 'succeeded', completedAt: new Date() })
-      .where(eq(runs.id, run.id));
+    await db.query(
+      'UPDATE runs SET status = $2, completed_at = $3 WHERE id = $1',
+      [run.id, 'succeeded', new Date()],
+    );
 
     const finalRun = await runRepo.findById(run.id);
     expect(finalRun!.status).toBe('succeeded');

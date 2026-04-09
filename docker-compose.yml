@@ -9,7 +9,6 @@ services:
       NODE_ENV: production
       DATABASE_URL: postgres://agentqueue:agentqueue@postgres:5432/agentqueue
     volumes:
-      - ${AGENTFILES_CONFIG:-~/.config/agentfiles}:/home/app/.config/agentfiles:ro
       - ${AGENTQUEUE_CONFIG:-~/.agentqueue}:/home/app/.agentqueue:ro
     depends_on:
       postgres:

@@ -9,7 +9,7 @@ import {
 export class EnqueueRunDto {
   @IsString()
   @IsNotEmpty()
-  repo!: string;
+  cwd!: string;
 
   @IsString()
   @IsNotEmpty()

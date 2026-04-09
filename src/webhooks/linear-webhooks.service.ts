@@ -6,10 +6,10 @@ import {
 } from '@nestjs/common';
 import { TriggerConfigService } from '../config/trigger-config.service.js';
 import { interpolateTemplate } from '../config/trigger-config.interface.js';
-import { AgentfilesConfigService } from '../config/agentfiles-config.service.js';
 import { RunsService } from '../runs/runs.service.js';
 import { LinearCallbackHandler } from '../callbacks/handlers/linear.callback-handler.js';
 import { LinearWebhookParserService } from './linear-webhook-parser.service.js';
+import { ensureDirectoryExists } from '../common/utils/cwd-path.js';
 
 export interface HandleLinearWebhookParams {
   agentName: string;
@@ -38,7 +38,6 @@ export class LinearWebhooksService {
   constructor(
     private readonly triggerConfigService: TriggerConfigService,
     private readonly linearWebhookParserService: LinearWebhookParserService,
-    private readonly agentfilesConfigService: AgentfilesConfigService,
     private readonly runsService: RunsService,
   ) {}
 
@@ -118,9 +117,8 @@ export class LinearWebhooksService {
       return;
     }
 
-    // 6. Resolve repo from target
-    const repo = linearConfig.target;
-    this.agentfilesConfigService.resolveRepo(repo); // throws RepoNotFoundError if not found
+    // 6. Resolve cwd from config
+    const cwd = ensureDirectoryExists(linearConfig.cwd, 'linear trigger cwd');
 
     // 7. Build prompt
     const prompt =
@@ -134,7 +132,7 @@ export class LinearWebhooksService {
       agentSessionId: payload.agentSessionId,
       action: payload.action,
       agentName: params.agentName,
-      target: repo,
+      cwd,
     };
 
     const prependSystemPrompt = linearConfig.prepend_system_prompt
@@ -155,7 +153,7 @@ export class LinearWebhooksService {
       .enqueue({
         source: 'linear',
         triggerName: params.agentName,
-        repo,
+        cwd,
         prompt,
         externalSessionId: payload.agentSessionId,
         prependSystemPrompt,

@@ -174,7 +174,10 @@ describe('RunProcessorService', () => {
     });
 
     it('should call dispose() on success', async () => {
-      await service.runSession({ cwd: '/home/user/dev/my-repo', prompt: 'hello' });
+      await service.runSession({
+        cwd: '/home/user/dev/my-repo',
+        prompt: 'hello',
+      });
 
       expect(mockDispose).toHaveBeenCalled();
     });
@@ -302,7 +305,10 @@ describe('RunProcessorService', () => {
     });
 
     it('should not track when no externalSessionId is provided', async () => {
-      await service.runSession({ cwd: '/home/user/dev/my-repo', prompt: 'hello' });
+      await service.runSession({
+        cwd: '/home/user/dev/my-repo',
+        prompt: 'hello',
+      });
 
       expect(activeSessionTracker.track).not.toHaveBeenCalled();
       expect(activeSessionTracker.untrack).not.toHaveBeenCalled();

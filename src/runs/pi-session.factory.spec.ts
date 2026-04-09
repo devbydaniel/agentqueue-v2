@@ -150,9 +150,9 @@ describe('PiSessionFactory', () => {
   describe('session resumption', () => {
     it('should open existing session when repository has a stored file', async () => {
       const { SessionManager } = await import('@mariozechner/pi-coding-agent');
-      (externalSessionRepository.findFilePath as jest.Mock).mockResolvedValueOnce(
-        '/sessions/existing.jsonl',
-      );
+      (
+        externalSessionRepository.findFilePath as jest.Mock
+      ).mockResolvedValueOnce('/sessions/existing.jsonl');
 
       await factory.create({
         cwd: '/home/user/dev/my-repo',
@@ -171,9 +171,9 @@ describe('PiSessionFactory', () => {
 
     it('should fall back to create when open fails', async () => {
       const { SessionManager } = await import('@mariozechner/pi-coding-agent');
-      (externalSessionRepository.findFilePath as jest.Mock).mockResolvedValueOnce(
-        '/sessions/missing.jsonl',
-      );
+      (
+        externalSessionRepository.findFilePath as jest.Mock
+      ).mockResolvedValueOnce('/sessions/missing.jsonl');
       (SessionManager.open as jest.Mock).mockImplementationOnce(() => {
         throw new Error('file not found');
       });

@@ -46,7 +46,7 @@ export class CronSchedulerService implements OnModuleInit, OnModuleDestroy {
 
       this.tasks.push(task);
       this.logger.log(
-        `Registered cron trigger "${trigger.name}" [${trigger.schedule}] → ${trigger.target}`,
+        `Registered cron trigger "${trigger.name}" [${trigger.schedule}] → ${trigger.cwd}`,
       );
     }
 
@@ -64,7 +64,7 @@ export class CronSchedulerService implements OnModuleInit, OnModuleDestroy {
 
   private async handleCronTick(trigger: CronTrigger): Promise<void> {
     this.logger.log(`Cron trigger "${trigger.name}" fired, executing run`, {
-      repo: trigger.target,
+      cwd: trigger.cwd,
     });
 
     let prompt = trigger.prompt;
@@ -86,7 +86,7 @@ export class CronSchedulerService implements OnModuleInit, OnModuleDestroy {
       triggerName: trigger.name,
       schedule: trigger.schedule,
       date: new Date().toISOString().slice(0, 10),
-      target: trigger.target,
+      cwd: trigger.cwd,
     };
 
     const prependSystemPrompt = trigger.prepend_system_prompt
@@ -99,7 +99,7 @@ export class CronSchedulerService implements OnModuleInit, OnModuleDestroy {
     const { runId } = await this.runsService.enqueue({
       source: 'cron',
       triggerName: trigger.name,
-      repo: trigger.target,
+      cwd: trigger.cwd,
       prompt,
       prependSystemPrompt,
       appendSystemPrompt,

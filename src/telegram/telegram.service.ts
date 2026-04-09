@@ -94,9 +94,8 @@ export class TelegramService {
       return;
     }
 
-    const session = await this.externalSessionRepository.findBySessionKey(
-      sessionKey,
-    );
+    const session =
+      await this.externalSessionRepository.findBySessionKey(sessionKey);
     if (!session || session.provider !== 'telegram' || !session.chatId) {
       this.logger.debug('Skipping Telegram reply because session is missing', {
         triggerName,

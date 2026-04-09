@@ -1,3 +1,4 @@
+/* eslint-disable sonarjs/publicly-writable-directories */
 import * as cron from 'node-cron';
 import { CronSchedulerService } from './cron-scheduler.service.js';
 import type { TriggerConfigService } from '../config/trigger-config.service.js';
@@ -46,7 +47,7 @@ describe('CronSchedulerService', () => {
     return {
       name: 'test-trigger',
       schedule: '0 8 * * *',
-      target: 'assistant',
+      cwd: '/tmp/assistant',
       prompt: 'Run test',
       ...overrides,
     };
@@ -128,7 +129,7 @@ describe('CronSchedulerService', () => {
   describe('cron tick handler', () => {
     it('should call runsService when cron fires', async () => {
       triggerConfigService.getCronTriggers.mockReturnValue([
-        makeTrigger({ target: 'myrepo', prompt: 'Do something' }),
+        makeTrigger({ cwd: '/tmp/myrepo', prompt: 'Do something' }),
       ]);
       (cron.validate as jest.Mock).mockReturnValue(true);
 
@@ -145,7 +146,7 @@ describe('CronSchedulerService', () => {
       expect(runsService.enqueue).toHaveBeenCalledWith({
         source: 'cron',
         triggerName: 'test-trigger',
-        repo: 'myrepo',
+        cwd: '/tmp/myrepo',
         prompt: 'Do something',
         prependSystemPrompt: undefined,
         appendSystemPrompt: undefined,
@@ -171,9 +172,9 @@ describe('CronSchedulerService', () => {
     it('should pass interpolated prepend_system_prompt to enqueue', async () => {
       triggerConfigService.getCronTriggers.mockReturnValue([
         makeTrigger({
-          target: 'myrepo',
+          cwd: '/tmp/myrepo',
           prompt: 'Do something',
-          prepend_system_prompt: 'Trigger: {{triggerName}}, target: {{target}}',
+          prepend_system_prompt: 'Trigger: {{triggerName}}, cwd: {{cwd}}',
         }),
       ]);
       (cron.validate as jest.Mock).mockReturnValue(true);
@@ -189,7 +190,7 @@ describe('CronSchedulerService', () => {
 
       expect(runsService.enqueue).toHaveBeenCalledWith(
         expect.objectContaining({
-          prependSystemPrompt: 'Trigger: test-trigger, target: myrepo',
+          prependSystemPrompt: 'Trigger: test-trigger, cwd: /tmp/myrepo',
         }),
       );
     });
@@ -197,7 +198,7 @@ describe('CronSchedulerService', () => {
     it('should pass interpolated append_system_prompt to enqueue', async () => {
       triggerConfigService.getCronTriggers.mockReturnValue([
         makeTrigger({
-          target: 'myrepo',
+          cwd: '/tmp/myrepo',
           prompt: 'Do something',
           append_system_prompt: 'Schedule: {{schedule}}',
         }),
@@ -222,7 +223,7 @@ describe('CronSchedulerService', () => {
 
     it('should not pass system prompt fields when trigger has no templates', async () => {
       triggerConfigService.getCronTriggers.mockReturnValue([
-        makeTrigger({ target: 'myrepo', prompt: 'Do something' }),
+        makeTrigger({ cwd: '/tmp/myrepo', prompt: 'Do something' }),
       ]);
       (cron.validate as jest.Mock).mockReturnValue(true);
 
