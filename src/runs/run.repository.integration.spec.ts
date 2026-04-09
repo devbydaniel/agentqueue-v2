@@ -6,15 +6,16 @@ import {
   truncateAll,
   closeTestDb,
 } from '../../test/integration/db.js';
-import type { DrizzleDb } from '../database/database.tokens.js';
+import type { PgPool } from '../database/database.tokens.js';
 
 describe('RunRepository (integration)', () => {
   let repo: RunRepository;
-  let db: DrizzleDb;
+  let db: PgPool;
 
   const baseCommand: CreateRunCommand = {
     source: 'manual',
-    repo: 'my-repo',
+    // eslint-disable-next-line sonarjs/publicly-writable-directories -- test-only placeholder path
+    cwd: '/tmp/my-repo',
     prompt: 'Fix the failing tests',
   };
 
@@ -38,7 +39,8 @@ describe('RunRepository (integration)', () => {
 
       expect(run.id).toBeDefined();
       expect(run.source).toBe('manual');
-      expect(run.repo).toBe('my-repo');
+      // eslint-disable-next-line sonarjs/publicly-writable-directories -- test-only placeholder path
+      expect(run.cwd).toBe('/tmp/my-repo');
       expect(run.prompt).toBe('Fix the failing tests');
       expect(run.promptPreview).toBe('Fix the failing tests');
       expect(run.status).toBe('waiting');
@@ -80,7 +82,8 @@ describe('RunRepository (integration)', () => {
 
       expect(found).not.toBeNull();
       expect(found!.id).toBe(created.id);
-      expect(found!.repo).toBe('my-repo');
+      // eslint-disable-next-line sonarjs/publicly-writable-directories -- test-only placeholder path
+      expect(found!.cwd).toBe('/tmp/my-repo');
     });
 
     it('should return null when the run does not exist', async () => {
@@ -175,11 +178,14 @@ describe('RunRepository (integration)', () => {
       expect(results[0].id).toBe(cronRun.id);
     });
 
-    it('should filter by repo', async () => {
-      await repo.create({ ...baseCommand, repo: 'other-repo' });
-      const myRun = await repo.create({ ...baseCommand, repo: 'my-repo' });
+    it('should filter by cwd', async () => {
+      // eslint-disable-next-line sonarjs/publicly-writable-directories -- test-only placeholder path
+      await repo.create({ ...baseCommand, cwd: '/tmp/other-repo' });
+      // eslint-disable-next-line sonarjs/publicly-writable-directories -- test-only placeholder path
+      const myRun = await repo.create({ ...baseCommand, cwd: '/tmp/my-repo' });
 
-      const results = await repo.findMany({ repo: 'my-repo' });
+      // eslint-disable-next-line sonarjs/publicly-writable-directories -- test-only placeholder path
+      const results = await repo.findMany({ cwd: '/tmp/my-repo' });
 
       expect(results).toHaveLength(1);
       expect(results[0].id).toBe(myRun.id);

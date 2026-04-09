@@ -6,17 +6,18 @@ import {
   truncateAll,
   closeTestDb,
 } from '../../test/integration/db.js';
-import type { DrizzleDb } from '../database/database.tokens.js';
+import type { PgPool } from '../database/database.tokens.js';
 
 describe('RunEventRepository (integration)', () => {
   let eventRepo: RunEventRepository;
   let runRepo: RunRepository;
-  let db: DrizzleDb;
+  let db: PgPool;
   let runId: string;
 
   const baseCommand: CreateRunCommand = {
     source: 'manual',
-    repo: 'my-repo',
+    // eslint-disable-next-line sonarjs/publicly-writable-directories -- test-only placeholder path
+    cwd: '/tmp/my-repo',
     prompt: 'Fix the failing tests',
   };
 

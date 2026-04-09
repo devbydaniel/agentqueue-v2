@@ -1,34 +1,30 @@
-import {
-  pgTable,
-  uuid,
-  varchar,
-  text,
-  jsonb,
-  timestamp,
-  pgEnum,
-} from 'drizzle-orm/pg-core';
-
-export const flowRunStatusEnum = pgEnum('flow_run_status', [
+export const flowRunStatuses = [
   'running',
   'done',
   'escalated',
   'errored',
   'aborted',
   'interrupted',
-]);
+] as const;
 
-export const flowRuns = pgTable('flow_runs', {
-  flowRunId: uuid('flow_run_id').primaryKey().defaultRandom(),
-  flowName: varchar('flow_name', { length: 255 }).notNull(),
-  status: flowRunStatusEnum('status').notNull().default('running'),
-  vars: jsonb('vars').$type<Record<string, string>>().notNull().default({}),
-  currentAgent: varchar('current_agent', { length: 255 }),
-  message: text('message'),
-  startedAt: timestamp('started_at', { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-  completedAt: timestamp('completed_at', { withTimezone: true }),
-});
+export interface FlowRunRow {
+  flowRunId: string;
+  flowName: string;
+  status: (typeof flowRunStatuses)[number];
+  vars: Record<string, string>;
+  currentAgent: string | null;
+  message: string | null;
+  startedAt: Date;
+  completedAt: Date | null;
+}
 
-export type FlowRunRow = typeof flowRuns.$inferSelect;
-export type NewFlowRunRow = typeof flowRuns.$inferInsert;
+export interface NewFlowRunRow {
+  flowRunId?: string;
+  flowName: string;
+  status?: FlowRunRow['status'];
+  vars: Record<string, string>;
+  currentAgent?: string | null;
+  message?: string | null;
+  startedAt?: Date;
+  completedAt?: Date | null;
+}

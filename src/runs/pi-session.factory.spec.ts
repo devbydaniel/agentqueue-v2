@@ -1,6 +1,6 @@
 import { Test } from '@nestjs/testing';
 import { PiSessionFactory } from './pi-session.factory.js';
-import { LinearSessionRepository } from './linear-session.repository.js';
+import { ExternalSessionRepository } from './external-session.repository.js';
 
 // Mock the pi SDK module
 const mockSession = {
@@ -36,7 +36,7 @@ jest.mock(
 
 describe('PiSessionFactory', () => {
   let factory: PiSessionFactory;
-  let linearSessionRepository: LinearSessionRepository;
+  let externalSessionRepository: ExternalSessionRepository;
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -45,17 +45,17 @@ describe('PiSessionFactory', () => {
       providers: [
         PiSessionFactory,
         {
-          provide: LinearSessionRepository,
+          provide: ExternalSessionRepository,
           useValue: {
             findFilePath: jest.fn().mockResolvedValue(null),
-            saveFilePath: jest.fn().mockResolvedValue(undefined),
+            upsertSession: jest.fn().mockResolvedValue(undefined),
           },
         },
       ],
     }).compile();
 
     factory = module.get(PiSessionFactory);
-    linearSessionRepository = module.get(LinearSessionRepository);
+    externalSessionRepository = module.get(ExternalSessionRepository);
   });
 
   it('should create a fresh session when no externalSessionId is provided', async () => {
@@ -150,16 +150,17 @@ describe('PiSessionFactory', () => {
   describe('session resumption', () => {
     it('should open existing session when repository has a stored file', async () => {
       const { SessionManager } = await import('@mariozechner/pi-coding-agent');
-      (linearSessionRepository.findFilePath as jest.Mock).mockResolvedValueOnce(
+      (externalSessionRepository.findFilePath as jest.Mock).mockResolvedValueOnce(
         '/sessions/existing.jsonl',
       );
 
       await factory.create({
         cwd: '/home/user/dev/my-repo',
         externalSessionId: 'linear-session-1',
+        externalSessionProvider: 'linear',
       });
 
-      expect(linearSessionRepository.findFilePath).toHaveBeenCalledWith(
+      expect(externalSessionRepository.findFilePath).toHaveBeenCalledWith(
         'linear-session-1',
       );
       expect(SessionManager.open).toHaveBeenCalledWith(
@@ -170,7 +171,7 @@ describe('PiSessionFactory', () => {
 
     it('should fall back to create when open fails', async () => {
       const { SessionManager } = await import('@mariozechner/pi-coding-agent');
-      (linearSessionRepository.findFilePath as jest.Mock).mockResolvedValueOnce(
+      (externalSessionRepository.findFilePath as jest.Mock).mockResolvedValueOnce(
         '/sessions/missing.jsonl',
       );
       (SessionManager.open as jest.Mock).mockImplementationOnce(() => {
@@ -180,6 +181,7 @@ describe('PiSessionFactory', () => {
       await factory.create({
         cwd: '/home/user/dev/my-repo',
         externalSessionId: 'linear-session-1',
+        externalSessionProvider: 'linear',
       });
 
       expect(SessionManager.open).toHaveBeenCalled();
@@ -190,12 +192,14 @@ describe('PiSessionFactory', () => {
       await factory.create({
         cwd: '/home/user/dev/my-repo',
         externalSessionId: 'linear-session-1',
+        externalSessionProvider: 'linear',
       });
 
-      expect(linearSessionRepository.saveFilePath).toHaveBeenCalledWith(
-        'linear-session-1',
-        '/sessions/test-session.jsonl',
-      );
+      expect(externalSessionRepository.upsertSession).toHaveBeenCalledWith({
+        provider: 'linear',
+        sessionKey: 'linear-session-1',
+        filePath: '/sessions/test-session.jsonl',
+      });
     });
 
     it('should not query repository when no externalSessionId is provided', async () => {
@@ -203,8 +207,8 @@ describe('PiSessionFactory', () => {
 
       await factory.create({ cwd: '/home/user/dev/my-repo' });
 
-      expect(linearSessionRepository.findFilePath).not.toHaveBeenCalled();
-      expect(linearSessionRepository.saveFilePath).not.toHaveBeenCalled();
+      expect(externalSessionRepository.findFilePath).not.toHaveBeenCalled();
+      expect(externalSessionRepository.upsertSession).not.toHaveBeenCalled();
       expect(SessionManager.create).toHaveBeenCalled();
       expect(SessionManager.open).not.toHaveBeenCalled();
     });

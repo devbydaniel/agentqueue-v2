@@ -6,9 +6,8 @@ import {
   type Provider,
 } from '@nestjs/common';
 import pg from 'pg';
-import { drizzle } from 'drizzle-orm/node-postgres';
 import { AppConfigService } from '../config/app-config.service.js';
-import { PG_POOL, DRIZZLE } from './database.tokens.js';
+import { PG_POOL } from './database.tokens.js';
 
 export const databaseProviders: Provider[] = [
   {
@@ -17,13 +16,6 @@ export const databaseProviders: Provider[] = [
       return new pg.Pool({ connectionString: config.databaseUrl });
     },
     inject: [AppConfigService],
-  },
-  {
-    provide: DRIZZLE,
-    useFactory: (pool: pg.Pool) => {
-      return drizzle(pool);
-    },
-    inject: [PG_POOL],
   },
 ];
 

@@ -3,11 +3,11 @@ import {
   databaseProviders,
   DatabaseShutdownService,
 } from './database.providers.js';
-import { PG_POOL, DRIZZLE } from './database.tokens.js';
+import { PG_POOL } from './database.tokens.js';
 
 @Global()
 @Module({
   providers: [...databaseProviders, DatabaseShutdownService],
-  exports: [PG_POOL, DRIZZLE],
+  exports: [PG_POOL],
 })
 export class DatabaseModule {}

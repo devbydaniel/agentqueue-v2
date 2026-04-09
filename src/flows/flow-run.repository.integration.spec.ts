@@ -6,12 +6,12 @@ import {
   truncateAll,
   closeTestDb,
 } from '../../test/integration/db.js';
-import type { DrizzleDb } from '../database/database.tokens.js';
+import type { PgPool } from '../database/database.tokens.js';
 
 describe('FlowRunRepository (integration)', () => {
   let repo: FlowRunRepository;
   let runRepo: RunRepository;
-  let db: DrizzleDb;
+  let db: PgPool;
 
   beforeAll(() => {
     db = getTestDb();
@@ -148,7 +148,8 @@ describe('FlowRunRepository (integration)', () => {
       // Create a real run row so the FK is satisfied
       const agentRun = await runRepo.create({
         source: 'flow',
-        repo: 'test-repo',
+        // eslint-disable-next-line sonarjs/publicly-writable-directories -- test-only placeholder path
+        cwd: '/tmp/test-repo',
         prompt: 'test prompt',
       });
 

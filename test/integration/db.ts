@@ -1,12 +1,10 @@
 import pg from 'pg';
-import { drizzle } from 'drizzle-orm/node-postgres';
-import { sql } from 'drizzle-orm';
-import type { DrizzleDb } from '../../src/database/database.tokens.js';
+import type { PgPool } from '../../src/database/database.tokens.js';
 
 let pool: pg.Pool;
-let db: DrizzleDb;
+let db: PgPool;
 
-export function getTestDb(): DrizzleDb {
+export function getTestDb(): PgPool {
   if (!db) {
     const connectionString = process.env.TEST_DATABASE_URL;
     if (!connectionString) {
@@ -15,7 +13,7 @@ export function getTestDb(): DrizzleDb {
       );
     }
     pool = new pg.Pool({ connectionString });
-    db = drizzle(pool);
+    db = pool;
   }
   return db;
 }
@@ -26,9 +24,8 @@ export function getTestPool(): pg.Pool {
 }
 
 export async function truncateAll(): Promise<void> {
-  const testDb = getTestDb();
-  await testDb.execute(
-    sql`TRUNCATE TABLE linear_sessions, flow_steps, flow_runs, run_events, runs CASCADE`,
+  await getTestDb().query(
+    'TRUNCATE TABLE external_sessions, flow_steps, flow_runs, run_events, runs CASCADE',
   );
 }
 

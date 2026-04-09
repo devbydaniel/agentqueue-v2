@@ -1,11 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common';
 import type { AgentSession } from '@mariozechner/pi-coding-agent';
-import { LinearSessionRepository } from './linear-session.repository.js';
+import {
+  ExternalSessionRepository,
+  type ExternalSessionProvider,
+} from './external-session.repository.js';
 
 export interface CreatePiSessionOptions {
   cwd: string;
   /** Optional external ID to resume / store the underlying pi session file under */
   externalSessionId?: string;
+  externalSessionProvider?: ExternalSessionProvider;
   /** System prompt snippet to prepend before the base system prompt */
   prependSystemPrompt?: string;
   /** System prompt snippet to append after the base system prompt */
@@ -23,7 +27,7 @@ export interface CreatedPiSession {
  *
  * Owns the verbose pi SDK plumbing — auth storage, model registry, settings,
  * resource loader (with optional system-prompt overrides), and session
- * resume-or-create against `LinearSessionRepository`. `RunsService` calls
+ * resume-or-create against `ExternalSessionRepository`. `RunsService` calls
  * this and never imports `@mariozechner/pi-coding-agent` directly.
  */
 @Injectable()
@@ -31,7 +35,7 @@ export class PiSessionFactory {
   private readonly logger = new Logger(PiSessionFactory.name);
 
   constructor(
-    private readonly linearSessionRepository: LinearSessionRepository,
+    private readonly externalSessionRepository: ExternalSessionRepository,
   ) {}
 
   async create(options: CreatePiSessionOptions): Promise<CreatedPiSession> {
@@ -72,7 +76,7 @@ export class PiSessionFactory {
 
     // Resume existing pi session or create a new one
     const existingSessionFile = options.externalSessionId
-      ? await this.linearSessionRepository.findFilePath(
+      ? await this.externalSessionRepository.findFilePath(
           options.externalSessionId,
         )
       : null;
@@ -106,13 +110,14 @@ export class PiSessionFactory {
     });
 
     // Store session file path for future resumption
-    if (options.externalSessionId) {
+    if (options.externalSessionId && options.externalSessionProvider) {
       const sessionFile = sessionMgr.getSessionFile();
       if (sessionFile) {
-        await this.linearSessionRepository.saveFilePath(
-          options.externalSessionId,
-          sessionFile,
-        );
+        await this.externalSessionRepository.upsertSession({
+          provider: options.externalSessionProvider,
+          sessionKey: options.externalSessionId,
+          filePath: sessionFile,
+        });
       }
     }
 

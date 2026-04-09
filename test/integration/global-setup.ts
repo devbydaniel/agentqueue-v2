@@ -2,10 +2,8 @@ import {
   PostgreSqlContainer,
   type StartedPostgreSqlContainer,
 } from '@testcontainers/postgresql';
-import { drizzle } from 'drizzle-orm/node-postgres';
-import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import pg from 'pg';
-import path from 'node:path';
+import { applyMigrations } from './migrate';
 
 let container: StartedPostgreSqlContainer;
 
@@ -34,12 +32,9 @@ export default async function globalSetup() {
 
   const connectionString = container.getConnectionUri();
 
-  // Run Drizzle migrations
+  // Run SQL migrations
   const pool = new pg.Pool({ connectionString });
-  const db = drizzle(pool);
-  await migrate(db, {
-    migrationsFolder: path.resolve(__dirname, '../../src/database/migrations'),
-  });
+  await applyMigrations(pool);
   await pool.end();
 
   // Expose to test environment

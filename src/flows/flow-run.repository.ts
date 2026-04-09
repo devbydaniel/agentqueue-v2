@@ -1,11 +1,9 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { eq, asc, inArray } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
-import type { DrizzleDb } from '../database/database.tokens.js';
-import { DRIZZLE } from '../database/database.tokens.js';
-import { flowRuns } from '../database/flow-runs.schema.js';
+import type { PgClient, PgPool } from '../database/database.tokens.js';
+import { PG_POOL } from '../database/database.tokens.js';
+import { mapRows } from '../database/query-helpers.js';
 import type { FlowRunRow } from '../database/flow-runs.schema.js';
-import { flowSteps } from '../database/flow-steps.schema.js';
 import type { FlowStepRow } from '../database/flow-steps.schema.js';
 
 export type FlowRunStatus =
@@ -73,7 +71,7 @@ function rowToFlowRun(row: FlowRunRow, stepRows: FlowStepRow[]): FlowRun {
 export class FlowRunRepository {
   private readonly logger = new Logger(FlowRunRepository.name);
 
-  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
+  constructor(@Inject(PG_POOL) private readonly pool: PgPool) {}
 
   async create(
     flowName: string,
@@ -81,54 +79,63 @@ export class FlowRunRepository {
   ): Promise<FlowRun> {
     const flowRunId = randomUUID();
 
-    const [row] = await this.db
-      .insert(flowRuns)
-      .values({
-        flowRunId,
-        flowName,
-        status: 'running',
-        vars,
-      })
-      .returning();
+    const result = await this.pool.query(
+      `INSERT INTO flow_runs (flow_run_id, flow_name, status, vars)
+      VALUES ($1, $2, 'running', $3)
+      RETURNING *`,
+      [flowRunId, flowName, vars],
+    );
+    const row = mapRows<FlowRunRow>(
+      result.rows as Record<string, unknown>[],
+    )[0];
 
     this.logger.log(`Created flow run ${flowRunId} for flow "${flowName}"`);
     return rowToFlowRun(row, []);
   }
 
   async findById(flowRunId: string): Promise<FlowRun | null> {
-    const rows = await this.db
-      .select()
-      .from(flowRuns)
-      .where(eq(flowRuns.flowRunId, flowRunId))
-      .limit(1);
+    const runResult = await this.pool.query(
+      'SELECT * FROM flow_runs WHERE flow_run_id = $1',
+      [flowRunId],
+    );
+    if (runResult.rowCount === 0) return null;
 
-    if (rows.length === 0) return null;
+    const stepResult = await this.pool.query(
+      `SELECT * FROM flow_steps
+      WHERE flow_run_id = $1
+      ORDER BY step_index ASC`,
+      [flowRunId],
+    );
 
-    const stepRows = await this.db
-      .select()
-      .from(flowSteps)
-      .where(eq(flowSteps.flowRunId, flowRunId))
-      .orderBy(asc(flowSteps.stepIndex));
+    const rows = mapRows<FlowRunRow>(runResult.rows as Record<string, unknown>[]);
+    const stepRows = mapRows<FlowStepRow>(
+      stepResult.rows as Record<string, unknown>[],
+    );
 
     return rowToFlowRun(rows[0], stepRows);
   }
 
   async findByFlowName(flowName: string): Promise<FlowRun[]> {
-    const runRows = await this.db
-      .select()
-      .from(flowRuns)
-      .where(eq(flowRuns.flowName, flowName));
-
+    const runResult = await this.pool.query(
+      'SELECT * FROM flow_runs WHERE flow_name = $1',
+      [flowName],
+    );
+    const runRows = mapRows<FlowRunRow>(
+      runResult.rows as Record<string, unknown>[],
+    );
     if (runRows.length === 0) return [];
 
     const runIds = runRows.map((r) => r.flowRunId);
-
-    // Fetch all steps for the matching runs in one query
-    const allStepRows = await this.db
-      .select()
-      .from(flowSteps)
-      .where(inArray(flowSteps.flowRunId, runIds))
-      .orderBy(asc(flowSteps.stepIndex));
+    const placeholders = runIds.map((_, index) => `$${index + 1}`).join(', ');
+    const stepResult = await this.pool.query(
+      `SELECT * FROM flow_steps
+      WHERE flow_run_id IN (${placeholders})
+      ORDER BY step_index ASC`,
+      runIds,
+    );
+    const allStepRows = mapRows<FlowStepRow>(
+      stepResult.rows as Record<string, unknown>[],
+    );
 
     // Group steps by flowRunId
     const stepsByRunId = new Map<string, FlowStepRow[]>();
@@ -144,66 +151,97 @@ export class FlowRunRepository {
   }
 
   async save(run: FlowRun): Promise<void> {
-    await this.db.transaction(async (tx) => {
-      await this.upsertFlowRun(tx, run);
-      await this.replaceSteps(tx, run);
-    });
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      await this.upsertFlowRun(client, run);
+      await this.replaceSteps(client, run);
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
-  private async upsertFlowRun(tx: DrizzleDb, run: FlowRun): Promise<void> {
-    await tx
-      .insert(flowRuns)
-      .values({
-        flowRunId: run.flowRunId,
-        flowName: run.flowName,
-        status: run.status,
-        vars: run.vars,
-        currentAgent: run.currentAgent ?? null,
-        message: run.message ?? null,
-        startedAt: run.startedAt,
-        completedAt: run.completedAt ?? null,
-      })
-      .onConflictDoUpdate({
-        target: flowRuns.flowRunId,
-        set: {
-          status: run.status,
-          vars: run.vars,
-          currentAgent: run.currentAgent ?? null,
-          message: run.message ?? null,
-          startedAt: run.startedAt,
-          completedAt: run.completedAt ?? null,
-        },
-      });
+  private async upsertFlowRun(tx: PgClient, run: FlowRun): Promise<void> {
+    await tx.query(
+      `INSERT INTO flow_runs (
+        flow_run_id,
+        flow_name,
+        status,
+        vars,
+        current_agent,
+        message,
+        started_at,
+        completed_at
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+      ON CONFLICT (flow_run_id) DO UPDATE SET
+        status = EXCLUDED.status,
+        vars = EXCLUDED.vars,
+        current_agent = EXCLUDED.current_agent,
+        message = EXCLUDED.message,
+        started_at = EXCLUDED.started_at,
+        completed_at = EXCLUDED.completed_at`,
+      [
+        run.flowRunId,
+        run.flowName,
+        run.status,
+        run.vars,
+        run.currentAgent ?? null,
+        run.message ?? null,
+        run.startedAt,
+        run.completedAt ?? null,
+      ],
+    );
   }
 
-  private async replaceSteps(tx: DrizzleDb, run: FlowRun): Promise<void> {
-    await tx.delete(flowSteps).where(eq(flowSteps.flowRunId, run.flowRunId));
+  private async replaceSteps(tx: PgClient, run: FlowRun): Promise<void> {
+    await tx.query('DELETE FROM flow_steps WHERE flow_run_id = $1', [
+      run.flowRunId,
+    ]);
 
     if (run.steps.length > 0) {
-      await tx.insert(flowSteps).values(
-        run.steps.map((step, index) => ({
-          flowRunId: run.flowRunId,
-          stepIndex: index,
-          agent: step.agent,
-          vars: step.vars,
-          startedAt: step.startedAt,
-          completedAt: step.completedAt ?? null,
-          success: step.success ?? null,
-          runId: step.runId ?? null,
-        })),
-      );
+      for (const [index, step] of run.steps.entries()) {
+        await tx.query(
+          `INSERT INTO flow_steps (
+            flow_run_id,
+            step_index,
+            agent,
+            vars,
+            started_at,
+            completed_at,
+            success,
+            run_id
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+          [
+            run.flowRunId,
+            index,
+            step.agent,
+            step.vars,
+            step.startedAt,
+            step.completedAt ?? null,
+            step.success ?? null,
+            step.runId ?? null,
+          ],
+        );
+      }
     }
   }
 
   async markRunningAsInterrupted(): Promise<{ flowRunId: string }[]> {
-    return this.db
-      .update(flowRuns)
-      .set({
-        status: 'interrupted',
-        message: 'Process restarted while flow was in progress',
-        completedAt: new Date(),
-      })
-      .where(eq(flowRuns.status, 'running'))
-      .returning({ flowRunId: flowRuns.flowRunId });
+    const result = await this.pool.query(
+      `UPDATE flow_runs
+      SET
+        status = 'interrupted',
+        message = 'Process restarted while flow was in progress',
+        completed_at = $1
+      WHERE status = 'running'
+      RETURNING flow_run_id AS "flowRunId"`,
+      [new Date()],
+    );
+
+    return result.rows as { flowRunId: string }[];
   }
 }

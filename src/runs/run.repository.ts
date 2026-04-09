@@ -1,14 +1,13 @@
 import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { and, desc, eq, gte, type SQL } from 'drizzle-orm';
-import type { DrizzleDb } from '../database/database.tokens.js';
-import { DRIZZLE } from '../database/database.tokens.js';
-import { runs, runSourceEnum, runStatusEnum } from '../database/runs.schema.js';
-import type { Run, NewRun } from '../database/runs.schema.js';
+import type { PgPool } from '../database/database.tokens.js';
+import { PG_POOL } from '../database/database.tokens.js';
+import { mapRow, mapRows } from '../database/query-helpers.js';
+import { runSources, runStatuses, type Run, type NewRun } from '../database/runs.schema.js';
 
 export interface ListRunsFilters {
   status?: string;
   source?: string;
-  repo?: string;
+  cwd?: string;
   trigger?: string;
   since?: string;
   limit?: number;
@@ -16,10 +15,10 @@ export interface ListRunsFilters {
 }
 
 export interface CreateRunCommand {
-  source: (typeof runSourceEnum.enumValues)[number];
+  source: (typeof runSources)[number];
   triggerName?: string;
   parentFlowRunId?: string;
-  repo: string;
+  cwd: string;
   prompt: string;
   externalSessionId?: string;
   prependSystemPrompt?: string;
@@ -27,18 +26,26 @@ export interface CreateRunCommand {
   timeoutMs?: number;
 }
 
+function mapRunRow(row: Record<string, unknown>): Run {
+  const mapped = mapRow<Record<string, unknown>>(row);
+  return {
+    ...(mapped as Omit<Run, 'externalSessionId'>),
+    externalSessionId: (row['external_session_id'] as string | null) ?? null,
+  };
+}
+
 @Injectable()
 export class RunRepository {
   private readonly logger = new Logger(RunRepository.name);
 
-  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
+  constructor(@Inject(PG_POOL) private readonly pool: PgPool) {}
 
   async create(command: CreateRunCommand): Promise<Run> {
     const newRun: NewRun = {
       source: command.source,
       triggerName: command.triggerName,
       parentFlowRunId: command.parentFlowRunId,
-      repo: command.repo,
+      cwd: command.cwd,
       prompt: command.prompt,
       promptPreview: command.prompt.slice(0, 500),
       externalSessionId: command.externalSessionId,
@@ -46,104 +53,151 @@ export class RunRepository {
       appendSystemPrompt: command.appendSystemPrompt,
       timeoutMs: command.timeoutMs,
     };
-
-    const [row] = await this.db.insert(runs).values(newRun).returning();
+    const result = await this.pool.query(
+      `INSERT INTO runs (
+        source,
+        trigger_name,
+        parent_flow_run_id,
+        cwd,
+        prompt,
+        prompt_preview,
+        external_session_id,
+        prepend_system_prompt,
+        append_system_prompt,
+        timeout_ms
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      RETURNING *`,
+      [
+        newRun.source,
+        newRun.triggerName ?? null,
+        newRun.parentFlowRunId ?? null,
+        newRun.cwd,
+        newRun.prompt,
+        newRun.promptPreview ?? null,
+        newRun.externalSessionId ?? null,
+        newRun.prependSystemPrompt ?? null,
+        newRun.appendSystemPrompt ?? null,
+        newRun.timeoutMs ?? null,
+      ],
+    );
+    const row = mapRunRow(result.rows[0] as Record<string, unknown>);
     this.logger.debug('Created run', { id: row.id, source: row.source });
     return row;
   }
 
   async findById(id: string): Promise<Run | null> {
-    const rows = await this.db
-      .select()
-      .from(runs)
-      .where(eq(runs.id, id))
-      .limit(1);
-    return rows[0] ?? null;
+    const result = await this.pool.query('SELECT * FROM runs WHERE id = $1', [
+      id,
+    ]);
+    return result.rows[0]
+      ? mapRunRow(result.rows[0] as Record<string, unknown>)
+      : null;
   }
 
   async save(run: Run): Promise<void> {
-    const result = await this.db
-      .update(runs)
-      .set({
-        status: run.status,
-        attemptsMade: run.attemptsMade,
-        startedAt: run.startedAt,
-        completedAt: run.completedAt,
-        errorMessage: run.errorMessage,
-        timeoutMs: run.timeoutMs,
-        queueJobId: run.queueJobId,
-        updatedAt: new Date(),
-      })
-      .where(eq(runs.id, run.id))
-      .returning({ id: runs.id });
+    const result = await this.pool.query(
+      `UPDATE runs
+      SET
+        status = $2,
+        attempts_made = $3,
+        started_at = $4,
+        completed_at = $5,
+        error_message = $6,
+        timeout_ms = $7,
+        queue_job_id = $8,
+        updated_at = $9
+      WHERE id = $1
+      RETURNING id`,
+      [
+        run.id,
+        run.status,
+        run.attemptsMade,
+        run.startedAt,
+        run.completedAt,
+        run.errorMessage,
+        run.timeoutMs,
+        run.queueJobId,
+        new Date(),
+      ],
+    );
 
-    if (result.length === 0) {
+    if (result.rowCount === 0) {
       throw new NotFoundException(`Run "${run.id}" not found`);
     }
   }
 
   async findMany(filters: ListRunsFilters = {}): Promise<Run[]> {
-    const conditions: SQL[] = [];
+    const conditions: string[] = [];
+    const values: unknown[] = [];
+    let index = 1;
 
     if (filters.status) {
-      conditions.push(
-        eq(
-          runs.status,
-          filters.status as (typeof runStatusEnum.enumValues)[number],
-        ),
-      );
+      conditions.push(`status = $${index++}`);
+      values.push(filters.status as (typeof runStatuses)[number]);
     }
     if (filters.source) {
-      conditions.push(
-        eq(
-          runs.source,
-          filters.source as (typeof runSourceEnum.enumValues)[number],
-        ),
-      );
+      conditions.push(`source = $${index++}`);
+      values.push(filters.source as (typeof runSources)[number]);
     }
-    if (filters.repo) {
-      conditions.push(eq(runs.repo, filters.repo));
+    if (filters.cwd) {
+      conditions.push(`cwd = $${index++}`);
+      values.push(filters.cwd);
     }
     if (filters.trigger) {
-      conditions.push(eq(runs.triggerName, filters.trigger));
+      conditions.push(`trigger_name = $${index++}`);
+      values.push(filters.trigger);
     }
     if (filters.since) {
-      conditions.push(gte(runs.createdAt, new Date(filters.since)));
+      conditions.push(`created_at >= $${index++}`);
+      values.push(new Date(filters.since));
     }
 
     const limit = Math.min(filters.limit ?? 50, 200);
     const offset = filters.offset ?? 0;
+    values.push(limit, offset);
 
-    return this.db
-      .select()
-      .from(runs)
-      .where(conditions.length > 0 ? and(...conditions) : undefined)
-      .orderBy(desc(runs.createdAt))
-      .limit(limit)
-      .offset(offset);
+    const whereClause =
+      conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const result = await this.pool.query(
+      `SELECT * FROM runs
+      ${whereClause}
+      ORDER BY created_at DESC
+      LIMIT $${index++}
+      OFFSET $${index}`,
+      values,
+    );
+
+    return (result.rows as Record<string, unknown>[]).map((row) =>
+      mapRunRow(row),
+    );
   }
 
   async markRunningAsInterrupted(): Promise<{ id: string }[]> {
-    return this.db
-      .update(runs)
-      .set({
-        status: 'interrupted',
-        errorMessage: 'Process restarted while run was in progress',
-        completedAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(runs.status, 'running'))
-      .returning({ id: runs.id });
+    const result = await this.pool.query(
+      `UPDATE runs
+      SET
+        status = 'interrupted',
+        error_message = 'Process restarted while run was in progress',
+        completed_at = $1,
+        updated_at = $1
+      WHERE status = 'running'
+      RETURNING id`,
+      [new Date()],
+    );
+
+    return result.rows as { id: string }[];
   }
 
   async markWaitingQueueJob(runId: string, queueJobId: string): Promise<void> {
-    const result = await this.db
-      .update(runs)
-      .set({ queueJobId, updatedAt: new Date() })
-      .where(eq(runs.id, runId))
-      .returning({ id: runs.id });
+    const result = await this.pool.query(
+      `UPDATE runs
+      SET queue_job_id = $2, updated_at = $3
+      WHERE id = $1
+      RETURNING id`,
+      [runId, queueJobId, new Date()],
+    );
 
-    if (result.length === 0) {
+    if (result.rowCount === 0) {
       throw new NotFoundException(`Run "${runId}" not found`);
     }
   }
