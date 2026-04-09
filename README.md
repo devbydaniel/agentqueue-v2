@@ -7,29 +7,29 @@ Centralized agent orchestrator for AI agent workloads. Receives triggers (cron s
 NestJS modular backend backed by Postgres (via raw `pg`) and pg-boss for job queueing. Schema changes are managed with `dbmate` SQL migrations. Runs are enqueued asynchronously — `POST /runs` returns `202` immediately with a `runId`, and the run is processed by a background queue worker.
 
 ```text
-┌─────────────┐   ┌──────────────┐   ┌──────────────┐
-│  Cron        │   │  Linear      │   │  GitHub      │
-│  Scheduler   │   │  Webhook     │   │  Webhook     │
-└──────┬───────┘   └──────┬───────┘   └──────┬───────┘
-       │                  │                  │
-       └──────────────────┼──────────────────┘
-                          │
-                   ┌──────▼───────┐
-                   │ ExecuteRun   │
-                   │ UseCase      │
-                   └──────┬───────┘
-                          │
-                   ┌──────▼───────┐
-                   │ pi Agent     │
-                   │ Session      │
-                   └──────┬───────┘
-                          │
-              ┌───────────┼───────────┐
-              │           │           │
-        ┌─────▼──┐  ┌─────▼──┐  ┌────▼────┐
-        │ Logger │  │Langfuse│  │ Linear  │
-        │Handler │  │Handler │  │Handler  │
-        └────────┘  └────────┘  └─────────┘
+┌─────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
+│ Cron        │  │ Linear       │  │ GitHub       │  │ Telegram     │
+│ scheduler   │  │ webhooks     │  │ webhooks     │  │ webhooks     │
+└──────┬──────┘  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘
+       │                │                 │                 │
+       └────────────────┴─────────────────┴─────────────────┘
+                                │
+                     ┌──────────▼──────────┐
+                     │ RunsService /       │
+                     │ queue worker        │
+                     └──────────┬──────────┘
+                                │
+                     ┌──────────▼──────────┐
+                     │ pi session factory  │
+                     │ + agent session     │
+                     └──────────┬──────────┘
+                                │
+                ┌───────────────┼────────────────┬────────────────┐
+                │               │                │                │
+          ┌─────▼─────┐   ┌─────▼─────┐    ┌─────▼─────┐    ┌─────▼─────┐
+          │ Logger    │   │ Langfuse  │    │ Run event │    │ Source     │
+          │ callbacks │   │ callbacks │    │ storage   │    │ replies    │
+          └───────────┘   └───────────┘    └───────────┘    └───────────┘
 ```
 
 ## Requirements
@@ -107,6 +107,11 @@ All endpoints except health and webhooks require `Authorization: Bearer <AUTH_TO
 | `GET` | `/runs/:id` | Bearer | Get run details by ID |
 | `GET` | `/runs/:id/events` | Bearer | List filtered events for a run |
 | `POST` | `/runs/:id/abort` | Bearer | Abort a running or waiting run |
+| `GET` | `/flows` | Bearer | List available flows |
+| `POST` | `/flows/:name/start` | Bearer | Start a flow run |
+| `GET` | `/flows/:name/runs` | Bearer | List runs for a flow |
+| `GET` | `/flows/runs/:runId` | Bearer | Get flow run details |
+| `POST` | `/flows/runs/:runId/abort` | Bearer | Abort a running flow |
 | `POST` | `/webhooks/linear/:agentName` | Signature | Receive Linear Agent Interaction webhooks |
 | `GET` | `/webhooks/linear/:agentName` | Public | Linear webhook URL verification |
 | `POST` | `/webhooks/github` | Signature | Receive GitHub webhooks |
@@ -188,6 +193,34 @@ curl -s -X POST http://localhost:3000/runs/abc-123/abort \
 # => { "aborted": true }
 ```
 
+### Flow Endpoints
+
+Flow APIs are authenticated and operate on named flow configs under
+`~/.agentqueue/flows/<name>/config.yaml`.
+
+```bash
+# List available flows
+curl -s http://localhost:3000/flows \
+  -H "Authorization: Bearer $AUTH_TOKEN"
+
+# Start a flow
+curl -s -X POST http://localhost:3000/flows/factory/start \
+  -H "Authorization: Bearer $AUTH_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"vars":{"task":"build the feature"}}'
+
+# Inspect flow runs
+curl -s http://localhost:3000/flows/factory/runs \
+  -H "Authorization: Bearer $AUTH_TOKEN"
+
+curl -s http://localhost:3000/flows/runs/<flow-run-id> \
+  -H "Authorization: Bearer $AUTH_TOKEN"
+
+# Abort a running flow
+curl -s -X POST http://localhost:3000/flows/runs/<flow-run-id>/abort \
+  -H "Authorization: Bearer $AUTH_TOKEN"
+```
+
 ### POST /webhooks/github
 
 Single endpoint for all GitHub webhooks. Configure your GitHub repo/org to send webhooks to this URL with a shared secret. The trigger config determines which events match and which working directory/agent handles them.
@@ -260,6 +293,17 @@ triggers:
     prompt: "Prepare for the upcoming meeting: {{before_output}}"
 ```
 
+Contract:
+
+| Exit code | Behavior |
+|---|---|
+| `0` | Proceed. `{{before_output}}` placeholders in `prompt` are replaced with the trimmed stdout. |
+| Non-zero | Skip. The run is not started. |
+| Timeout | Skip. The default timeout is `BEFORE_HOOK_TIMEOUT` (30s). |
+
+The hook is executed via `sh -c <before>`, so it can be a script path or an
+inline shell expression. It does **not** apply to Linear or Telegram triggers.
+
 #### Telegram Triggers
 
 Telegram triggers route inbound bot messages by `bot_name` and sender `user_id`.
@@ -288,18 +332,6 @@ curl -X POST "https://api.telegram.org/bot$TELEGRAM_MAIN_BOT_TOKEN/setWebhook" \
     "secret_token": "'"$TELEGRAM_MAIN_WEBHOOK_SECRET"'"
   }'
 ```
-
-Contract:
-
-| Exit code | Behavior |
-|---|---|
-| `0` | Proceed. `{{before_output}}` placeholders in `prompt` are replaced with the trimmed stdout. |
-| Non-zero | Skip. The run is not started. |
-| Timeout | Skip. The default timeout is `BEFORE_HOOK_TIMEOUT` (30s). |
-
-The hook is executed via `sh -c <before>`, so it can be a script path or an
-inline shell expression. It does **not** apply to Linear triggers (those have
-no static prompt to gate).
 
 #### Linear Triggers
 
@@ -384,7 +416,9 @@ Every agent run streams events to registered callback handlers:
 |---|---|---|
 | **Logger** | Global | Logs agent activity (tool calls, messages) via NestJS Logger |
 | **Langfuse** | Global | Sends traces to Langfuse (enabled when `LANGFUSE_SECRET_KEY` is set) |
-| **Linear** | Per-run | Posts agent activity back to Linear (only for Linear webhook runs) |
+| **Run event** | Per-run | Persists filtered agent events for `GET /runs/:id/events` |
+| **Linear** | Per-run | Posts agent responses and errors back to Linear for Linear webhook runs |
+| **Assistant message** | Per-run/internal | Captures the last assistant reply so Telegram runs can send it back to the chat |
 
 ## Project Structure
 
@@ -394,9 +428,9 @@ src/
 ├── app.module.ts                     # Root module
 ├── instrumentation.ts                # OpenTelemetry / Langfuse init
 ├── auth/                             # Bearer auth guard + @Public()
-├── callbacks/                        # Event handlers (logger, Langfuse, Linear, run events)
+├── callbacks/                        # Event handlers (logger, Langfuse, Linear, Telegram helpers, run events)
 ├── config/                           # Env + trigger config
-├── database/                         # Drizzle schemas + DB wiring + migrations
+├── database/                         # Row types, raw pg wiring, SQL migrations
 ├── flows/                            # Multi-step flow orchestration
 ├── queue/                            # pg-boss integration
 ├── runs/                             # Run API, persistence, processor, queue worker
@@ -409,8 +443,9 @@ src/
 │   ├── pi-session.factory.ts
 │   ├── external-session.repository.ts
 │   └── dto/
+├── telegram/                         # Telegram API client + response delivery
 ├── triggers/                         # Cron scheduler
-└── webhooks/                         # Linear + GitHub webhook entrypoints/services
+└── webhooks/                         # Linear, GitHub, and Telegram webhook entrypoints/services
 ```
 
 ## Running Tests
