@@ -15,12 +15,13 @@ import type { RunEventPagination } from './run-event.repository.js';
 import type { Run } from '../database/runs.schema.js';
 import type { RunEvent } from '../database/run-events.schema.js';
 import { RUNS_QUEUE_NAME } from './runs.constants.js';
+import { ensureDirectoryExists } from '../common/utils/cwd-path.js';
 
 export interface EnqueueRunCommand {
-  source: 'manual' | 'cron' | 'linear' | 'github' | 'flow';
+  source: 'manual' | 'cron' | 'linear' | 'github' | 'flow' | 'telegram';
   triggerName?: string;
   parentFlowRunId?: string;
-  repo: string;
+  cwd: string;
   prompt: string;
   externalSessionId?: string;
   prependSystemPrompt?: string;
@@ -62,15 +63,17 @@ export class RunsService {
 
   async enqueue(command: EnqueueRunCommand): Promise<EnqueueRunResult> {
     this.logger.log('Enqueueing run', {
-      repo: command.repo,
+      cwd: command.cwd,
       source: command.source,
     });
+
+    const cwd = ensureDirectoryExists(command.cwd);
 
     const createCommand: CreateRunCommand = {
       source: command.source,
       triggerName: command.triggerName,
       parentFlowRunId: command.parentFlowRunId,
-      repo: command.repo,
+      cwd,
       prompt: command.prompt,
       externalSessionId: command.externalSessionId,
       prependSystemPrompt: command.prependSystemPrompt,

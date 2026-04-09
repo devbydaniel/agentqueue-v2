@@ -3,6 +3,7 @@ import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Public } from '../auth/public.decorator.js';
 import { LinearWebhooksService } from './linear-webhooks.service.js';
 import { GithubWebhooksService } from './github-webhooks.service.js';
+import { TelegramWebhooksService } from './telegram-webhooks.service.js';
 
 interface RawBodyRequest {
   rawBody?: Buffer;
@@ -17,6 +18,7 @@ export class WebhooksController {
   constructor(
     private readonly linearWebhooksService: LinearWebhooksService,
     private readonly githubWebhooksService: GithubWebhooksService,
+    private readonly telegramWebhooksService: TelegramWebhooksService,
   ) {}
 
   @Get('linear/:agentName')
@@ -79,5 +81,31 @@ export class WebhooksController {
       body: req.body as Record<string, unknown>,
     });
     return { accepted: true, triggered: result.triggered };
+  }
+
+  @Post('telegram/:botName')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Receive Telegram bot webhooks',
+    description:
+      'Verifies the Telegram secret token, routes the inbound message by configured sender/chat rules, and enqueues a background agent run.',
+  })
+  @ApiResponse({ status: 200, description: 'Webhook processed' })
+  @ApiResponse({ status: 401, description: 'Invalid Telegram webhook secret' })
+  @ApiResponse({
+    status: 404,
+    description: 'Telegram bot is not configured',
+  })
+  async handleTelegramWebhook(
+    @Param('botName') botName: string,
+    @Req() req: RawBodyRequest,
+  ): Promise<{ accepted: boolean; handled: boolean }> {
+    return this.telegramWebhooksService.handleWebhook({
+      botName,
+      secretTokenHeader: req.headers[
+        'x-telegram-bot-api-secret-token'
+      ] as string | undefined,
+      body: req.body as Record<string, unknown>,
+    });
   }
 }

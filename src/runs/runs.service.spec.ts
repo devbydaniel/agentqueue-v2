@@ -1,5 +1,8 @@
 import { Test } from '@nestjs/testing';
 import { ConflictException, NotFoundException } from '@nestjs/common';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { RunsService } from './runs.service.js';
 import { RunProcessorService } from './run-processor.service.js';
 import { RunRepository } from './run.repository.js';
@@ -13,6 +16,7 @@ describe('RunsService', () => {
   let runRepository: RunRepository;
   let runEventRepository: RunEventRepository;
   let mockBoss: { send: jest.Mock; cancel: jest.Mock };
+  let tmpDir: string;
 
   function makeRun(overrides: Partial<Run> = {}): Run {
     return {
@@ -20,7 +24,7 @@ describe('RunsService', () => {
       source: 'manual',
       triggerName: null,
       parentFlowRunId: null,
-      repo: 'core',
+      cwd: tmpDir,
       prompt: 'do something',
       promptPreview: 'do something',
       status: 'waiting',
@@ -41,6 +45,7 @@ describe('RunsService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runs-service-test-'));
 
     mockBoss = {
       send: jest.fn().mockResolvedValue('job-123'),
@@ -87,6 +92,10 @@ describe('RunsService', () => {
     runEventRepository = module.get(RunEventRepository);
   });
 
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
   describe('abortSession', () => {
     it('should delegate abort to the processor', async () => {
       const result = await service.abortSession('linear-session-1');
@@ -102,7 +111,7 @@ describe('RunsService', () => {
     it('should create a run row, enqueue a job, and return runId + status', async () => {
       const result = await service.enqueue({
         source: 'manual',
-        repo: 'core',
+        cwd: tmpDir,
         prompt: 'do something',
       });
 
@@ -110,7 +119,7 @@ describe('RunsService', () => {
         source: 'manual',
         triggerName: undefined,
         parentFlowRunId: undefined,
-        repo: 'core',
+        cwd: tmpDir,
         prompt: 'do something',
         externalSessionId: undefined,
         prependSystemPrompt: undefined,
@@ -133,7 +142,7 @@ describe('RunsService', () => {
       await service.enqueue({
         source: 'linear',
         triggerName: 'my-agent',
-        repo: 'core',
+        cwd: tmpDir,
         prompt: 'fix bug',
         externalSessionId: 'session-key-1',
         prependSystemPrompt: 'prepend',
@@ -156,7 +165,7 @@ describe('RunsService', () => {
 
       await service.enqueue({
         source: 'manual',
-        repo: 'core',
+        cwd: tmpDir,
         prompt: 'hello',
       });
 
@@ -171,7 +180,7 @@ describe('RunsService', () => {
       await expect(
         service.enqueue({
           source: 'manual',
-          repo: 'core',
+          cwd: tmpDir,
           prompt: 'do something',
         }),
       ).rejects.toThrow('queue unavailable');
@@ -194,7 +203,7 @@ describe('RunsService', () => {
       await expect(
         service.enqueue({
           source: 'manual',
-          repo: 'core',
+          cwd: tmpDir,
           prompt: 'hello',
         }),
       ).rejects.toThrow('DB connection failed');

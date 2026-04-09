@@ -1,9 +1,7 @@
 import { Test } from '@nestjs/testing';
-import { NotFoundException } from '@nestjs/common';
 import type { AgentSession } from '@mariozechner/pi-coding-agent';
 import { RunProcessorService } from './run-processor.service.js';
 import { AppConfigService } from '../config/app-config.service.js';
-import { AgentfilesConfigService } from '../config/agentfiles-config.service.js';
 import { TriggerConfigService } from '../config/trigger-config.service.js';
 import { PiSessionFactory } from './pi-session.factory.js';
 import { ActiveSessionTrackerService } from './active-session-tracker.service.js';
@@ -13,6 +11,7 @@ import { RunEventRepository } from './run-event.repository.js';
 import { CALLBACK_HANDLERS } from '../callbacks/constants.js';
 import type { CallbackHandler } from '../callbacks/callback-handler.interface.js';
 import type { Run } from '../database/runs.schema.js';
+import { TelegramService } from '../telegram/telegram.service.js';
 
 /** Prompt mock that delays 50ms then rejects — used to test timeout behavior */
 function delayedReject(): Promise<void> {
@@ -23,13 +22,13 @@ function delayedReject(): Promise<void> {
 
 describe('RunProcessorService', () => {
   let service: RunProcessorService;
-  let configService: AgentfilesConfigService;
   let piSessionFactory: PiSessionFactory;
   let activeSessionTracker: ActiveSessionTrackerService;
   let runRepository: RunRepository;
   let runCompletionNotifier: RunCompletionNotifier;
   let runEventRepository: RunEventRepository;
   let triggerConfigService: TriggerConfigService;
+  let telegramService: TelegramService;
   let mockSession: jest.Mocked<
     Pick<AgentSession, 'prompt' | 'subscribe' | 'abort'>
   > & {
@@ -68,12 +67,6 @@ describe('RunProcessorService', () => {
           provide: AppConfigService,
           useValue: {
             runTimeoutMs: 1800000,
-          },
-        },
-        {
-          provide: AgentfilesConfigService,
-          useValue: {
-            resolveRepo: jest.fn().mockReturnValue('/home/user/dev/my-repo'),
           },
         },
         {
@@ -120,6 +113,13 @@ describe('RunProcessorService', () => {
           },
         },
         {
+          provide: TelegramService,
+          useValue: {
+            emitRunResponse: jest.fn().mockResolvedValue(undefined),
+            emitRunError: jest.fn().mockResolvedValue(undefined),
+          },
+        },
+        {
           provide: CALLBACK_HANDLERS,
           useValue: [mockGlobalHandler],
         },
@@ -127,25 +127,19 @@ describe('RunProcessorService', () => {
     }).compile();
 
     service = module.get(RunProcessorService);
-    configService = module.get(AgentfilesConfigService);
     piSessionFactory = module.get(PiSessionFactory);
     activeSessionTracker = module.get(ActiveSessionTrackerService);
     runRepository = module.get(RunRepository);
     runCompletionNotifier = module.get(RunCompletionNotifier);
     runEventRepository = module.get(RunEventRepository);
     triggerConfigService = module.get(TriggerConfigService);
+    telegramService = module.get(TelegramService);
   });
 
   describe('runSession', () => {
-    it('should resolve the repo via config service', async () => {
-      await service.runSession({ repo: 'core', prompt: 'do something' });
-
-      expect(configService.resolveRepo).toHaveBeenCalledWith('core');
-    });
-
     it('should call the factory with cwd + system prompt options', async () => {
       await service.runSession({
-        repo: 'core',
+        cwd: '/home/user/dev/my-repo',
         prompt: 'do something',
         externalSessionId: 'session-1',
         prependSystemPrompt: 'prepend',
@@ -155,20 +149,24 @@ describe('RunProcessorService', () => {
       expect(piSessionFactory.create).toHaveBeenCalledWith({
         cwd: '/home/user/dev/my-repo',
         externalSessionId: 'session-1',
+        externalSessionProvider: undefined,
         prependSystemPrompt: 'prepend',
         appendSystemPrompt: 'append',
       });
     });
 
     it('should call session.prompt with the provided prompt', async () => {
-      await service.runSession({ repo: 'core', prompt: 'fix the tests' });
+      await service.runSession({
+        cwd: '/home/user/dev/my-repo',
+        prompt: 'fix the tests',
+      });
 
       expect(mockSession.prompt).toHaveBeenCalledWith('fix the tests');
     });
 
     it('should return success true on completion', async () => {
       const result = await service.runSession({
-        repo: 'core',
+        cwd: '/home/user/dev/my-repo',
         prompt: 'hello',
       });
 
@@ -176,7 +174,7 @@ describe('RunProcessorService', () => {
     });
 
     it('should call dispose() on success', async () => {
-      await service.runSession({ repo: 'core', prompt: 'hello' });
+      await service.runSession({ cwd: '/home/user/dev/my-repo', prompt: 'hello' });
 
       expect(mockDispose).toHaveBeenCalled();
     });
@@ -185,27 +183,17 @@ describe('RunProcessorService', () => {
       mockSession.prompt.mockRejectedValueOnce(new Error('boom'));
 
       await expect(
-        service.runSession({ repo: 'core', prompt: 'hello' }),
+        service.runSession({ cwd: '/home/user/dev/my-repo', prompt: 'hello' }),
       ).rejects.toThrow();
 
       expect(mockDispose).toHaveBeenCalled();
-    });
-
-    it('should propagate NotFoundException from resolveRepo unchanged', async () => {
-      (configService.resolveRepo as jest.Mock).mockImplementation(() => {
-        throw new NotFoundException('Repo "unknown" not found');
-      });
-
-      await expect(
-        service.runSession({ repo: 'unknown', prompt: 'hello' }),
-      ).rejects.toThrow(NotFoundException);
     });
 
     it('should propagate unknown errors from session.prompt unchanged', async () => {
       mockSession.prompt.mockRejectedValueOnce(new Error('something broke'));
 
       await expect(
-        service.runSession({ repo: 'core', prompt: 'hello' }),
+        service.runSession({ cwd: '/home/user/dev/my-repo', prompt: 'hello' }),
       ).rejects.toThrow('something broke');
     });
 
@@ -220,7 +208,7 @@ describe('RunProcessorService', () => {
       });
 
       await service.runSession({
-        repo: 'core',
+        cwd: '/home/user/dev/my-repo',
         prompt: 'hello',
         additionalHandlers: [additionalHandler],
       });
@@ -250,7 +238,7 @@ describe('RunProcessorService', () => {
       });
 
       const result = await service.runSession({
-        repo: 'core',
+        cwd: '/home/user/dev/my-repo',
         prompt: 'hello',
         additionalHandlers: [throwingHandler, safeHandler],
       });
@@ -270,7 +258,7 @@ describe('RunProcessorService', () => {
       });
 
       const result = await service.runSession({
-        repo: 'core',
+        cwd: '/home/user/dev/my-repo',
         prompt: 'hello',
         additionalHandlers: [rejectingHandler],
       });
@@ -280,7 +268,7 @@ describe('RunProcessorService', () => {
 
     it('should track and untrack active session via tracker', async () => {
       await service.runSession({
-        repo: 'core',
+        cwd: '/home/user/dev/my-repo',
         prompt: 'hello',
         externalSessionId: 'linear-session-1',
       });
@@ -301,7 +289,7 @@ describe('RunProcessorService', () => {
 
       await expect(
         service.runSession({
-          repo: 'core',
+          cwd: '/home/user/dev/my-repo',
           prompt: 'hello',
           externalSessionId: 'linear-session-1',
         }),
@@ -314,7 +302,7 @@ describe('RunProcessorService', () => {
     });
 
     it('should not track when no externalSessionId is provided', async () => {
-      await service.runSession({ repo: 'core', prompt: 'hello' });
+      await service.runSession({ cwd: '/home/user/dev/my-repo', prompt: 'hello' });
 
       expect(activeSessionTracker.track).not.toHaveBeenCalled();
       expect(activeSessionTracker.untrack).not.toHaveBeenCalled();
@@ -336,7 +324,7 @@ describe('RunProcessorService', () => {
 
     it('should track by both externalSessionId and runId when both are provided', async () => {
       await service.runSession({
-        repo: 'core',
+        cwd: '/home/user/dev/my-repo',
         prompt: 'hello',
         externalSessionId: 'linear-session-1',
         runId: 'run-abc',
@@ -355,7 +343,7 @@ describe('RunProcessorService', () => {
 
     it('should track by runId alone when no externalSessionId', async () => {
       await service.runSession({
-        repo: 'core',
+        cwd: '/home/user/dev/my-repo',
         prompt: 'hello',
         runId: 'run-abc',
       });
@@ -379,7 +367,7 @@ describe('RunProcessorService', () => {
         source: 'manual',
         triggerName: null,
         parentFlowRunId: null,
-        repo: 'core',
+        cwd: '/home/user/dev/my-repo',
         prompt: 'do something',
         promptPreview: 'do something',
         status: 'waiting',
@@ -492,7 +480,7 @@ describe('RunProcessorService', () => {
       (triggerConfigService.getLinearTrigger as jest.Mock).mockReturnValue({
         name: 'my-agent',
         type: 'linear',
-        target: 'core',
+        cwd: '/home/user/dev/my-repo',
         signing_secret: 'secret',
         api_key: 'test-api-key',
       });
@@ -501,7 +489,10 @@ describe('RunProcessorService', () => {
 
       // Verify factory was called with externalSessionId
       expect(piSessionFactory.create).toHaveBeenCalledWith(
-        expect.objectContaining({ externalSessionId: 'linear-session-id' }),
+        expect.objectContaining({
+          externalSessionId: 'linear-session-id',
+          externalSessionProvider: 'linear',
+        }),
       );
 
       // The linear handler should have been attached — we can verify
@@ -537,7 +528,7 @@ describe('RunProcessorService', () => {
       (triggerConfigService.getLinearTrigger as jest.Mock).mockReturnValue({
         name: 'my-agent',
         type: 'linear',
-        target: 'core',
+        cwd: '/home/user/dev/my-repo',
         signing_secret: 'secret',
         api_key: 'test-api-key',
       });
@@ -549,6 +540,52 @@ describe('RunProcessorService', () => {
 
       const lastSave = (runRepository.save as jest.Mock).mock.calls.at(-1)?.[0];
       expect(lastSave.status).toBe('succeeded');
+    });
+
+    it('should emit a Telegram response on successful telegram runs', async () => {
+      const run = makeRun({
+        source: 'telegram',
+        externalSessionId: 'telegram:bot:123:main',
+        triggerName: 'daniel-assistant',
+      });
+      (runRepository.findById as jest.Mock).mockResolvedValue(run);
+      mockSession.prompt.mockImplementationOnce(async () => {
+        subscribeFn?.({
+          type: 'message_end',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'Telegram final reply' }],
+          },
+        });
+      });
+
+      await service.processRun('run-123');
+
+      expect(telegramService.emitRunResponse).toHaveBeenCalledWith(
+        'daniel-assistant',
+        'telegram:bot:123:main',
+        'Telegram final reply',
+      );
+    });
+
+    it('should emit a Telegram error on failed telegram runs', async () => {
+      const run = makeRun({
+        source: 'telegram',
+        externalSessionId: 'telegram:bot:123:main',
+        triggerName: 'daniel-assistant',
+      });
+      (runRepository.findById as jest.Mock).mockResolvedValue(run);
+      mockSession.prompt.mockRejectedValueOnce(new Error('telegram crashed'));
+
+      await expect(service.processRun('run-123')).rejects.toThrow(
+        'telegram crashed',
+      );
+
+      expect(telegramService.emitRunError).toHaveBeenCalledWith(
+        'daniel-assistant',
+        'telegram:bot:123:main',
+        'telegram crashed',
+      );
     });
 
     it('should re-throw original error when save fails in catch block', async () => {

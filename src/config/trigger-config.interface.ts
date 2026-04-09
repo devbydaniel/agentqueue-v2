@@ -1,7 +1,7 @@
 export interface CronTrigger {
   name: string;
   schedule: string;
-  target: string;
+  cwd: string;
   prompt: string;
   agent?: string;
   before?: string;
@@ -13,9 +13,23 @@ export interface CronTrigger {
 export interface LinearTrigger {
   name: string;
   type: 'linear';
-  target: string;
+  cwd: string;
   signing_secret: string;
   api_key: string;
+  prepend_system_prompt?: string;
+  append_system_prompt?: string;
+  timeout_ms?: number;
+}
+
+export interface TelegramTrigger {
+  name: string;
+  type: 'telegram';
+  bot_name: string;
+  bot_token: string;
+  webhook_secret: string;
+  user_id: string;
+  cwd: string;
+  chat_id?: string;
   prepend_system_prompt?: string;
   append_system_prompt?: string;
   timeout_ms?: number;
@@ -33,7 +47,7 @@ export interface GithubTrigger {
   name: string;
   type: 'github';
   events: string[];
-  target: string;
+  cwd: string;
   prompt: string;
   filters?: WebhookFilter[];
   before?: string;
@@ -43,7 +57,7 @@ export interface GithubTrigger {
 }
 
 export interface TriggersFile {
-  triggers: (CronTrigger | LinearTrigger | GithubTrigger)[];
+  triggers: (CronTrigger | LinearTrigger | GithubTrigger | TelegramTrigger)[];
 }
 
 /**

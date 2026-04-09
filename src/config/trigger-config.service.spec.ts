@@ -1,3 +1,4 @@
+/* eslint-disable sonarjs/publicly-writable-directories */
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -42,7 +43,7 @@ describe('TriggerConfigService', () => {
         {
           name: 'daily-review',
           schedule: '0 8 * * *',
-          target: 'assistant',
+          cwd: '/tmp/assistant',
           prompt: 'Run morning review',
         },
       ],
@@ -54,7 +55,7 @@ describe('TriggerConfigService', () => {
     expect(triggers).toHaveLength(1);
     expect(triggers[0].name).toBe('daily-review');
     expect(triggers[0].schedule).toBe('0 8 * * *');
-    expect(triggers[0].target).toBe('assistant');
+    expect(triggers[0].cwd).toBe('/tmp/assistant');
     expect(triggers[0].prompt).toBe('Run morning review');
   });
 
@@ -64,13 +65,13 @@ describe('TriggerConfigService', () => {
         {
           name: 'morning',
           schedule: '0 8 * * *',
-          target: 'assistant',
+          cwd: '/tmp/assistant',
           prompt: 'Morning task',
         },
         {
           name: 'evening',
           schedule: '0 18 * * *',
-          target: 'clerk',
+          cwd: '/tmp/clerk',
           prompt: 'Evening task',
         },
       ],
@@ -103,8 +104,8 @@ describe('TriggerConfigService', () => {
   it('should filter out triggers missing name', () => {
     mockConfigFile({
       triggers: [
-        { schedule: '0 * * * *', target: 'x', prompt: 'y' },
-        { name: 'valid', schedule: '0 * * * *', target: 'x', prompt: 'y' },
+        { schedule: '0 * * * *', cwd: '/tmp/x', prompt: 'y' },
+        { name: 'valid', schedule: '0 * * * *', cwd: '/tmp/x', prompt: 'y' },
       ],
     });
 
@@ -115,16 +116,16 @@ describe('TriggerConfigService', () => {
 
   it('should filter out triggers missing schedule', () => {
     mockConfigFile({
-      triggers: [{ name: 'no-schedule', target: 'x', prompt: 'y' }],
+      triggers: [{ name: 'no-schedule', cwd: '/tmp/x', prompt: 'y' }],
     });
 
     service = createService();
     expect(service.getCronTriggers()).toHaveLength(0);
   });
 
-  it('should filter out triggers missing target', () => {
+  it('should filter out triggers missing cwd', () => {
     mockConfigFile({
-      triggers: [{ name: 'no-target', schedule: '0 * * * *', prompt: 'y' }],
+      triggers: [{ name: 'no-cwd', schedule: '0 * * * *', prompt: 'y' }],
     });
 
     service = createService();
@@ -133,7 +134,7 @@ describe('TriggerConfigService', () => {
 
   it('should filter out triggers missing prompt', () => {
     mockConfigFile({
-      triggers: [{ name: 'no-prompt', schedule: '0 * * * *', target: 'x' }],
+      triggers: [{ name: 'no-prompt', schedule: '0 * * * *', cwd: '/tmp/x' }],
     });
 
     service = createService();
@@ -156,7 +157,7 @@ describe('TriggerConfigService', () => {
         {
           name: 'with-extras',
           schedule: '0 8 * * *',
-          target: 'assistant',
+          cwd: '/tmp/assistant',
           prompt: 'Run task',
           agent: 'reviewer',
           before: '/path/to/script.sh',
@@ -185,7 +186,7 @@ describe('TriggerConfigService', () => {
         {
           name: 'coding-agent',
           type: 'linear',
-          target: 'my-repo',
+          cwd: '/tmp/my-repo',
           signing_secret: 'secret123',
           api_key: 'lin_api_abc',
         },
@@ -197,7 +198,7 @@ describe('TriggerConfigService', () => {
 
     expect(triggers).toHaveLength(1);
     expect(triggers[0].name).toBe('coding-agent');
-    expect(triggers[0].target).toBe('my-repo');
+    expect(triggers[0].cwd).toBe('/tmp/my-repo');
     expect(triggers[0].signing_secret).toBe('secret123');
     expect(triggers[0].api_key).toBe('lin_api_abc');
   });
@@ -208,14 +209,14 @@ describe('TriggerConfigService', () => {
         {
           name: 'coding-agent',
           type: 'linear',
-          target: 'repo-a',
+          cwd: '/tmp/repo-a',
           signing_secret: 'secret-a',
           api_key: 'key-a',
         },
         {
           name: 'review-agent',
           type: 'linear',
-          target: 'repo-b',
+          cwd: '/tmp/repo-b',
           signing_secret: 'secret-b',
           api_key: 'key-b',
         },
@@ -227,9 +228,9 @@ describe('TriggerConfigService', () => {
 
     expect(triggers).toHaveLength(2);
     expect(triggers[0].name).toBe('coding-agent');
-    expect(triggers[0].target).toBe('repo-a');
+    expect(triggers[0].cwd).toBe('/tmp/repo-a');
     expect(triggers[1].name).toBe('review-agent');
-    expect(triggers[1].target).toBe('repo-b');
+    expect(triggers[1].cwd).toBe('/tmp/repo-b');
   });
 
   it('should look up linear trigger by name', () => {
@@ -238,14 +239,14 @@ describe('TriggerConfigService', () => {
         {
           name: 'coding-agent',
           type: 'linear',
-          target: 'repo-a',
+          cwd: '/tmp/repo-a',
           signing_secret: 'secret-a',
           api_key: 'key-a',
         },
         {
           name: 'review-agent',
           type: 'linear',
-          target: 'repo-b',
+          cwd: '/tmp/repo-b',
           signing_secret: 'secret-b',
           api_key: 'key-b',
         },
@@ -256,12 +257,12 @@ describe('TriggerConfigService', () => {
 
     const coding = service.getLinearTrigger('coding-agent');
     expect(coding).toBeDefined();
-    expect(coding!.target).toBe('repo-a');
+    expect(coding!.cwd).toBe('/tmp/repo-a');
     expect(coding!.signing_secret).toBe('secret-a');
 
     const review = service.getLinearTrigger('review-agent');
     expect(review).toBeDefined();
-    expect(review!.target).toBe('repo-b');
+    expect(review!.cwd).toBe('/tmp/repo-b');
 
     expect(service.getLinearTrigger('nonexistent')).toBeUndefined();
   });
@@ -272,7 +273,7 @@ describe('TriggerConfigService', () => {
         {
           name: 'cron-only',
           schedule: '0 8 * * *',
-          target: 'assistant',
+          cwd: '/tmp/assistant',
           prompt: 'Hello',
         },
       ],
@@ -294,13 +295,13 @@ describe('TriggerConfigService', () => {
         {
           name: 'cron-job',
           schedule: '0 8 * * *',
-          target: 'assistant',
+          cwd: '/tmp/assistant',
           prompt: 'Hello',
         },
         {
           name: 'coding-agent',
           type: 'linear',
-          target: 'my-repo',
+          cwd: '/tmp/my-repo',
           signing_secret: 'secret',
           api_key: 'key',
         },
@@ -323,7 +324,7 @@ describe('TriggerConfigService', () => {
         {
           name: 'coding-agent',
           type: 'linear',
-          target: 'my-repo',
+          cwd: '/tmp/my-repo',
           signing_secret: '${TEST_LINEAR_SECRET}',
           api_key: '${TEST_LINEAR_KEY}',
         },
@@ -348,7 +349,7 @@ describe('TriggerConfigService', () => {
         {
           name: 'coding-agent',
           type: 'linear',
-          target: 'my-repo',
+          cwd: '/tmp/my-repo',
           signing_secret: '${NONEXISTENT_VAR}',
           api_key: 'literal_key',
         },
@@ -368,26 +369,26 @@ describe('TriggerConfigService', () => {
         {
           name: 'morning',
           schedule: '0 8 * * *',
-          target: 'assistant',
+          cwd: '/tmp/assistant',
           prompt: 'Morning',
         },
         {
           name: 'coding-agent',
           type: 'linear',
-          target: 'repo-a',
+          cwd: '/tmp/repo-a',
           signing_secret: 'sec',
           api_key: 'key',
         },
         {
           name: 'evening',
           schedule: '0 18 * * *',
-          target: 'clerk',
+          cwd: '/tmp/clerk',
           prompt: 'Evening',
         },
         {
           name: 'review-agent',
           type: 'linear',
-          target: 'repo-b',
+          cwd: '/tmp/repo-b',
           signing_secret: 'sec2',
           api_key: 'key2',
         },
@@ -410,7 +411,7 @@ describe('TriggerConfigService', () => {
         {
           name: 'bad-agent',
           type: 'linear',
-          target: 'my-repo',
+          cwd: '/tmp/my-repo',
           api_key: 'key',
         },
       ],
@@ -420,7 +421,7 @@ describe('TriggerConfigService', () => {
     expect(service.getLinearTriggers()).toEqual([]);
   });
 
-  it('should skip invalid linear trigger (missing target)', () => {
+  it('should skip invalid linear trigger (missing cwd)', () => {
     mockConfigFile({
       triggers: [
         {
@@ -444,7 +445,7 @@ describe('TriggerConfigService', () => {
         {
           name: 'with-prompts',
           schedule: '0 8 * * *',
-          target: 'assistant',
+          cwd: '/tmp/assistant',
           prompt: 'Hello',
           prepend_system_prompt: 'You are a cron agent.',
           append_system_prompt: 'Always be concise.',
@@ -464,7 +465,7 @@ describe('TriggerConfigService', () => {
         {
           name: 'no-prompts',
           schedule: '0 8 * * *',
-          target: 'assistant',
+          cwd: '/tmp/assistant',
           prompt: 'Hello',
         },
       ],
@@ -482,7 +483,7 @@ describe('TriggerConfigService', () => {
         {
           name: 'coding-agent',
           type: 'linear',
-          target: 'my-repo',
+          cwd: '/tmp/my-repo',
           signing_secret: 'secret',
           api_key: 'key',
           prepend_system_prompt: 'You are working on Linear issue {{issueId}}.',
@@ -505,7 +506,7 @@ describe('TriggerConfigService', () => {
         {
           name: 'coding-agent',
           type: 'linear',
-          target: 'my-repo',
+          cwd: '/tmp/my-repo',
           signing_secret: 'secret',
           api_key: 'key',
         },
@@ -516,5 +517,113 @@ describe('TriggerConfigService', () => {
     const trigger = service.getLinearTrigger('coding-agent');
     expect(trigger!.prepend_system_prompt).toBeUndefined();
     expect(trigger!.append_system_prompt).toBeUndefined();
+  });
+
+  // --- Telegram trigger tests ---
+
+  it('should load telegram triggers and normalize numeric IDs to strings', () => {
+    mockConfigFile({
+      triggers: [
+        {
+          name: 'daniel-assistant',
+          type: 'telegram',
+          bot_name: 'main-bot',
+          bot_token: 'bot-token',
+          webhook_secret: 'secret',
+          user_id: 456,
+          chat_id: 123,
+          cwd: '/tmp/assistant',
+        },
+      ],
+    });
+
+    service = createService();
+    const trigger = service.getTelegramTrigger('daniel-assistant');
+
+    expect(trigger).toBeDefined();
+    expect(trigger!.user_id).toBe('456');
+    expect(trigger!.chat_id).toBe('123');
+  });
+
+  it('should return telegram triggers by bot name', () => {
+    mockConfigFile({
+      triggers: [
+        {
+          name: 'daniel-assistant',
+          type: 'telegram',
+          bot_name: 'main-bot',
+          bot_token: 'bot-token',
+          webhook_secret: 'secret',
+          user_id: '456',
+          cwd: '/tmp/assistant',
+        },
+        {
+          name: 'ops-assistant',
+          type: 'telegram',
+          bot_name: 'ops-bot',
+          bot_token: 'ops-token',
+          webhook_secret: 'ops-secret',
+          user_id: '789',
+          cwd: '/tmp/ops',
+        },
+      ],
+    });
+
+    service = createService();
+
+    expect(service.getTelegramTriggersForBot('main-bot')).toHaveLength(1);
+    expect(service.getTelegramTriggersForBot('main-bot')[0].name).toBe(
+      'daniel-assistant',
+    );
+  });
+
+  it('should interpolate env vars in telegram bot credentials', () => {
+    process.env['TEST_TELEGRAM_BOT_TOKEN'] = 'interpolated_bot_token';
+    process.env['TEST_TELEGRAM_SECRET'] = 'interpolated_secret';
+
+    mockConfigFile({
+      triggers: [
+        {
+          name: 'daniel-assistant',
+          type: 'telegram',
+          bot_name: 'main-bot',
+          bot_token: '${TEST_TELEGRAM_BOT_TOKEN}',
+          webhook_secret: '${TEST_TELEGRAM_SECRET}',
+          user_id: '456',
+          cwd: '/tmp/assistant',
+        },
+      ],
+    });
+
+    service = createService();
+    const bot = service.getTelegramBotConfig('main-bot');
+
+    expect(bot).toEqual({
+      botName: 'main-bot',
+      botToken: 'interpolated_bot_token',
+      webhookSecret: 'interpolated_secret',
+    });
+
+    delete process.env['TEST_TELEGRAM_BOT_TOKEN'];
+    delete process.env['TEST_TELEGRAM_SECRET'];
+  });
+
+  it('should skip invalid telegram triggers missing required fields', () => {
+    mockConfigFile({
+      triggers: [
+        {
+          name: 'bad-telegram',
+          type: 'telegram',
+          bot_name: 'main-bot',
+          user_id: '456',
+          cwd: '/tmp/assistant',
+        },
+      ],
+    });
+
+    service = createService();
+
+    expect(service.getTelegramTriggers()).toEqual([]);
+    expect(service.getTelegramBotConfig('main-bot')).toBeUndefined();
   });
 });

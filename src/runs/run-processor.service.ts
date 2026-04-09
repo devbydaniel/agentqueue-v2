@@ -2,9 +2,9 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { LinearClient } from '@linear/sdk';
 import { CALLBACK_HANDLERS } from '../callbacks/constants.js';
 import type { CallbackHandler } from '../callbacks/callback-handler.interface.js';
+import { AssistantMessageCallbackHandler } from '../callbacks/handlers/assistant-message.callback-handler.js';
 import { LinearCallbackHandler } from '../callbacks/handlers/linear.callback-handler.js';
 import { AppConfigService } from '../config/app-config.service.js';
-import { AgentfilesConfigService } from '../config/agentfiles-config.service.js';
 import { TriggerConfigService } from '../config/trigger-config.service.js';
 import { ActiveSessionTrackerService } from './active-session-tracker.service.js';
 import { PiSessionFactory } from './pi-session.factory.js';
@@ -14,13 +14,15 @@ import type { Run } from '../database/runs.schema.js';
 import { RunEventRepository } from './run-event.repository.js';
 import { RunEventCallbackHandler } from '../callbacks/handlers/run-event.callback-handler.js';
 import type { AgentSession } from '@mariozechner/pi-coding-agent';
+import { TelegramService } from '../telegram/telegram.service.js';
 
 export interface RunSessionParams {
-  repo: string;
+  cwd: string;
   prompt: string;
   additionalHandlers?: CallbackHandler[];
   /** Optional external ID to track the session for later cancellation (e.g. Linear agentSessionId) */
   externalSessionId?: string;
+  externalSessionProvider?: 'linear' | 'telegram';
   /** Run ID for dual-indexed tracker (enables abort-by-runId from dashboard) */
   runId?: string;
   /** System prompt snippet to prepend before the base system prompt */
@@ -41,13 +43,13 @@ export class RunProcessorService {
 
   constructor(
     private readonly appConfigService: AppConfigService,
-    private readonly agentfilesConfigService: AgentfilesConfigService,
     private readonly piSessionFactory: PiSessionFactory,
     private readonly activeSessionTracker: ActiveSessionTrackerService,
     private readonly runRepository: RunRepository,
     private readonly runCompletionNotifier: RunCompletionNotifier,
     private readonly runEventRepository: RunEventRepository,
     private readonly triggerConfigService: TriggerConfigService,
+    private readonly telegramService: TelegramService,
     @Inject(CALLBACK_HANDLERS)
     private readonly globalHandlers: CallbackHandler[],
   ) {}
@@ -94,7 +96,8 @@ export class RunProcessorService {
     await this.runRepository.save(run);
 
     // Build additional handlers
-    const { additionalHandlers, linearHandler } = this.buildLinearHandlers(run);
+    const { additionalHandlers, linearHandler, assistantMessageHandler } =
+      this.buildSourceHandlers(run);
 
     // Attach registry handler to persist filtered events
     additionalHandlers.push(
@@ -108,9 +111,13 @@ export class RunProcessorService {
 
     try {
       await this.runSession({
-        repo: run.repo,
+        cwd: run.cwd,
         prompt: run.prompt,
         externalSessionId: run.externalSessionId ?? undefined,
+        externalSessionProvider:
+          run.source === 'linear' || run.source === 'telegram'
+            ? run.source
+            : undefined,
         runId,
         prependSystemPrompt: run.prependSystemPrompt ?? undefined,
         appendSystemPrompt: run.appendSystemPrompt ?? undefined,
@@ -132,6 +139,14 @@ export class RunProcessorService {
           return linearHandler!.emitResponse(message);
         },
         'Failed to emit success response to Linear',
+      );
+
+      await this.emitTelegramSafe(run, () =>
+        this.telegramService.emitRunResponse(
+          run.triggerName!,
+          run.externalSessionId!,
+          assistantMessageHandler?.getLastAssistantMessage() ?? 'Completed.',
+        ),
       );
     } catch (error) {
       await this.handleRunError(
@@ -196,18 +211,28 @@ export class RunProcessorService {
       () => linearHandler!.emitError(run.errorMessage!),
       'Failed to emit error to Linear',
     );
+
+    await this.emitTelegramSafe(run, () =>
+      this.telegramService.emitRunError(
+        run.triggerName!,
+        run.externalSessionId!,
+        run.errorMessage!,
+      ),
+    );
   }
 
-  private buildLinearHandlers(run: {
+  private buildSourceHandlers(run: {
     source: string;
     externalSessionId: string | null;
     triggerName: string | null;
   }): {
     additionalHandlers: CallbackHandler[];
     linearHandler: LinearCallbackHandler | undefined;
+    assistantMessageHandler: AssistantMessageCallbackHandler | undefined;
   } {
     const additionalHandlers: CallbackHandler[] = [];
     let linearHandler: LinearCallbackHandler | undefined;
+    let assistantMessageHandler: AssistantMessageCallbackHandler | undefined;
 
     if (run.source === 'linear' && run.externalSessionId && run.triggerName) {
       const linearConfig = this.triggerConfigService.getLinearTrigger(
@@ -225,7 +250,12 @@ export class RunProcessorService {
       }
     }
 
-    return { additionalHandlers, linearHandler };
+    if (run.source === 'telegram' && run.externalSessionId && run.triggerName) {
+      assistantMessageHandler = new AssistantMessageCallbackHandler();
+      additionalHandlers.push(assistantMessageHandler);
+    }
+
+    return { additionalHandlers, linearHandler, assistantMessageHandler };
   }
 
   private async emitLinearSafe(
@@ -241,14 +271,40 @@ export class RunProcessorService {
     }
   }
 
-  async runSession(params: RunSessionParams): Promise<RunSessionResult> {
-    this.logger.log('Running session', { repo: params.repo });
+  private async emitTelegramSafe(
+    run: {
+      source: string;
+      externalSessionId: string | null;
+      triggerName: string | null;
+    },
+    action: () => Promise<unknown>,
+  ): Promise<void> {
+    if (
+      run.source !== 'telegram' ||
+      !run.externalSessionId ||
+      !run.triggerName
+    ) {
+      return;
+    }
 
-    const cwd = this.agentfilesConfigService.resolveRepo(params.repo);
+    try {
+      await action();
+    } catch (emitErr) {
+      this.logger.error('Failed to emit Telegram reply', {
+        error: emitErr as Error,
+        triggerName: run.triggerName,
+        sessionKey: run.externalSessionId,
+      });
+    }
+  }
+
+  async runSession(params: RunSessionParams): Promise<RunSessionResult> {
+    this.logger.log('Running session', { cwd: params.cwd });
 
     const { session, dispose } = await this.piSessionFactory.create({
-      cwd,
+      cwd: params.cwd,
       externalSessionId: params.externalSessionId,
+      externalSessionProvider: params.externalSessionProvider,
       prependSystemPrompt: params.prependSystemPrompt,
       appendSystemPrompt: params.appendSystemPrompt,
     });
