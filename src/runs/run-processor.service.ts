@@ -13,6 +13,8 @@ import {
   type LangfuseTraceContext,
 } from '../callbacks/handlers/langfuse.callback-handler.js';
 import { LinearCallbackHandler } from '../callbacks/handlers/linear.callback-handler.js';
+import { AgentProfileService } from '../agents/agent-profile.service.js';
+import type { AgentProfile } from '../agents/agent-profile.interface.js';
 import { AppConfigService } from '../config/app-config.service.js';
 import { TriggerConfigService } from '../config/trigger-config.service.js';
 import { ActiveSessionTrackerService } from './active-session-tracker.service.js';
@@ -27,6 +29,8 @@ import { TelegramService } from '../telegram/telegram.service.js';
 export interface RunSessionParams {
   cwd: string;
   prompt: string;
+  /** Resolved agent profile (enables model/tool/subagent overrides) */
+  profile?: AgentProfile;
   additionalHandlers?: RunEventHandler[];
   /** Optional external ID to track the session for later cancellation (e.g. Linear agentSessionId) */
   externalSessionId?: string;
@@ -58,6 +62,7 @@ export class RunProcessorService {
     private readonly triggerConfigService: TriggerConfigService,
     private readonly telegramService: TelegramService,
     private readonly langfuseCallbackHandlerFactory: LangfuseCallbackHandlerFactory,
+    private readonly agentProfileService: AgentProfileService,
     @Inject(RUN_EVENT_HANDLERS)
     private readonly globalHandlers: RunEventHandler[],
   ) {}
@@ -97,6 +102,21 @@ export class RunProcessorService {
       return;
     }
 
+    // Resolve agent profile (if the run references one)
+    const profile = run.agentName
+      ? this.agentProfileService.getProfile(run.agentName)
+      : undefined;
+
+    if (run.agentName && !profile) {
+      this.logger.warn(
+        `Agent profile "${run.agentName}" not found — running without profile overrides`,
+        { runId },
+      );
+    }
+
+    // Agent profile repo overrides the run's cwd (already expanded by AgentProfileService)
+    const effectiveCwd = profile?.repo ?? run.cwd;
+
     // Mark running
     run.status = 'running';
     run.startedAt = new Date();
@@ -122,8 +142,9 @@ export class RunProcessorService {
 
     try {
       await this.runSession({
-        cwd: run.cwd,
+        cwd: effectiveCwd,
         prompt: run.prompt,
+        profile,
         externalSessionId: run.externalSessionId ?? undefined,
         runId,
         appendSystemPrompt: run.appendSystemPrompt ?? undefined,
@@ -318,6 +339,7 @@ export class RunProcessorService {
     const handle = await this.sdkSessionFactory.create({
       cwd: params.cwd,
       prompt: params.prompt,
+      profile: params.profile,
       additionalSystemPrompts:
         systemPrompts.length > 0 ? systemPrompts : undefined,
       abortController,

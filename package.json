@@ -31,7 +31,6 @@
     "@langfuse/otel": "5.0.2",
     "@langfuse/tracing": "5.0.2",
     "@linear/sdk": "80.1.0",
-    "@mariozechner/pi-coding-agent": "0.64.0",
     "@nestjs/common": "11.1.17",
     "@nestjs/core": "11.1.17",
     "@nestjs/platform-express": "11.1.17",

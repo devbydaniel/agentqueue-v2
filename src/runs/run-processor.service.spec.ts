@@ -20,14 +20,16 @@ import type { RunEventHandler } from '../callbacks/run-event-handler.interface.j
 import { LangfuseCallbackHandlerFactory } from '../callbacks/handlers/langfuse.callback-handler.js';
 import type { Run } from '../database/runs.schema.js';
 import { TelegramService } from '../telegram/telegram.service.js';
+import { AgentProfileService } from '../agents/agent-profile.service.js';
 
 /** Build a mock SdkSessionHandle whose async generator throws immediately. */
 function makeThrowingHandle(error: Error): SdkSessionHandle {
+  // eslint-disable-next-line require-yield, sonarjs/generator-without-yield -- intentionally throws before yielding
+  async function* gen(): AsyncGenerator<SDKMessage, void> {
+    throw error;
+  }
   return {
-    // eslint-disable-next-line require-yield, sonarjs/generator-without-yield -- intentionally throws before yielding
-    async *messages() {
-      throw error;
-    },
+    messages: gen(),
     abort: jest.fn(),
     get sessionId() {
       return undefined;
@@ -37,13 +39,14 @@ function makeThrowingHandle(error: Error): SdkSessionHandle {
 
 /** Build a mock SdkSessionHandle that delays then throws (for timeout tests). */
 function makeDelayedThrowingHandle(delayMs: number): SdkSessionHandle {
+  // eslint-disable-next-line require-yield, sonarjs/generator-without-yield -- intentionally throws before yielding
+  async function* gen(): AsyncGenerator<SDKMessage, void> {
+    await new Promise((_, reject) =>
+      setTimeout(reject, delayMs, new Error('aborted')),
+    );
+  }
   return {
-    // eslint-disable-next-line require-yield, sonarjs/generator-without-yield -- intentionally throws before yielding
-    async *messages() {
-      await new Promise((_, reject) =>
-        setTimeout(reject, delayMs, new Error('aborted')),
-      );
-    },
+    messages: gen(),
     abort: jest.fn(),
     get sessionId() {
       return undefined;
@@ -189,6 +192,12 @@ describe('RunProcessorService', () => {
           useValue: {
             emitRunResponse: jest.fn().mockResolvedValue(undefined),
             emitRunError: jest.fn().mockResolvedValue(undefined),
+          },
+        },
+        {
+          provide: AgentProfileService,
+          useValue: {
+            getProfile: jest.fn().mockReturnValue(undefined),
           },
         },
         {
@@ -476,6 +485,7 @@ describe('RunProcessorService', () => {
         id: 'run-123',
         source: 'manual',
         triggerName: null,
+        agentName: null,
         parentFlowRunId: null,
         cwd: '/home/user/dev/my-repo',
         prompt: 'do something',

@@ -63,9 +63,9 @@ export class RunQueueWorkerService
     });
   }
 
-  async onApplicationShutdown(): Promise<void> {
+  onApplicationShutdown(): void {
     this.logger.log('Shutting down queue worker — aborting in-flight sessions');
-    await this.activeSessionTracker.abortAll();
+    this.activeSessionTracker.abortAll();
     this.logger.log('Queue worker shutdown complete');
   }
 }

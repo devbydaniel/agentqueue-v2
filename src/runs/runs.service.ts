@@ -20,6 +20,7 @@ import { ensureDirectoryExists } from '../common/utils/cwd-path.js';
 export interface EnqueueRunCommand {
   source: 'manual' | 'cron' | 'linear' | 'github' | 'flow' | 'telegram';
   triggerName?: string;
+  agentName?: string;
   parentFlowRunId?: string;
   cwd: string;
   prompt: string;
@@ -71,6 +72,7 @@ export class RunsService {
     const createCommand: CreateRunCommand = {
       source: command.source,
       triggerName: command.triggerName,
+      agentName: command.agentName,
       parentFlowRunId: command.parentFlowRunId,
       cwd,
       prompt: command.prompt,

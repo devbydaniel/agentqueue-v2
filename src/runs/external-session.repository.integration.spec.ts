@@ -24,24 +24,24 @@ describe('ExternalSessionRepository (integration)', () => {
   });
 
   it('should return null for unknown session key', async () => {
-    expect(await repo.findFilePath('unknown')).toBeNull();
+    expect(await repo.findSessionId('unknown')).toBeNull();
   });
 
-  it('should store and retrieve a session file path', async () => {
+  it('should store and retrieve a session id', async () => {
     await repo.upsertSession({
       provider: 'linear',
       sessionKey: 'key-1',
-      filePath: '/sessions/abc.jsonl',
+      sessionId: 'sess-abc-123',
     });
 
-    expect(await repo.findFilePath('key-1')).toBe('/sessions/abc.jsonl');
+    expect(await repo.findSessionId('key-1')).toBe('sess-abc-123');
   });
 
   it('should overwrite an existing mapping without clearing chat metadata', async () => {
     await repo.upsertSession({
       provider: 'telegram',
       sessionKey: 'key-1',
-      filePath: null,
+      sessionId: null,
       botName: 'main-bot',
       chatId: '1234',
       messageThreadId: 99,
@@ -50,11 +50,11 @@ describe('ExternalSessionRepository (integration)', () => {
     await repo.upsertSession({
       provider: 'telegram',
       sessionKey: 'key-1',
-      filePath: '/sessions/new.jsonl',
+      sessionId: 'sess-new-456',
     });
 
     const row = await repo.findBySessionKey('key-1');
-    expect(row?.filePath).toBe('/sessions/new.jsonl');
+    expect(row?.sessionId).toBe('sess-new-456');
     expect(row?.botName).toBe('main-bot');
     expect(row?.chatId).toBe('1234');
     expect(row?.messageThreadId).toBe(99);
@@ -64,7 +64,7 @@ describe('ExternalSessionRepository (integration)', () => {
     await repo.upsertSession({
       provider: 'telegram',
       sessionKey: 'key-1',
-      filePath: null,
+      sessionId: null,
       botName: 'main-bot',
       chatId: '1234',
     });

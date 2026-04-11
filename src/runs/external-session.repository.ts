@@ -9,7 +9,7 @@ export type ExternalSessionProvider = 'linear' | 'telegram';
 export interface UpsertExternalSessionParams {
   provider: ExternalSessionProvider;
   sessionKey: string;
-  filePath: string | null;
+  sessionId: string | null;
   botName?: string;
   chatId?: string;
   messageThreadId?: number;
@@ -35,14 +35,14 @@ export class ExternalSessionRepository {
       : null;
   }
 
-  async findFilePath(sessionKey: string): Promise<string | null> {
+  async findSessionId(sessionKey: string): Promise<string | null> {
     const result = await this.pool.query(
-      'SELECT file_path FROM external_sessions WHERE session_key = $1',
+      'SELECT session_id FROM external_sessions WHERE session_key = $1',
       [sessionKey],
     );
 
-    const row = result.rows[0] as { file_path?: string | null } | undefined;
-    return row?.file_path ?? null;
+    const row = result.rows[0] as { session_id?: string | null } | undefined;
+    return row?.session_id ?? null;
   }
 
   async upsertSession(params: UpsertExternalSessionParams): Promise<void> {
@@ -51,7 +51,7 @@ export class ExternalSessionRepository {
       `INSERT INTO external_sessions (
         provider,
         session_key,
-        file_path,
+        session_id,
         bot_name,
         chat_id,
         message_thread_id,
@@ -60,7 +60,7 @@ export class ExternalSessionRepository {
       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
       ON CONFLICT (session_key) DO UPDATE SET
         provider = EXCLUDED.provider,
-        file_path = EXCLUDED.file_path,
+        session_id = EXCLUDED.session_id,
         bot_name = COALESCE(EXCLUDED.bot_name, external_sessions.bot_name),
         chat_id = COALESCE(EXCLUDED.chat_id, external_sessions.chat_id),
         message_thread_id = COALESCE(
@@ -72,7 +72,7 @@ export class ExternalSessionRepository {
       [
         params.provider,
         params.sessionKey,
-        params.filePath,
+        params.sessionId,
         params.botName ?? null,
         params.chatId ?? null,
         params.messageThreadId ?? null,
@@ -84,7 +84,7 @@ export class ExternalSessionRepository {
     this.logger.debug('Upserted external session mapping', {
       provider: params.provider,
       sessionKey: params.sessionKey,
-      filePath: params.filePath,
+      sessionId: params.sessionId,
     });
   }
 

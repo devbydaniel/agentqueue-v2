@@ -150,6 +150,7 @@ export class GithubWebhooksService {
     const { runId } = await this.runsService.enqueue({
       source: 'github',
       triggerName: trigger.name,
+      agentName: trigger.agent,
       cwd,
       prompt,
       appendSystemPrompt,

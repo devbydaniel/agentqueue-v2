@@ -131,7 +131,7 @@ describe('TelegramWebhooksService', () => {
       expect.objectContaining({
         provider: 'telegram',
         sessionKey: 'telegram:main-bot:123:22',
-        filePath: null,
+        sessionId: null,
         botName: 'main-bot',
         chatId: '123',
         messageThreadId: 22,
@@ -197,7 +197,7 @@ describe('TelegramWebhooksService', () => {
     externalSessionRepository.findBySessionKey.mockResolvedValueOnce({
       provider: 'telegram',
       sessionKey: 'telegram:main-bot:123:main',
-      filePath: '/sessions/old.jsonl',
+      sessionId: 'sess-old-789',
       botName: 'main-bot',
       chatId: '123',
       messageThreadId: null,
@@ -228,7 +228,7 @@ describe('TelegramWebhooksService', () => {
     expect(externalSessionRepository.upsertSession).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionKey: 'telegram:main-bot:123:main',
-        filePath: null,
+        sessionId: null,
       }),
     );
   });

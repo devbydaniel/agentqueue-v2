@@ -182,7 +182,7 @@ export class TelegramWebhooksService {
     await this.externalSessionRepository.upsertSession({
       provider: 'telegram',
       sessionKey,
-      filePath: isExpired ? null : (existingSession?.filePath ?? null),
+      sessionId: null,
       botName: params.botName,
       chatId,
       messageThreadId: message.message_thread_id,
@@ -219,6 +219,7 @@ export class TelegramWebhooksService {
       .enqueue({
         source: 'telegram',
         triggerName: trigger.name,
+        agentName: trigger.agent,
         cwd,
         prompt: message.text,
         externalSessionId: sessionKey,

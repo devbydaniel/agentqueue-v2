@@ -1,4 +1,7 @@
-import { RunCompletionNotifier, RUN_COMPLETED_CHANNEL } from './run-completion.notifier.js';
+import {
+  RunCompletionNotifier,
+  RUN_COMPLETED_CHANNEL,
+} from './run-completion.notifier.js';
 import type { PgPool } from '../database/database.tokens.js';
 
 describe('RunCompletionNotifier', () => {

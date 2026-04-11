@@ -108,8 +108,8 @@ describe('RunQueueWorkerService', () => {
   });
 
   describe('onApplicationShutdown', () => {
-    it('should abort all active sessions on shutdown', async () => {
-      await service.onApplicationShutdown();
+    it('should abort all active sessions on shutdown', () => {
+      service.onApplicationShutdown();
 
       expect(mockSessionTracker.abortAll).toHaveBeenCalled();
     });

@@ -96,6 +96,7 @@ export class CronSchedulerService implements OnModuleInit, OnModuleDestroy {
     const { runId } = await this.runsService.enqueue({
       source: 'cron',
       triggerName: trigger.name,
+      agentName: trigger.agent,
       cwd: trigger.cwd,
       prompt,
       appendSystemPrompt,

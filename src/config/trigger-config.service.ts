@@ -163,6 +163,7 @@ export class TriggerConfigService implements OnModuleInit {
               entry['signing_secret'] as string,
             ),
             api_key: interpolateEnvVars(entry['api_key'] as string),
+            ...(entry['agent'] ? { agent: entry['agent'] as string } : {}),
             ...(entry['prepend_system_prompt']
               ? {
                   prepend_system_prompt: entry[
@@ -191,6 +192,7 @@ export class TriggerConfigService implements OnModuleInit {
             events: entry['events'] as string[],
             cwd: normalizeCwd(entry['cwd'] as string, 'github trigger cwd'),
             prompt: entry['prompt'] as string,
+            ...(entry['agent'] ? { agent: entry['agent'] as string } : {}),
             ...(entry['filters']
               ? { filters: entry['filters'] as WebhookFilter[] }
               : {}),
@@ -232,6 +234,7 @@ export class TriggerConfigService implements OnModuleInit {
             entry['chat_id']
               ? { chat_id: String(entry['chat_id']) }
               : {}),
+            ...(entry['agent'] ? { agent: entry['agent'] as string } : {}),
             ...(entry['prepend_system_prompt']
               ? {
                   prepend_system_prompt: entry[

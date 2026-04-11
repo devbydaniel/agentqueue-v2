@@ -23,6 +23,7 @@ describe('RunsService', () => {
       id: 'run-abc',
       source: 'manual',
       triggerName: null,
+      agentName: null,
       parentFlowRunId: null,
       cwd: tmpDir,
       prompt: 'do something',

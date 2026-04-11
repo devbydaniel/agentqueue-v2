@@ -1,7 +1,7 @@
 export interface ExternalSessionRow {
   provider: string;
   sessionKey: string;
-  filePath: string | null;
+  sessionId: string | null;
   botName: string | null;
   chatId: string | null;
   messageThreadId: number | null;
@@ -13,7 +13,7 @@ export interface ExternalSessionRow {
 export interface NewExternalSessionRow {
   provider: string;
   sessionKey: string;
-  filePath?: string | null;
+  sessionId?: string | null;
   botName?: string | null;
   chatId?: string | null;
   messageThreadId?: number | null;

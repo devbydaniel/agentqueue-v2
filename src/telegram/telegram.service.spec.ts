@@ -26,7 +26,7 @@ describe('TelegramService', () => {
       findBySessionKey: jest.fn().mockResolvedValue({
         provider: 'telegram',
         sessionKey: 'telegram:main-bot:123:main',
-        filePath: '/sessions/test.jsonl',
+        sessionId: 'sess-test-abc',
         botName: 'main-bot',
         chatId: '123',
         messageThreadId: 22,
