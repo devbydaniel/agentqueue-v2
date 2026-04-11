@@ -23,3 +23,7 @@ AGENTS.md
 .agents/
 .agentfiles
 .agentfiles.lock
+
+# Claude Code local config
+.claude/
+CLAUDE.md

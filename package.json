@@ -27,6 +27,7 @@
     "prepare": "husky"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.2.101",
     "@langfuse/otel": "5.0.2",
     "@langfuse/tracing": "5.0.2",
     "@linear/sdk": "80.1.0",
