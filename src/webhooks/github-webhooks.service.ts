@@ -112,7 +112,10 @@ export class GithubWebhooksService {
 
     let cwd: string;
     try {
-      cwd = ensureDirectoryExists(rawCwd, `GitHub trigger "${trigger.name}" cwd`);
+      cwd = ensureDirectoryExists(
+        rawCwd,
+        `GitHub trigger "${trigger.name}" cwd`,
+      );
     } catch {
       this.logger.warn(
         `Trigger "${trigger.name}" resolved cwd "${rawCwd}" which is not a usable directory, skipping`,
@@ -135,9 +138,6 @@ export class GithubWebhooksService {
       prompt = prompt.replace(/\{\{before_output\}\}/g, hookResult.output);
     }
 
-    const prependSystemPrompt = trigger.prepend_system_prompt
-      ? interpolatePayloadTemplate(trigger.prepend_system_prompt, payload)
-      : undefined;
     const appendSystemPrompt = trigger.append_system_prompt
       ? interpolatePayloadTemplate(trigger.append_system_prompt, payload)
       : undefined;
@@ -152,7 +152,6 @@ export class GithubWebhooksService {
       triggerName: trigger.name,
       cwd,
       prompt,
-      prependSystemPrompt,
       appendSystemPrompt,
       timeoutMs: trigger.timeout_ms,
     });

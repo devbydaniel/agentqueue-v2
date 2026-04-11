@@ -134,12 +134,14 @@ export class TelegramWebhooksService {
 
     if (isResetCommand(message.text)) {
       await this.externalSessionRepository.deleteBySessionKey(sessionKey);
-      void this.runsService.abortSession(sessionKey).catch((error: unknown) => {
+      try {
+        this.runsService.abortSession(sessionKey);
+      } catch (error) {
         this.logger.error('Failed to abort Telegram session during reset', {
           error: error as Error,
           sessionKey,
         });
-      });
+      }
       void this.telegramService
         .sendDirectMessage({
           botToken: trigger.bot_token,
@@ -167,12 +169,14 @@ export class TelegramWebhooksService {
 
     if (isExpired) {
       await this.externalSessionRepository.deleteBySessionKey(sessionKey);
-      void this.runsService.abortSession(sessionKey).catch((error: unknown) => {
+      try {
+        this.runsService.abortSession(sessionKey);
+      } catch (error) {
         this.logger.error('Failed to abort expired Telegram session', {
           error: error as Error,
           sessionKey,
         });
-      });
+      }
     }
 
     await this.externalSessionRepository.upsertSession({
@@ -207,9 +211,6 @@ export class TelegramWebhooksService {
       cwd,
     };
 
-    const prependSystemPrompt = trigger.prepend_system_prompt
-      ? interpolateTemplate(trigger.prepend_system_prompt, templateVars)
-      : undefined;
     const appendSystemPrompt = trigger.append_system_prompt
       ? interpolateTemplate(trigger.append_system_prompt, templateVars)
       : undefined;
@@ -221,7 +222,6 @@ export class TelegramWebhooksService {
         cwd,
         prompt: message.text,
         externalSessionId: sessionKey,
-        prependSystemPrompt,
         appendSystemPrompt,
         timeoutMs: trigger.timeout_ms,
       })

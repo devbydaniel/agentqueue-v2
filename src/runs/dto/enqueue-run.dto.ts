@@ -17,10 +17,6 @@ export class EnqueueRunDto {
 
   @IsString()
   @IsOptional()
-  prependSystemPrompt?: string;
-
-  @IsString()
-  @IsOptional()
   appendSystemPrompt?: string;
 
   @IsInt()

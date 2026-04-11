@@ -19,7 +19,6 @@ function makeRun(overrides: Partial<Run> = {}): Run {
     completedAt: new Date(),
     errorMessage: null,
     externalSessionId: null,
-    prependSystemPrompt: null,
     appendSystemPrompt: null,
     timeoutMs: null,
     queueJobId: 'job-1',

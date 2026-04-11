@@ -93,7 +93,6 @@ describe('RunProcessor lifecycle (integration)', () => {
       cwd: '/tmp/core',
       prompt: 'fix the bug',
       externalSessionId: 'linear-session-123',
-      prependSystemPrompt: 'You are a helpful agent',
       appendSystemPrompt: 'Always run tests',
     });
 
@@ -101,7 +100,6 @@ describe('RunProcessor lifecycle (integration)', () => {
     expect(fetched!.source).toBe('linear');
     expect(fetched!.triggerName).toBe('my-agent');
     expect(fetched!.externalSessionId).toBe('linear-session-123');
-    expect(fetched!.prependSystemPrompt).toBe('You are a helpful agent');
     expect(fetched!.appendSystemPrompt).toBe('Always run tests');
   });
 

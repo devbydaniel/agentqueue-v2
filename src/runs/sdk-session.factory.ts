@@ -35,9 +35,7 @@ export interface SdkSessionHandle {
 
 /**
  * Builds a Claude Agent SDK `query()` call from a merged profile + run config.
- *
- * Counterpart of `PiSessionFactory` for the new SDK. Not wired into the run
- * processor yet — that happens in a future migration chunk.
+ * Wired into `RunProcessorService` as the execution engine.
  */
 @Injectable()
 export class SdkSessionFactory {

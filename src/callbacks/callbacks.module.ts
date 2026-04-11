@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { CALLBACK_HANDLERS } from './constants.js';
+import { RUN_EVENT_HANDLERS } from './constants.js';
 import { LoggerCallbackHandler } from './handlers/logger.callback-handler.js';
 import { LangfuseCallbackHandlerFactory } from './handlers/langfuse.callback-handler.js';
 
@@ -8,11 +8,11 @@ import { LangfuseCallbackHandlerFactory } from './handlers/langfuse.callback-han
     LoggerCallbackHandler,
     LangfuseCallbackHandlerFactory,
     {
-      provide: CALLBACK_HANDLERS,
+      provide: RUN_EVENT_HANDLERS,
       useFactory: (logger: LoggerCallbackHandler) => [logger],
       inject: [LoggerCallbackHandler],
     },
   ],
-  exports: [CALLBACK_HANDLERS, LangfuseCallbackHandlerFactory],
+  exports: [RUN_EVENT_HANDLERS, LangfuseCallbackHandlerFactory],
 })
 export class CallbacksModule {}

@@ -334,7 +334,6 @@ describe('GithubWebhooksService', () => {
 
       expect(runsService.enqueue).toHaveBeenCalledWith(
         expect.objectContaining({
-          prependSystemPrompt: 'You are working on org/my-repo.',
           appendSystemPrompt: 'PR URL: https://github.com/org/my-repo/pull/42',
         }),
       );

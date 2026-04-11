@@ -1,1 +1,1 @@
-export const CALLBACK_HANDLERS = Symbol('CALLBACK_HANDLERS');
+export const RUN_EVENT_HANDLERS = Symbol('RUN_EVENT_HANDLERS');

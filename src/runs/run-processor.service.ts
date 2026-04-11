@@ -1,8 +1,12 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { LinearClient } from '@linear/sdk';
 import { propagateAttributes } from '@langfuse/tracing';
-import { CALLBACK_HANDLERS } from '../callbacks/constants.js';
-import type { CallbackHandler } from '../callbacks/callback-handler.interface.js';
+import type {
+  SDKMessage,
+  SDKResultMessage,
+} from '@anthropic-ai/claude-agent-sdk';
+import { RUN_EVENT_HANDLERS } from '../callbacks/constants.js';
+import type { RunEventHandler } from '../callbacks/run-event-handler.interface.js';
 import { AssistantMessageCallbackHandler } from '../callbacks/handlers/assistant-message.callback-handler.js';
 import {
   LangfuseCallbackHandlerFactory,
@@ -12,30 +16,26 @@ import { LinearCallbackHandler } from '../callbacks/handlers/linear.callback-han
 import { AppConfigService } from '../config/app-config.service.js';
 import { TriggerConfigService } from '../config/trigger-config.service.js';
 import { ActiveSessionTrackerService } from './active-session-tracker.service.js';
-import { PiSessionFactory } from './pi-session.factory.js';
+import { SdkSessionFactory } from './sdk-session.factory.js';
 import { RunRepository } from './run.repository.js';
 import { RunCompletionNotifier } from './run-completion.notifier.js';
 import type { Run } from '../database/runs.schema.js';
 import { RunEventRepository } from './run-event.repository.js';
 import { RunEventCallbackHandler } from '../callbacks/handlers/run-event.callback-handler.js';
-import type { AgentSession } from '@mariozechner/pi-coding-agent';
 import { TelegramService } from '../telegram/telegram.service.js';
 
 export interface RunSessionParams {
   cwd: string;
   prompt: string;
-  additionalHandlers?: CallbackHandler[];
+  additionalHandlers?: RunEventHandler[];
   /** Optional external ID to track the session for later cancellation (e.g. Linear agentSessionId) */
   externalSessionId?: string;
-  externalSessionProvider?: 'linear' | 'telegram';
   /** Run ID for dual-indexed tracker (enables abort-by-runId from dashboard) */
   runId?: string;
-  /** System prompt snippet to prepend before the base system prompt */
-  prependSystemPrompt?: string;
   /** System prompt snippet to append after the base system prompt */
   appendSystemPrompt?: string;
-  /** AbortSignal for per-run timeout */
-  abortSignal?: AbortSignal;
+  /** AbortController for per-run timeout + cancellation */
+  abortController?: AbortController;
   /** Trace-level Langfuse attributes applied for the duration of the run */
   langfuseTraceContext?: LangfuseTraceContext;
 }
@@ -50,7 +50,7 @@ export class RunProcessorService {
 
   constructor(
     private readonly appConfigService: AppConfigService,
-    private readonly piSessionFactory: PiSessionFactory,
+    private readonly sdkSessionFactory: SdkSessionFactory,
     private readonly activeSessionTracker: ActiveSessionTrackerService,
     private readonly runRepository: RunRepository,
     private readonly runCompletionNotifier: RunCompletionNotifier,
@@ -58,15 +58,15 @@ export class RunProcessorService {
     private readonly triggerConfigService: TriggerConfigService,
     private readonly telegramService: TelegramService,
     private readonly langfuseCallbackHandlerFactory: LangfuseCallbackHandlerFactory,
-    @Inject(CALLBACK_HANDLERS)
-    private readonly globalHandlers: CallbackHandler[],
+    @Inject(RUN_EVENT_HANDLERS)
+    private readonly globalHandlers: RunEventHandler[],
   ) {}
 
   /**
    * Abort a tracked session by its external session ID (e.g. Linear agentSessionId).
    * Returns true if the session was found and aborted.
    */
-  async abortSession(externalSessionId: string): Promise<boolean> {
+  abortSession(externalSessionId: string): boolean {
     return this.activeSessionTracker.abort(externalSessionId);
   }
 
@@ -74,7 +74,7 @@ export class RunProcessorService {
    * Abort a tracked session by its run ID.
    * Returns true if a session was found and aborted.
    */
-  async abortByRunId(runId: string): Promise<boolean> {
+  abortByRunId(runId: string): boolean {
     return this.activeSessionTracker.abort(runId);
   }
 
@@ -125,15 +125,10 @@ export class RunProcessorService {
         cwd: run.cwd,
         prompt: run.prompt,
         externalSessionId: run.externalSessionId ?? undefined,
-        externalSessionProvider:
-          run.source === 'linear' || run.source === 'telegram'
-            ? run.source
-            : undefined,
         runId,
-        prependSystemPrompt: run.prependSystemPrompt ?? undefined,
         appendSystemPrompt: run.appendSystemPrompt ?? undefined,
         additionalHandlers,
-        abortSignal: abortController.signal,
+        abortController,
         langfuseTraceContext,
       });
 
@@ -238,11 +233,11 @@ export class RunProcessorService {
     externalSessionId: string | null;
     triggerName: string | null;
   }): {
-    additionalHandlers: CallbackHandler[];
+    additionalHandlers: RunEventHandler[];
     linearHandler: LinearCallbackHandler | undefined;
     assistantMessageHandler: AssistantMessageCallbackHandler | undefined;
   } {
-    const additionalHandlers: CallbackHandler[] = [];
+    const additionalHandlers: RunEventHandler[] = [];
     let linearHandler: LinearCallbackHandler | undefined;
     let assistantMessageHandler: AssistantMessageCallbackHandler | undefined;
 
@@ -313,95 +308,111 @@ export class RunProcessorService {
   async runSession(params: RunSessionParams): Promise<RunSessionResult> {
     this.logger.log('Running session', { cwd: params.cwd });
 
-    const { session, dispose } = await this.piSessionFactory.create({
+    const abortController = params.abortController ?? new AbortController();
+
+    const systemPrompts: string[] = [];
+    if (params.appendSystemPrompt) {
+      systemPrompts.push(params.appendSystemPrompt);
+    }
+
+    const handle = await this.sdkSessionFactory.create({
       cwd: params.cwd,
-      externalSessionId: params.externalSessionId,
-      externalSessionProvider: params.externalSessionProvider,
-      prependSystemPrompt: params.prependSystemPrompt,
-      appendSystemPrompt: params.appendSystemPrompt,
+      prompt: params.prompt,
+      additionalSystemPrompts:
+        systemPrompts.length > 0 ? systemPrompts : undefined,
+      abortController,
     });
 
-    const detachCallbacks = this.attachHandlers(
-      session,
-      params.additionalHandlers,
-    );
-
+    // Track for abort-on-demand
     if (params.externalSessionId || params.runId) {
       const trackKey = params.externalSessionId ?? params.runId!;
-      this.activeSessionTracker.track(trackKey, session, params.runId);
+      this.activeSessionTracker.track(trackKey, abortController, params.runId);
     }
 
-    // Wire abort signal to session abort
-    let onAbort: (() => void) | undefined;
-    if (params.abortSignal) {
-      onAbort = () => {
-        this.logger.log('Abort signal received, aborting session', {
-          runId: params.runId,
-        });
-        void session.abort();
-      };
-      params.abortSignal.addEventListener('abort', onAbort, { once: true });
-
-      // If the signal was already aborted (e.g. timeout fired during session creation),
-      // the listener above won't fire — trigger abort manually.
-      if (params.abortSignal.aborted) {
-        void session.abort();
-      }
-    }
+    const handlers = [
+      ...this.globalHandlers,
+      ...(params.additionalHandlers ?? []),
+    ];
 
     try {
+      const executeSession = async (): Promise<void> => {
+        let lastResult: SDKResultMessage | undefined;
+
+        try {
+          for await (const message of handle.messages) {
+            this.dispatchToHandlers(handlers, message);
+            if (message.type === 'result') {
+              lastResult = message;
+            }
+          }
+        } finally {
+          // Always call onComplete — handlers use this for cleanup (e.g.
+          // closing Langfuse spans, flushing Linear activities).
+          await this.completeHandlers(handlers, lastResult);
+        }
+      };
+
       if (params.langfuseTraceContext) {
-        await propagateAttributes(params.langfuseTraceContext, async () => {
-          await session.prompt(params.prompt);
-        });
+        await propagateAttributes(params.langfuseTraceContext, executeSession);
       } else {
-        await session.prompt(params.prompt);
+        await executeSession();
       }
+
       return { success: true };
     } finally {
-      if (onAbort && params.abortSignal) {
-        params.abortSignal.removeEventListener('abort', onAbort);
-      }
       if (params.externalSessionId || params.runId) {
         const trackKey = params.externalSessionId ?? params.runId!;
         this.activeSessionTracker.untrack(trackKey, params.runId);
       }
-      detachCallbacks();
-      dispose();
     }
   }
 
-  private attachHandlers(
-    session: AgentSession,
-    additionalHandlers?: CallbackHandler[],
-  ): () => void {
-    const handlers = [...this.globalHandlers, ...(additionalHandlers ?? [])];
-
-    const unsubscribe = session.subscribe((event) => {
-      for (const handler of handlers) {
-        try {
-          const result = handler.onEvent(event);
-          if (result instanceof Promise) {
-            result.catch((err) => {
-              this.logger.error(
-                `Async callback handler "${handler.name}" rejected`,
-                { error: err as Error, eventType: event.type },
-              );
+  /**
+   * Dispatch a single SDK message to all handlers.
+   * Errors in one handler don't prevent others from being called.
+   */
+  private dispatchToHandlers(
+    handlers: RunEventHandler[],
+    message: SDKMessage,
+  ): void {
+    for (const handler of handlers) {
+      try {
+        const result = handler.onMessage(message);
+        if (result instanceof Promise) {
+          result.catch((err) => {
+            this.logger.error(`Async handler "${handler.name}" rejected`, {
+              error: err as Error,
+              messageType: message.type,
             });
-          }
+          });
+        }
+      } catch (error) {
+        this.logger.error(`Handler "${handler.name}" threw`, {
+          error: error as Error,
+          messageType: message.type,
+        });
+      }
+    }
+  }
+
+  /**
+   * Call onComplete on all handlers that implement it.
+   * Called in a finally block so it runs on both success and error paths.
+   */
+  private async completeHandlers(
+    handlers: RunEventHandler[],
+    result: SDKResultMessage | undefined,
+  ): Promise<void> {
+    for (const handler of handlers) {
+      if (handler.onComplete) {
+        try {
+          await handler.onComplete(result);
         } catch (error) {
-          this.logger.error(`Callback handler "${handler.name}" threw`, {
+          this.logger.error(`Handler "${handler.name}" onComplete failed`, {
             error: error as Error,
-            eventType: event.type,
           });
         }
       }
-    });
-
-    this.logger.debug('Attached callback handlers to session', {
-      count: handlers.length,
-    });
-
-    return unsubscribe;
+    }
   }
 }

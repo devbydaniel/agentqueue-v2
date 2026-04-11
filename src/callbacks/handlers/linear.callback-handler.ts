@@ -1,7 +1,7 @@
 import { Logger } from '@nestjs/common';
-import type { AgentSessionEvent } from '@mariozechner/pi-coding-agent';
+import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { LinearClient } from '@linear/sdk';
-import type { CallbackHandler } from '../callback-handler.interface.js';
+import type { RunEventHandler } from '../run-event-handler.interface.js';
 
 const MAX_BODY_LENGTH = 10_000;
 
@@ -10,25 +10,13 @@ function truncate(text: string, max = MAX_BODY_LENGTH): string {
   return text.slice(0, max) + '…';
 }
 
-function extractToolResult(result: unknown): string {
-  const typed = result as
-    | { content: Array<{ type: string; text?: string }> }
-    | undefined;
-  return (
-    typed?.content
-      .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
-      .map((c) => c.text)
-      .join('\n') ?? ''
-  );
-}
-
 /**
  * Per-run callback handler that posts agent activities back to Linear
  * via the Agent Interaction API.
  *
  * NOT a global handler — instantiated per webhook request with session-specific context.
  */
-export class LinearCallbackHandler implements CallbackHandler {
+export class LinearCallbackHandler implements RunEventHandler {
   readonly name = 'linear';
   private readonly logger = new Logger(LinearCallbackHandler.name);
   private lastAssistantMessage: string | undefined;
@@ -44,17 +32,23 @@ export class LinearCallbackHandler implements CallbackHandler {
     return this.lastAssistantMessage;
   }
 
-  async onEvent(event: AgentSessionEvent): Promise<void> {
-    const activity = this.mapEventToActivity(event);
-    if (!activity) return;
-    const promise = this.postActivity(activity.content, activity.ephemeral);
-    this.pendingActivities.push(promise);
-    void promise.finally(() => {
-      this.pendingActivities = this.pendingActivities.filter(
-        (p) => p !== promise,
-      );
-    });
-    await promise;
+  async onMessage(message: SDKMessage): Promise<void> {
+    if (message.type !== 'assistant') return;
+
+    // Ignore subagent messages to avoid noise in Linear
+    if (message.parent_tool_use_id) return;
+
+    const activities = this.mapAssistantToActivities(message);
+    for (const activity of activities) {
+      const promise = this.postActivity(activity.content, activity.ephemeral);
+      this.pendingActivities.push(promise);
+      void promise.finally(() => {
+        this.pendingActivities = this.pendingActivities.filter(
+          (p) => p !== promise,
+        );
+      });
+      await promise;
+    }
   }
 
   /**
@@ -84,56 +78,52 @@ export class LinearCallbackHandler implements CallbackHandler {
     await Promise.allSettled(this.pendingActivities);
   }
 
-  private mapEventToActivity(
-    event: AgentSessionEvent,
-  ): { content: Record<string, unknown>; ephemeral: boolean } | null {
-    if (event.type === 'agent_start') {
-      return {
-        content: { type: 'thought', body: 'Starting work…' },
+  /**
+   * Flush pending activities on session completion.
+   * Called by the run processor in a finally block.
+   */
+  async onComplete(): Promise<void> {
+    await this.flush();
+  }
+
+  private mapAssistantToActivities(
+    message: SDKMessage & { type: 'assistant' },
+  ): Array<{ content: Record<string, unknown>; ephemeral: boolean }> {
+    const activities: Array<{
+      content: Record<string, unknown>;
+      ephemeral: boolean;
+    }> = [];
+    const content = message.message.content;
+
+    // Extract text blocks → thought activity
+    const textParts = content
+      .filter((c) => c.type === 'text')
+      .map((c) => ('text' in c ? c.text : ''));
+    const text = textParts.join('\n');
+
+    if (text) {
+      this.lastAssistantMessage = text;
+      activities.push({
+        content: { type: 'thought', body: truncate(text) },
         ephemeral: false,
-      };
+      });
     }
-    if (event.type === 'tool_execution_start') {
-      return {
-        content: {
-          type: 'action',
-          action: event.toolName,
-          parameter: truncate(JSON.stringify(event.args)),
-        },
-        ephemeral: true,
-      };
-    }
-    if (event.type === 'tool_execution_end') {
-      return {
-        content: {
-          type: 'action',
-          action: event.toolName,
-          result: truncate(extractToolResult(event.result)),
-        },
-        ephemeral: false,
-      };
-    }
-    if (event.type === 'message_end') {
-      const msg = (event as Record<string, unknown>).message as
-        | { role?: string; content?: Array<{ type: string; text?: string }> }
-        | undefined;
-      if (msg?.role === 'assistant' && Array.isArray(msg.content)) {
-        const text = msg.content
-          .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
-          .map((c) => c.text)
-          .join('\n');
-        if (text) {
-          this.lastAssistantMessage = text;
-          return {
-            content: { type: 'thought', body: truncate(text) },
-            ephemeral: false,
-          };
-        }
+
+    // Extract tool_use blocks → action activities (ephemeral)
+    for (const block of content) {
+      if (block.type === 'tool_use') {
+        activities.push({
+          content: {
+            type: 'action',
+            action: block.name,
+            parameter: truncate(JSON.stringify(block.input)),
+          },
+          ephemeral: true,
+        });
       }
     }
-    // agent_end completion is handled by the controller after execute() resolves,
-    // so we don't emit a response here to avoid duplicates.
-    return null;
+
+    return activities;
   }
 
   private async postActivity(

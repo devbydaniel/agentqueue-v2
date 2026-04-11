@@ -26,7 +26,6 @@ export interface CreateRunCommand {
   cwd: string;
   prompt: string;
   externalSessionId?: string;
-  prependSystemPrompt?: string;
   appendSystemPrompt?: string;
   timeoutMs?: number;
 }
@@ -54,7 +53,6 @@ export class RunRepository {
       prompt: command.prompt,
       promptPreview: command.prompt.slice(0, 500),
       externalSessionId: command.externalSessionId,
-      prependSystemPrompt: command.prependSystemPrompt,
       appendSystemPrompt: command.appendSystemPrompt,
       timeoutMs: command.timeoutMs,
     };
@@ -67,10 +65,9 @@ export class RunRepository {
         prompt,
         prompt_preview,
         external_session_id,
-        prepend_system_prompt,
         append_system_prompt,
         timeout_ms
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
       RETURNING *`,
       [
         newRun.source,
@@ -80,7 +77,6 @@ export class RunRepository {
         newRun.prompt,
         newRun.promptPreview ?? null,
         newRun.externalSessionId ?? null,
-        newRun.prependSystemPrompt ?? null,
         newRun.appendSystemPrompt ?? null,
         newRun.timeoutMs ?? null,
       ],

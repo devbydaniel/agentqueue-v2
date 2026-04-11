@@ -76,7 +76,6 @@ describe('RunsController', () => {
         .send({
           cwd: '/tmp/core',
           prompt: 'do something',
-          prependSystemPrompt: 'prepend',
           appendSystemPrompt: 'append',
         })
         .expect(202);
@@ -85,7 +84,6 @@ describe('RunsController', () => {
         source: 'manual',
         cwd: '/tmp/core',
         prompt: 'do something',
-        prependSystemPrompt: 'prepend',
         appendSystemPrompt: 'append',
       });
     });

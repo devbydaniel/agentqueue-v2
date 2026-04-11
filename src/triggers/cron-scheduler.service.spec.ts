@@ -148,7 +148,6 @@ describe('CronSchedulerService', () => {
         triggerName: 'test-trigger',
         cwd: '/tmp/myrepo',
         prompt: 'Do something',
-        prependSystemPrompt: undefined,
         appendSystemPrompt: undefined,
       });
     });
@@ -167,32 +166,6 @@ describe('CronSchedulerService', () => {
       scheduler.onModuleInit();
 
       await expect(tickHandler!()).resolves.toBeUndefined();
-    });
-
-    it('should pass interpolated prepend_system_prompt to enqueue', async () => {
-      triggerConfigService.getCronTriggers.mockReturnValue([
-        makeTrigger({
-          cwd: '/tmp/myrepo',
-          prompt: 'Do something',
-          prepend_system_prompt: 'Trigger: {{triggerName}}, cwd: {{cwd}}',
-        }),
-      ]);
-      (cron.validate as jest.Mock).mockReturnValue(true);
-
-      let tickHandler: () => Promise<void>;
-      (cron.schedule as jest.Mock).mockImplementation((_schedule, handler) => {
-        tickHandler = handler as () => Promise<void>;
-        return mockTask;
-      });
-
-      scheduler.onModuleInit();
-      await tickHandler!();
-
-      expect(runsService.enqueue).toHaveBeenCalledWith(
-        expect.objectContaining({
-          prependSystemPrompt: 'Trigger: test-trigger, cwd: /tmp/myrepo',
-        }),
-      );
     });
 
     it('should pass interpolated append_system_prompt to enqueue', async () => {
@@ -240,7 +213,6 @@ describe('CronSchedulerService', () => {
         string,
         unknown
       >;
-      expect(call['prependSystemPrompt']).toBeUndefined();
       expect(call['appendSystemPrompt']).toBeUndefined();
     });
   });

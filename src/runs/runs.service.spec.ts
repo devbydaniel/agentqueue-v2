@@ -33,7 +33,6 @@ describe('RunsService', () => {
       completedAt: null,
       errorMessage: null,
       externalSessionId: null,
-      prependSystemPrompt: null,
       appendSystemPrompt: null,
       timeoutMs: null,
       queueJobId: null,
@@ -59,8 +58,8 @@ describe('RunsService', () => {
           provide: RunProcessorService,
           useValue: {
             runSession: jest.fn().mockResolvedValue({ success: true }),
-            abortSession: jest.fn().mockResolvedValue(true),
-            abortByRunId: jest.fn().mockResolvedValue(true),
+            abortSession: jest.fn().mockReturnValue(true),
+            abortByRunId: jest.fn().mockReturnValue(true),
           },
         },
         {
@@ -97,8 +96,8 @@ describe('RunsService', () => {
   });
 
   describe('abortSession', () => {
-    it('should delegate abort to the processor', async () => {
-      const result = await service.abortSession('linear-session-1');
+    it('should delegate abort to the processor', () => {
+      const result = service.abortSession('linear-session-1');
 
       expect(runProcessorService.abortSession).toHaveBeenCalledWith(
         'linear-session-1',
@@ -122,7 +121,6 @@ describe('RunsService', () => {
         cwd: tmpDir,
         prompt: 'do something',
         externalSessionId: undefined,
-        prependSystemPrompt: undefined,
         appendSystemPrompt: undefined,
       });
 
@@ -145,7 +143,6 @@ describe('RunsService', () => {
         cwd: tmpDir,
         prompt: 'fix bug',
         externalSessionId: 'session-key-1',
-        prependSystemPrompt: 'prepend',
         appendSystemPrompt: 'append',
       });
 
@@ -154,7 +151,6 @@ describe('RunsService', () => {
           source: 'linear',
           triggerName: 'my-agent',
           externalSessionId: 'session-key-1',
-          prependSystemPrompt: 'prepend',
           appendSystemPrompt: 'append',
         }),
       );
@@ -301,7 +297,7 @@ describe('RunsService', () => {
     it('should return aborted false when processor cannot find running session', async () => {
       const run = makeRun({ status: 'running' });
       (runRepository.findById as jest.Mock).mockResolvedValueOnce(run);
-      (runProcessorService.abortByRunId as jest.Mock).mockResolvedValueOnce(
+      (runProcessorService.abortByRunId as jest.Mock).mockReturnValueOnce(
         false,
       );
 

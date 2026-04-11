@@ -48,7 +48,7 @@ describe('TelegramWebhooksService', () => {
       enqueue: jest
         .fn()
         .mockResolvedValue({ runId: 'run-1', status: 'waiting' }),
-      abortSession: jest.fn().mockResolvedValue(true),
+      abortSession: jest.fn().mockReturnValue(true),
     } as unknown as jest.Mocked<RunsService>;
 
     externalSessionRepository = {
@@ -143,7 +143,6 @@ describe('TelegramWebhooksService', () => {
       cwd: path.join(tmpDir, 'assistant'),
       prompt: 'hello',
       externalSessionId: 'telegram:main-bot:123:22',
-      prependSystemPrompt: `Reply to 456 on ${path.join(tmpDir, 'assistant')}`,
       appendSystemPrompt: 'Chat 123',
       timeoutMs: 1234,
     });

@@ -89,9 +89,6 @@ export class CronSchedulerService implements OnModuleInit, OnModuleDestroy {
       cwd: trigger.cwd,
     };
 
-    const prependSystemPrompt = trigger.prepend_system_prompt
-      ? interpolateTemplate(trigger.prepend_system_prompt, templateVars)
-      : undefined;
     const appendSystemPrompt = trigger.append_system_prompt
       ? interpolateTemplate(trigger.append_system_prompt, templateVars)
       : undefined;
@@ -101,7 +98,6 @@ export class CronSchedulerService implements OnModuleInit, OnModuleDestroy {
       triggerName: trigger.name,
       cwd: trigger.cwd,
       prompt,
-      prependSystemPrompt,
       appendSystemPrompt,
       timeoutMs: trigger.timeout_ms,
     });

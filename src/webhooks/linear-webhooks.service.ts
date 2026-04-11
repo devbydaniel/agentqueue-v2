@@ -100,19 +100,21 @@ export class LinearWebhooksService {
         linearClient,
       );
 
-      void this.runsService
-        .abortSession(payload.agentSessionId)
-        .then(async (aborted) => {
-          const message = aborted
-            ? 'Agent stopped by user request.'
-            : 'No active session found to stop.';
-          await linearHandler.emitResponse(message);
-        })
-        .catch((error: unknown) => {
-          this.logger.error('Failed to abort session', {
+      try {
+        const aborted = this.runsService.abortSession(payload.agentSessionId);
+        const message = aborted
+          ? 'Agent stopped by user request.'
+          : 'No active session found to stop.';
+        void linearHandler.emitResponse(message).catch((error: unknown) => {
+          this.logger.error('Failed to emit stop response to Linear', {
             error: error as Error,
           });
         });
+      } catch (error) {
+        this.logger.error('Failed to abort session', {
+          error: error as Error,
+        });
+      }
 
       return;
     }
@@ -135,9 +137,6 @@ export class LinearWebhooksService {
       cwd,
     };
 
-    const prependSystemPrompt = linearConfig.prepend_system_prompt
-      ? interpolateTemplate(linearConfig.prepend_system_prompt, templateVars)
-      : undefined;
     const appendSystemPrompt = linearConfig.append_system_prompt
       ? interpolateTemplate(linearConfig.append_system_prompt, templateVars)
       : undefined;
@@ -156,7 +155,6 @@ export class LinearWebhooksService {
         cwd,
         prompt,
         externalSessionId: payload.agentSessionId,
-        prependSystemPrompt,
         appendSystemPrompt,
         timeoutMs: linearConfig.timeout_ms,
       })

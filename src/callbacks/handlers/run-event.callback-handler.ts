@@ -1,17 +1,20 @@
 import { Logger } from '@nestjs/common';
-import type { AgentSessionEvent } from '@mariozechner/pi-coding-agent';
-import type { CallbackHandler } from '../callback-handler.interface.js';
+import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { RunEventHandler } from '../run-event-handler.interface.js';
 import type { RunEventRepository } from '../../runs/run-event.repository.js';
-import { FILTERED_EVENT_TYPES } from '../callback.constants.js';
+import {
+  SKIPPED_MESSAGE_TYPES,
+  PERSISTED_SYSTEM_SUBTYPES,
+} from '../callback.constants.js';
 
 /**
- * Callback handler that writes filtered session events to the run_events table.
+ * Callback handler that writes filtered SDK messages to the run_events table.
  *
  * Instantiated per-run (not via DI) because it needs the runId of the
  * currently-running run. Created by RunProcessorService and passed as
  * an additional handler.
  */
-export class RunEventCallbackHandler implements CallbackHandler {
+export class RunEventCallbackHandler implements RunEventHandler {
   readonly name = 'run-event';
   private readonly logger = new Logger(RunEventCallbackHandler.name);
 
@@ -20,30 +23,50 @@ export class RunEventCallbackHandler implements CallbackHandler {
     private readonly runEventRepository: RunEventRepository,
   ) {}
 
-  onEvent(event: AgentSessionEvent): void {
-    if (!FILTERED_EVENT_TYPES.has(event.type)) return;
+  onMessage(message: SDKMessage): void {
+    if (SKIPPED_MESSAGE_TYPES.has(message.type)) return;
+
+    // For system messages, only persist meaningful subtypes
+    if (
+      message.type === 'system' &&
+      'subtype' in message &&
+      !PERSISTED_SYSTEM_SUBTYPES.has(message.subtype)
+    ) {
+      return;
+    }
+
+    const eventType = this.resolveEventType(message);
+    const payload = this.extractPayload(message);
 
     // Fire-and-forget write — don't block the session on DB writes.
     // Errors are logged but swallowed so a DB hiccup doesn't crash the run.
-    const payload = this.extractPayload(event);
     this.runEventRepository
-      .append(this.runId, event.type, payload)
+      .append(this.runId, eventType, payload)
       .catch((err) => {
         this.logger.error('Failed to persist run event', {
           runId: this.runId,
-          eventType: event.type,
+          eventType,
           error: err as Error,
         });
       });
   }
 
-  private extractPayload(
-    event: AgentSessionEvent,
-  ): Record<string, unknown> | null {
-    // Strip the `type` field — it's already stored in its own column.
+  /**
+   * For system messages, store `system:<subtype>` for queryability.
+   * For everything else, store the message type directly.
+   */
+  private resolveEventType(message: SDKMessage): string {
+    if (message.type === 'system' && 'subtype' in message) {
+      return `system:${message.subtype}`;
+    }
+    return message.type;
+  }
+
+  private extractPayload(message: SDKMessage): Record<string, unknown> | null {
+    const raw = message as Record<string, unknown>;
+    // Strip fields that are either stored in their own column or add noise
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { type, ...rest } = event as Record<string, unknown>;
-    // Return null if there's nothing left beyond `type`
+    const { type, uuid, session_id, ...rest } = raw;
     return Object.keys(rest).length > 0 ? rest : null;
   }
 }

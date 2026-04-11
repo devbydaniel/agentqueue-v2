@@ -7,124 +7,109 @@ describe('ActiveSessionTrackerService', () => {
     tracker = new ActiveSessionTrackerService();
   });
 
-  it('should abort a tracked session and return true', async () => {
-    const mockSession = { abort: jest.fn().mockResolvedValue(undefined) };
-    tracker.track('key-1', mockSession as never);
+  it('should abort a tracked controller and return true', () => {
+    const controller = new AbortController();
+    tracker.track('key-1', controller);
 
-    const result = await tracker.abort('key-1');
+    const result = tracker.abort('key-1');
 
     expect(result).toBe(true);
-    expect(mockSession.abort).toHaveBeenCalled();
+    expect(controller.signal.aborted).toBe(true);
   });
 
-  it('should return false when aborting an unknown session', async () => {
-    const result = await tracker.abort('unknown');
+  it('should return false when aborting an unknown session', () => {
+    const result = tracker.abort('unknown');
 
     expect(result).toBe(false);
   });
 
-  it('should not abort after untracking', async () => {
-    const mockSession = { abort: jest.fn().mockResolvedValue(undefined) };
-    tracker.track('key-1', mockSession as never);
+  it('should not abort after untracking', () => {
+    const controller = new AbortController();
+    tracker.track('key-1', controller);
     tracker.untrack('key-1');
 
-    const result = await tracker.abort('key-1');
+    const result = tracker.abort('key-1');
 
     expect(result).toBe(false);
-    expect(mockSession.abort).not.toHaveBeenCalled();
+    expect(controller.signal.aborted).toBe(false);
   });
 
   describe('dual-indexing', () => {
-    it('should track by both externalSessionId and runId', async () => {
-      const mockSession = { abort: jest.fn().mockResolvedValue(undefined) };
-      tracker.track('session-1', mockSession as never, 'run-abc');
+    it('should track by both externalSessionId and runId', () => {
+      const controller = new AbortController();
+      tracker.track('session-1', controller, 'run-abc');
 
-      // Both keys should resolve to the same session
-      const resultBySession = await tracker.abort('session-1');
+      const resultBySession = tracker.abort('session-1');
       expect(resultBySession).toBe(true);
+      expect(controller.signal.aborted).toBe(true);
 
-      // Same session reference, so abort was already called
-      expect(mockSession.abort).toHaveBeenCalledTimes(1);
-
-      // RunId key should also work
-      const resultByRun = await tracker.abort('run-abc');
+      // RunId key should also work (controller is already aborted, but key resolves)
+      const resultByRun = tracker.abort('run-abc');
       expect(resultByRun).toBe(true);
-      expect(mockSession.abort).toHaveBeenCalledTimes(2);
     });
 
-    it('should untrack both keys when runId is provided', async () => {
-      const mockSession = { abort: jest.fn().mockResolvedValue(undefined) };
-      tracker.track('session-1', mockSession as never, 'run-abc');
+    it('should untrack both keys when runId is provided', () => {
+      const controller = new AbortController();
+      tracker.track('session-1', controller, 'run-abc');
       tracker.untrack('session-1', 'run-abc');
 
-      const resultBySession = await tracker.abort('session-1');
+      const resultBySession = tracker.abort('session-1');
       expect(resultBySession).toBe(false);
 
-      const resultByRun = await tracker.abort('run-abc');
+      const resultByRun = tracker.abort('run-abc');
       expect(resultByRun).toBe(false);
     });
 
-    it('should allow abort by runId alone', async () => {
-      const mockSession = { abort: jest.fn().mockResolvedValue(undefined) };
-      tracker.track('session-1', mockSession as never, 'run-abc');
+    it('should allow abort by runId alone', () => {
+      const controller = new AbortController();
+      tracker.track('session-1', controller, 'run-abc');
 
-      const result = await tracker.abort('run-abc');
+      const result = tracker.abort('run-abc');
 
       expect(result).toBe(true);
-      expect(mockSession.abort).toHaveBeenCalled();
+      expect(controller.signal.aborted).toBe(true);
     });
 
-    it('should not create runId entry when runId is not provided', async () => {
-      const mockSession = { abort: jest.fn().mockResolvedValue(undefined) };
-      tracker.track('session-1', mockSession as never);
+    it('should not create runId entry when runId is not provided', () => {
+      const controller = new AbortController();
+      tracker.track('session-1', controller);
 
-      const result = await tracker.abort('session-1');
+      const result = tracker.abort('session-1');
       expect(result).toBe(true);
     });
   });
 
   describe('abortAll', () => {
-    it('should abort all tracked sessions and clear the map', async () => {
-      const mockSession1 = { abort: jest.fn().mockResolvedValue(undefined) };
-      const mockSession2 = { abort: jest.fn().mockResolvedValue(undefined) };
-      tracker.track('key-1', mockSession1 as never);
-      tracker.track('key-2', mockSession2 as never);
+    it('should abort all tracked controllers and clear the map', () => {
+      const controller1 = new AbortController();
+      const controller2 = new AbortController();
+      tracker.track('key-1', controller1);
+      tracker.track('key-2', controller2);
 
-      const count = await tracker.abortAll();
+      const count = tracker.abortAll();
 
       expect(count).toBe(2);
-      expect(mockSession1.abort).toHaveBeenCalledTimes(1);
-      expect(mockSession2.abort).toHaveBeenCalledTimes(1);
+      expect(controller1.signal.aborted).toBe(true);
+      expect(controller2.signal.aborted).toBe(true);
 
       // After abortAll, no sessions should remain
-      const result = await tracker.abort('key-1');
+      const result = tracker.abort('key-1');
       expect(result).toBe(false);
     });
 
-    it('should deduplicate sessions tracked under multiple keys', async () => {
-      const mockSession = { abort: jest.fn().mockResolvedValue(undefined) };
-      tracker.track('session-1', mockSession as never, 'run-abc');
+    it('should deduplicate controllers tracked under multiple keys', () => {
+      const controller = new AbortController();
+      tracker.track('session-1', controller, 'run-abc');
 
-      const count = await tracker.abortAll();
+      const count = tracker.abortAll();
 
-      expect(count).toBe(1); // Only one unique session
-      expect(mockSession.abort).toHaveBeenCalledTimes(1);
+      expect(count).toBe(1); // Only one unique controller
+      expect(controller.signal.aborted).toBe(true);
     });
 
-    it('should return 0 when no sessions are tracked', async () => {
-      const count = await tracker.abortAll();
+    it('should return 0 when no sessions are tracked', () => {
+      const count = tracker.abortAll();
       expect(count).toBe(0);
-    });
-
-    it('should not throw when a session abort fails', async () => {
-      const mockSession = {
-        abort: jest.fn().mockRejectedValue(new Error('abort failed')),
-      };
-      tracker.track('key-1', mockSession as never);
-
-      // Should not throw
-      const count = await tracker.abortAll();
-      expect(count).toBe(1);
     });
   });
 });

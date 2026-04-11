@@ -1,48 +1,22 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { basename } from 'node:path';
-import type { AgentSessionEvent } from '@mariozechner/pi-coding-agent';
+import type {
+  SDKMessage,
+  SDKResultMessage,
+} from '@anthropic-ai/claude-agent-sdk';
 import { AppConfigService } from '../../config/app-config.service.js';
 import {
   startObservation,
   type LangfuseSpan,
   type LangfuseTool,
 } from '@langfuse/tracing';
-import { CallbackHandler } from '../callback-handler.interface.js';
+import type { RunEventHandler } from '../run-event-handler.interface.js';
 
 const MAX_INPUT_LENGTH = 10_000;
 
 function truncate(text: string, max = MAX_INPUT_LENGTH): string {
   if (text.length <= max) return text;
   return text.slice(0, max) + '…';
-}
-
-function extractToolResult(result: unknown): string {
-  const typed = result as
-    | { content: Array<{ type: string; text?: string }> }
-    | undefined;
-  return (
-    typed?.content
-      .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
-      .map((c) => c.text)
-      .join('\n') ?? ''
-  );
-}
-
-function extractContentText(
-  content: string | Array<{ type: string; text?: string }> | undefined,
-): string {
-  if (typeof content === 'string') return content;
-  if (Array.isArray(content)) return extractAssistantText(content);
-  return '';
-}
-
-function extractAssistantText(
-  content: Array<{ type: string; text?: string }>,
-): string {
-  return content
-    .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
-    .map((c) => c.text)
-    .join('\n');
 }
 
 export interface LangfuseTraceContext {
@@ -80,22 +54,21 @@ function buildSessionId(run: LangfuseTraceableRun): string | undefined {
  * Per-run callback handler that sends agent run traces to Langfuse.
  *
  * Hierarchy:
- *   Trace (agent run)
- *     └─ Span per turn
- *         ├─ Generation (assistant message)
- *         └─ Tool spans (tool executions)
+ *   Root span (started on system init)
+ *     ├─ Generation span (per assistant message)
+ *     ├─ Tool span (per tool_use block, closed on matching tool_result)
+ *     ├─ Event markers (compact_boundary, api_retry)
+ *     └─ Closed on result message
  *
  * Active only when LANGFUSE_SECRET_KEY is set.
  */
-export class LangfuseCallbackHandler implements CallbackHandler {
+export class LangfuseCallbackHandler implements RunEventHandler {
   readonly name = 'langfuse';
   private readonly logger = new Logger(LangfuseCallbackHandler.name);
 
   /** Root span for the current agent run. */
   private rootSpan: LangfuseSpan | undefined;
-  /** Current turn span (child of root). */
-  private turnSpan: LangfuseSpan | undefined;
-  /** In-flight tool spans keyed by toolCallId. */
+  /** In-flight tool spans keyed by tool_use block id. */
   private readonly toolSpans = new Map<string, LangfuseTool>();
 
   constructor(
@@ -103,232 +76,242 @@ export class LangfuseCallbackHandler implements CallbackHandler {
     private readonly enabled: boolean,
   ) {}
 
-  onEvent(event: AgentSessionEvent): void {
+  onMessage(message: SDKMessage): void {
     if (!this.enabled) return;
 
     try {
-      this.handleEvent(event);
+      this.handleMessage(message);
     } catch (error) {
-      this.logger.error('Failed to process event for Langfuse', {
+      this.logger.error('Failed to process message for Langfuse', {
         error: error as Error,
-        eventType: event.type,
+        messageType: message.type,
       });
     }
   }
 
-  private handleEvent(event: AgentSessionEvent): void {
-    switch (event.type) {
-      case 'agent_start':
-        this.onAgentStart();
+  onComplete(result: SDKResultMessage | undefined): void {
+    if (!this.enabled) return;
+
+    // Close any orphaned tool spans (e.g. session aborted mid-tool)
+    for (const [id, span] of this.toolSpans) {
+      span.update({ metadata: { aborted: true } }).end();
+      this.toolSpans.delete(id);
+    }
+
+    // Close root span if still open (e.g. error path where
+    // the result message wasn't processed via onMessage)
+    if (this.rootSpan) {
+      const output: Record<string, unknown> = result
+        ? {
+            subtype: result.subtype,
+            numTurns: result.num_turns,
+            costUsd: result.total_cost_usd,
+            durationMs: result.duration_ms,
+          }
+        : { aborted: true };
+
+      this.rootSpan.update({ output }).end();
+      this.rootSpan = undefined;
+    }
+  }
+
+  private handleMessage(message: SDKMessage): void {
+    // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- intentionally handling only relevant types
+    switch (message.type) {
+      case 'system':
+        this.handleSystemMessage(message);
         break;
 
-      case 'agent_end':
-        this.onAgentEnd(event);
+      case 'assistant':
+        this.handleAssistantMessage(message);
         break;
 
-      case 'turn_start':
-        this.onTurnStart();
+      case 'user':
+        this.handleUserMessage(message);
         break;
 
-      case 'turn_end':
-        this.onTurnEnd();
+      case 'result':
+        this.handleResult(message);
         break;
 
-      case 'message_end':
-        this.onMessageEnd(event);
-        break;
-
-      case 'tool_execution_start':
-        this.onToolStart(event);
-        break;
-
-      case 'tool_execution_end':
-        this.onToolEnd(event);
-        break;
-
-      case 'compaction_start':
-        this.addEvent('compaction-start', { reason: event.reason });
-        break;
-
-      case 'compaction_end':
-        this.addEvent('compaction-end', {
-          reason: event.reason,
-          aborted: event.aborted,
-        });
-        break;
-
-      case 'auto_retry_start':
-        this.addEvent('auto-retry-start', {
-          attempt: event.attempt,
-          maxAttempts: event.maxAttempts,
-          delayMs: event.delayMs,
-          error: event.errorMessage,
-        });
-        break;
-
-      case 'auto_retry_end':
-        this.addEvent('auto-retry-end', {
-          success: event.success,
-          attempt: event.attempt,
-        });
-        break;
-
-      // Intentionally not traced — too noisy / no useful data.
-      case 'message_start':
-      case 'message_update':
-      case 'tool_execution_update':
-      case 'queue_update':
+      default:
         break;
     }
   }
 
-  // ── Agent lifecycle ──────────────────────────────────────────────
+  // ── System messages ─────────────────────────────────────────────
 
-  private onAgentStart(): void {
-    this.rootSpan = startObservation(this.traceContext.traceName, {
-      input: { event: 'agent_start' },
-      metadata: this.traceContext.metadata,
-    });
-    this.logger.debug('Langfuse trace started');
+  private handleSystemMessage(message: SDKMessage & { type: 'system' }): void {
+    if (!('subtype' in message)) return;
+
+    // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- only tracing relevant subtypes
+    switch (message.subtype) {
+      case 'init':
+        this.rootSpan = startObservation(this.traceContext.traceName, {
+          input: { event: 'init' },
+          metadata: {
+            ...this.traceContext.metadata,
+            model: message.model,
+            toolCount: message.tools.length,
+            mcpServerCount: message.mcp_servers.length,
+          },
+        });
+        this.logger.debug('Langfuse trace started');
+        break;
+
+      case 'compact_boundary':
+        this.addEvent('compaction', {
+          trigger: message.compact_metadata.trigger,
+          preTokens: message.compact_metadata.pre_tokens,
+        });
+        break;
+
+      case 'api_retry':
+        this.addEvent('api-retry', {
+          attempt: message.attempt,
+          maxRetries: message.max_retries,
+          retryDelayMs: message.retry_delay_ms,
+          error: message.error,
+        });
+        break;
+
+      default:
+        break;
+    }
   }
 
-  private onAgentEnd(event: { messages: unknown[] }): void {
+  // ── Assistant messages ──────────────────────────────────────────
+
+  private handleAssistantMessage(
+    message: SDKMessage & { type: 'assistant' },
+  ): void {
+    const parent = this.rootSpan;
+    if (!parent) return;
+
+    const content = message.message.content;
+
+    // Create a generation span for text output
+    const textParts = content
+      .filter((c) => c.type === 'text')
+      .map((c) => ('text' in c ? c.text : ''));
+    const text = textParts.join('\n');
+
+    const toolCalls = content.filter((c) => c.type === 'tool_use');
+
+    if (text || toolCalls.length > 0) {
+      const generation = parent.startObservation(
+        'assistant-message',
+        {
+          output: text ? truncate(text) : undefined,
+          metadata: toolCalls.length
+            ? {
+                toolCalls: toolCalls.map((tc) => ({
+                  name: tc.name,
+                  args:
+                    'input' in tc
+                      ? truncate(JSON.stringify(tc.input))
+                      : undefined,
+                })),
+              }
+            : undefined,
+        },
+        { asType: 'generation' },
+      );
+      generation.end();
+    }
+
+    // Open a tool span for each tool_use block
+    for (const block of content) {
+      if (block.type === 'tool_use') {
+        const span = parent.startObservation(
+          block.name,
+          { input: truncate(JSON.stringify(block.input)) },
+          { asType: 'tool' },
+        );
+        this.toolSpans.set(block.id, span);
+      }
+    }
+  }
+
+  // ── User messages (synthetic tool results) ──────────────────────
+
+  private handleUserMessage(message: SDKMessage & { type: 'user' }): void {
+    const msgContent = message.message.content;
+    if (!Array.isArray(msgContent)) return;
+
+    for (const block of msgContent) {
+      if (
+        typeof block === 'object' &&
+        'type' in block &&
+        block.type === 'tool_result' &&
+        'tool_use_id' in block
+      ) {
+        const toolUseId = block.tool_use_id;
+        const span = this.toolSpans.get(toolUseId);
+        if (!span) continue;
+
+        const resultText = this.extractToolResultText(
+          block as unknown as Record<string, unknown>,
+        );
+        const isError =
+          'is_error' in block ? (block.is_error as boolean) : false;
+
+        span
+          .update({
+            output: truncate(resultText),
+            metadata: { isError },
+          })
+          .end();
+        this.toolSpans.delete(toolUseId);
+      }
+    }
+  }
+
+  // ── Result ──────────────────────────────────────────────────────
+
+  private handleResult(message: SDKResultMessage): void {
     if (!this.rootSpan) return;
 
-    this.rootSpan
-      .update({
-        output: { messageCount: event.messages.length },
-      })
-      .end();
+    const output: Record<string, unknown> = {
+      subtype: message.subtype,
+      numTurns: message.num_turns,
+      costUsd: message.total_cost_usd,
+      durationMs: message.duration_ms,
+    };
+
+    if (message.subtype === 'success') {
+      output['result'] = truncate(message.result);
+    } else {
+      output['errors'] = message.errors;
+    }
+
+    this.rootSpan.update({ output }).end();
     this.rootSpan = undefined;
     this.logger.debug('Langfuse trace ended');
   }
 
-  // ── Turn lifecycle ───────────────────────────────────────────────
+  // ── Helpers ─────────────────────────────────────────────────────
 
-  private onTurnStart(): void {
-    const parent = this.rootSpan;
-    if (!parent) return;
-
-    this.turnSpan = parent.startObservation('turn');
-  }
-
-  private onTurnEnd(): void {
-    if (!this.turnSpan) return;
-
-    this.turnSpan.end();
-    this.turnSpan = undefined;
-  }
-
-  // ── Messages ─────────────────────────────────────────────────────
-
-  private onMessageEnd(event: { message: unknown }): void {
-    const parent = this.turnSpan ?? this.rootSpan;
-    if (!parent) return;
-
-    const msg = event.message as {
-      role?: string;
-      content?:
-        | string
-        | Array<{
-            type: string;
-            text?: string;
-            name?: string;
-            arguments?: unknown;
-          }>;
-    };
-
-    if (!msg.role) return;
-
-    switch (msg.role) {
-      case 'system':
-      case 'user': {
-        const text = extractContentText(msg.content);
-        if (!text) return;
-        const label = msg.role === 'system' ? 'system-message' : 'user-message';
-        const span = parent.startObservation(label, {
-          input: truncate(text),
-        });
-        span.end();
-        break;
-      }
-
-      case 'assistant': {
-        if (!Array.isArray(msg.content)) return;
-        const text = extractAssistantText(msg.content);
-        const toolCalls = msg.content.filter((c) => c.type === 'toolCall');
-
-        const generation = parent.startObservation(
-          'assistant-message',
-          {
-            output: truncate(text),
-            metadata: toolCalls.length
-              ? {
-                  toolCalls: toolCalls.map((tc) => ({
-                    name: tc.name,
-                    args: truncate(JSON.stringify(tc.arguments)),
-                  })),
-                }
-              : undefined,
-          },
-          { asType: 'generation' },
-        );
-        generation.end();
-        break;
-      }
-    }
-  }
-
-  // ── Tool executions ──────────────────────────────────────────────
-
-  private onToolStart(event: {
-    toolCallId: string;
-    toolName: string;
-    args: unknown;
-  }): void {
-    const parent = this.turnSpan ?? this.rootSpan;
-    if (!parent) return;
-
-    const span = parent.startObservation(
-      event.toolName,
-      { input: truncate(JSON.stringify(event.args)) },
-      { asType: 'tool' },
-    );
-    this.toolSpans.set(event.toolCallId, span);
-  }
-
-  private onToolEnd(event: {
-    toolCallId: string;
-    toolName: string;
-    result: unknown;
-    isError: boolean;
-  }): void {
-    const span = this.toolSpans.get(event.toolCallId);
-    if (!span) return;
-
-    const resultText = extractToolResult(event.result);
-    span
-      .update({
-        output: truncate(resultText),
-        metadata: { isError: event.isError },
-      })
-      .end();
-    this.toolSpans.delete(event.toolCallId);
-  }
-
-  // ── Helpers ──────────────────────────────────────────────────────
-
-  /** Record a point-in-time event on the current turn or root span. */
   private addEvent(name: string, attributes: Record<string, unknown>): void {
-    const parent = this.turnSpan ?? this.rootSpan;
-    if (!parent) return;
+    if (!this.rootSpan) return;
 
-    const event = parent.startObservation(
+    const event = this.rootSpan.startObservation(
       name,
       { metadata: attributes },
       { asType: 'event' },
     );
     event.end();
+  }
+
+  private extractToolResultText(block: Record<string, unknown>): string {
+    const content = block['content'];
+    if (typeof content === 'string') return content;
+    if (!Array.isArray(content)) return '';
+
+    return (content as Array<Record<string, unknown>>)
+      .filter((c) => c['type'] === 'text' && typeof c['text'] === 'string')
+      .map((c) => c['text'] as string)
+      .join('\n');
   }
 }
 

@@ -1,39 +1,68 @@
 import { Test } from '@nestjs/testing';
-import type { AgentSession } from '@mariozechner/pi-coding-agent';
 import { propagateAttributes } from '@langfuse/tracing';
+import type {
+  SDKMessage,
+  SDKResultMessage,
+} from '@anthropic-ai/claude-agent-sdk';
 import { RunProcessorService } from './run-processor.service.js';
 import { AppConfigService } from '../config/app-config.service.js';
 import { TriggerConfigService } from '../config/trigger-config.service.js';
-import { PiSessionFactory } from './pi-session.factory.js';
+import {
+  SdkSessionFactory,
+  type SdkSessionHandle,
+} from './sdk-session.factory.js';
 import { ActiveSessionTrackerService } from './active-session-tracker.service.js';
 import { RunRepository } from './run.repository.js';
 import { RunCompletionNotifier } from './run-completion.notifier.js';
 import { RunEventRepository } from './run-event.repository.js';
-import { CALLBACK_HANDLERS } from '../callbacks/constants.js';
-import type { CallbackHandler } from '../callbacks/callback-handler.interface.js';
+import { RUN_EVENT_HANDLERS } from '../callbacks/constants.js';
+import type { RunEventHandler } from '../callbacks/run-event-handler.interface.js';
 import { LangfuseCallbackHandlerFactory } from '../callbacks/handlers/langfuse.callback-handler.js';
 import type { Run } from '../database/runs.schema.js';
 import { TelegramService } from '../telegram/telegram.service.js';
 
+/** Build a mock SdkSessionHandle whose async generator throws immediately. */
+function makeThrowingHandle(error: Error): SdkSessionHandle {
+  return {
+    // eslint-disable-next-line require-yield, sonarjs/generator-without-yield -- intentionally throws before yielding
+    async *messages() {
+      throw error;
+    },
+    abort: jest.fn(),
+    get sessionId() {
+      return undefined;
+    },
+  } as unknown as SdkSessionHandle;
+}
+
+/** Build a mock SdkSessionHandle that delays then throws (for timeout tests). */
+function makeDelayedThrowingHandle(delayMs: number): SdkSessionHandle {
+  return {
+    // eslint-disable-next-line require-yield, sonarjs/generator-without-yield -- intentionally throws before yielding
+    async *messages() {
+      await new Promise((_, reject) =>
+        setTimeout(reject, delayMs, new Error('aborted')),
+      );
+    },
+    abort: jest.fn(),
+    get sessionId() {
+      return undefined;
+    },
+  } as unknown as SdkSessionHandle;
+}
+
 jest.mock('@langfuse/tracing', () => ({
   propagateAttributes: jest.fn(
     async (
-      params: unknown,
+      _params: unknown,
       fn: (() => Promise<unknown>) | (() => unknown),
     ): Promise<unknown> => await fn(),
   ),
 }));
 
-/** Prompt mock that delays 50ms then rejects — used to test timeout behavior */
-function delayedReject(): Promise<void> {
-  return new Promise((_, reject) =>
-    setTimeout(reject, 50, new Error('aborted')),
-  );
-}
-
 describe('RunProcessorService', () => {
   let service: RunProcessorService;
-  let piSessionFactory: PiSessionFactory;
+  let sdkSessionFactory: SdkSessionFactory;
   let activeSessionTracker: ActiveSessionTrackerService;
   let runRepository: RunRepository;
   let runCompletionNotifier: RunCompletionNotifier;
@@ -41,21 +70,20 @@ describe('RunProcessorService', () => {
   let triggerConfigService: TriggerConfigService;
   let telegramService: TelegramService;
   let langfuseCallbackHandlerFactory: LangfuseCallbackHandlerFactory;
-  let mockSession: jest.Mocked<
-    Pick<AgentSession, 'prompt' | 'subscribe' | 'abort'>
-  > & {
-    dispose: jest.Mock;
-  };
-  let mockDispose: jest.Mock;
-  let subscribeFn: ((event: unknown) => void) | undefined;
 
-  const mockGlobalHandler: CallbackHandler = {
+  /** Messages that the mock SDK session will yield. Set before calling runSession/processRun. */
+  let mockMessages: SDKMessage[];
+  /** The mock handle returned by the factory */
+  let mockHandle: SdkSessionHandle;
+  let mockAbort: jest.Mock;
+
+  const mockGlobalHandler: RunEventHandler = {
     name: 'test-global',
-    onEvent: jest.fn(),
+    onMessage: jest.fn(),
   };
-  const mockLangfuseHandler: CallbackHandler = {
+  const mockLangfuseHandler: RunEventHandler = {
     name: 'langfuse',
-    onEvent: jest.fn(),
+    onMessage: jest.fn(),
   };
   const mockLangfuseTraceContext = {
     traceName: 'manual-run',
@@ -63,23 +91,47 @@ describe('RunProcessorService', () => {
     metadata: { runId: 'run-123', source: 'manual', repoName: 'my-repo' },
   };
 
+  /** Default successful result message appended to the stream. */
+  const defaultResult: SDKResultMessage = {
+    type: 'result',
+    subtype: 'success',
+    result: 'done',
+    duration_ms: 1000,
+    duration_api_ms: 800,
+    is_error: false,
+    num_turns: 1,
+    stop_reason: 'end_turn',
+    total_cost_usd: 0.01,
+    usage: { input_tokens: 10, output_tokens: 5 } as never,
+    modelUsage: {},
+    permission_denials: [],
+    uuid: '00000000-0000-0000-0000-000000000000' as never,
+    session_id: 'test-session',
+  };
+
+  function buildMockHandle(): SdkSessionHandle {
+    mockAbort = jest.fn();
+    const messages = mockMessages;
+
+    async function* generateMessages(): AsyncGenerator<SDKMessage, void> {
+      for (const msg of messages) {
+        yield msg;
+      }
+    }
+
+    mockHandle = {
+      messages: generateMessages(),
+      abort: mockAbort,
+      get sessionId() {
+        return 'test-session';
+      },
+    };
+    return mockHandle;
+  }
+
   beforeEach(async () => {
     jest.clearAllMocks();
-    subscribeFn = undefined;
-
-    const unsubscribe = jest.fn();
-    mockSession = {
-      prompt: jest.fn().mockResolvedValue(undefined),
-      subscribe: jest
-        .fn()
-        .mockImplementation((fn: (event: unknown) => void) => {
-          subscribeFn = fn;
-          return unsubscribe;
-        }),
-      abort: jest.fn().mockResolvedValue(undefined),
-      dispose: jest.fn(),
-    };
-    mockDispose = jest.fn();
+    mockMessages = [defaultResult];
 
     const module = await Test.createTestingModule({
       providers: [
@@ -91,12 +143,11 @@ describe('RunProcessorService', () => {
           },
         },
         {
-          provide: PiSessionFactory,
+          provide: SdkSessionFactory,
           useValue: {
-            create: jest.fn().mockResolvedValue({
-              session: mockSession,
-              dispose: mockDispose,
-            }),
+            create: jest
+              .fn()
+              .mockImplementation(() => Promise.resolve(buildMockHandle())),
           },
         },
         {
@@ -104,7 +155,7 @@ describe('RunProcessorService', () => {
           useValue: {
             track: jest.fn(),
             untrack: jest.fn(),
-            abort: jest.fn().mockResolvedValue(true),
+            abort: jest.fn().mockReturnValue(true),
           },
         },
         {
@@ -150,14 +201,14 @@ describe('RunProcessorService', () => {
           },
         },
         {
-          provide: CALLBACK_HANDLERS,
+          provide: RUN_EVENT_HANDLERS,
           useValue: [mockGlobalHandler],
         },
       ],
     }).compile();
 
     service = module.get(RunProcessorService);
-    piSessionFactory = module.get(PiSessionFactory);
+    sdkSessionFactory = module.get(SdkSessionFactory);
     activeSessionTracker = module.get(ActiveSessionTrackerService);
     runRepository = module.get(RunRepository);
     runCompletionNotifier = module.get(RunCompletionNotifier);
@@ -168,31 +219,19 @@ describe('RunProcessorService', () => {
   });
 
   describe('runSession', () => {
-    it('should call the factory with cwd + system prompt options', async () => {
+    it('should call the factory with cwd + prompt + system prompt', async () => {
       await service.runSession({
         cwd: '/home/user/dev/my-repo',
         prompt: 'do something',
-        externalSessionId: 'session-1',
-        prependSystemPrompt: 'prepend',
         appendSystemPrompt: 'append',
       });
 
-      expect(piSessionFactory.create).toHaveBeenCalledWith({
+      expect(sdkSessionFactory.create).toHaveBeenCalledWith({
         cwd: '/home/user/dev/my-repo',
-        externalSessionId: 'session-1',
-        externalSessionProvider: undefined,
-        prependSystemPrompt: 'prepend',
-        appendSystemPrompt: 'append',
+        prompt: 'do something',
+        additionalSystemPrompts: ['append'],
+        abortController: expect.any(AbortController),
       });
-    });
-
-    it('should call session.prompt with the provided prompt', async () => {
-      await service.runSession({
-        cwd: '/home/user/dev/my-repo',
-        prompt: 'fix the tests',
-      });
-
-      expect(mockSession.prompt).toHaveBeenCalledWith('fix the tests');
     });
 
     it('should return success true on completion', async () => {
@@ -204,42 +243,29 @@ describe('RunProcessorService', () => {
       expect(result).toEqual({ success: true });
     });
 
-    it('should call dispose() on success', async () => {
-      await service.runSession({
-        cwd: '/home/user/dev/my-repo',
-        prompt: 'hello',
-      });
-
-      expect(mockDispose).toHaveBeenCalled();
-    });
-
-    it('should call dispose() on error', async () => {
-      mockSession.prompt.mockRejectedValueOnce(new Error('boom'));
-
-      await expect(
-        service.runSession({ cwd: '/home/user/dev/my-repo', prompt: 'hello' }),
-      ).rejects.toThrow();
-
-      expect(mockDispose).toHaveBeenCalled();
-    });
-
-    it('should propagate unknown errors from session.prompt unchanged', async () => {
-      mockSession.prompt.mockRejectedValueOnce(new Error('something broke'));
-
-      await expect(
-        service.runSession({ cwd: '/home/user/dev/my-repo', prompt: 'hello' }),
-      ).rejects.toThrow('something broke');
-    });
-
-    it('should call additionalHandlers on session events', async () => {
-      const additionalHandler: CallbackHandler = {
-        name: 'test-additional',
-        onEvent: jest.fn(),
+    it('should dispatch messages to all handlers', async () => {
+      const assistantMsg: SDKMessage = {
+        type: 'assistant',
+        message: {
+          id: 'msg-1',
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Hello', citations: null }],
+          model: 'test',
+          stop_reason: 'end_turn',
+          stop_sequence: null,
+          usage: { input_tokens: 1, output_tokens: 1 },
+        } as never,
+        parent_tool_use_id: null,
+        uuid: '00000000-0000-0000-0000-000000000000' as never,
+        session_id: 'test',
       };
+      mockMessages = [assistantMsg, defaultResult];
 
-      mockSession.prompt.mockImplementationOnce(async () => {
-        subscribeFn?.({ type: 'agent_start' });
-      });
+      const additionalHandler: RunEventHandler = {
+        name: 'test-additional',
+        onMessage: jest.fn(),
+      };
 
       await service.runSession({
         cwd: '/home/user/dev/my-repo',
@@ -247,49 +273,79 @@ describe('RunProcessorService', () => {
         additionalHandlers: [additionalHandler],
       });
 
-      expect(additionalHandler.onEvent).toHaveBeenCalledWith({
-        type: 'agent_start',
+      // Both global and additional handlers receive all messages
+      expect(additionalHandler.onMessage).toHaveBeenCalledWith(assistantMsg);
+      expect(additionalHandler.onMessage).toHaveBeenCalledWith(defaultResult);
+      expect(mockGlobalHandler.onMessage).toHaveBeenCalledWith(assistantMsg);
+      expect(mockGlobalHandler.onMessage).toHaveBeenCalledWith(defaultResult);
+    });
+
+    it('should call onComplete for handlers that implement it', async () => {
+      const handlerWithComplete: RunEventHandler = {
+        name: 'completer',
+        onMessage: jest.fn(),
+        onComplete: jest.fn(),
+      };
+
+      await service.runSession({
+        cwd: '/home/user/dev/my-repo',
+        prompt: 'hello',
+        additionalHandlers: [handlerWithComplete],
       });
-      expect(mockGlobalHandler.onEvent).toHaveBeenCalledWith({
-        type: 'agent_start',
-      });
+
+      expect(handlerWithComplete.onComplete).toHaveBeenCalledWith(
+        defaultResult,
+      );
+    });
+
+    it('should call onComplete with undefined when session errors before result', async () => {
+      (sdkSessionFactory.create as jest.Mock).mockResolvedValueOnce(
+        makeThrowingHandle(new Error('boom')),
+      );
+
+      const handlerWithComplete: RunEventHandler = {
+        name: 'completer',
+        onMessage: jest.fn(),
+        onComplete: jest.fn(),
+      };
+
+      await expect(
+        service.runSession({
+          cwd: '/home/user/dev/my-repo',
+          prompt: 'hello',
+          additionalHandlers: [handlerWithComplete],
+        }),
+      ).rejects.toThrow('boom');
+
+      expect(handlerWithComplete.onComplete).toHaveBeenCalledWith(undefined);
     });
 
     it('should not crash if a handler throws synchronously', async () => {
-      const throwingHandler: CallbackHandler = {
+      const throwingHandler: RunEventHandler = {
         name: 'throwing-handler',
-        onEvent: jest.fn().mockImplementation(() => {
+        onMessage: jest.fn().mockImplementation(() => {
           throw new Error('handler exploded');
         }),
       };
-      const safeHandler: CallbackHandler = {
+      const safeHandler: RunEventHandler = {
         name: 'safe-handler',
-        onEvent: jest.fn(),
+        onMessage: jest.fn(),
       };
 
-      mockSession.prompt.mockImplementationOnce(async () => {
-        subscribeFn?.({ type: 'agent_start' });
-      });
-
-      const result = await service.runSession({
+      await service.runSession({
         cwd: '/home/user/dev/my-repo',
         prompt: 'hello',
         additionalHandlers: [throwingHandler, safeHandler],
       });
 
-      expect(result).toEqual({ success: true });
-      expect(safeHandler.onEvent).toHaveBeenCalled();
+      expect(safeHandler.onMessage).toHaveBeenCalled();
     });
 
     it('should not crash if a handler rejects asynchronously', async () => {
-      const rejectingHandler: CallbackHandler = {
+      const rejectingHandler: RunEventHandler = {
         name: 'rejecting-handler',
-        onEvent: jest.fn().mockRejectedValue(new Error('async boom')),
+        onMessage: jest.fn().mockRejectedValue(new Error('async boom')),
       };
-
-      mockSession.prompt.mockImplementationOnce(async () => {
-        subscribeFn?.({ type: 'agent_start' });
-      });
 
       const result = await service.runSession({
         cwd: '/home/user/dev/my-repo',
@@ -300,7 +356,7 @@ describe('RunProcessorService', () => {
       expect(result).toEqual({ success: true });
     });
 
-    it('should track and untrack active session via tracker', async () => {
+    it('should track and untrack via AbortController', async () => {
       await service.runSession({
         cwd: '/home/user/dev/my-repo',
         prompt: 'hello',
@@ -309,7 +365,7 @@ describe('RunProcessorService', () => {
 
       expect(activeSessionTracker.track).toHaveBeenCalledWith(
         'linear-session-1',
-        mockSession,
+        expect.any(AbortController),
         undefined,
       );
       expect(activeSessionTracker.untrack).toHaveBeenCalledWith(
@@ -319,7 +375,11 @@ describe('RunProcessorService', () => {
     });
 
     it('should untrack on error', async () => {
-      mockSession.prompt.mockRejectedValueOnce(new Error('boom'));
+      // Make the generator throw
+      mockMessages = [];
+      (sdkSessionFactory.create as jest.Mock).mockResolvedValueOnce(
+        makeThrowingHandle(new Error('boom')),
+      );
 
       await expect(
         service.runSession({
@@ -335,7 +395,7 @@ describe('RunProcessorService', () => {
       );
     });
 
-    it('should not track when no externalSessionId is provided', async () => {
+    it('should not track when no externalSessionId or runId is provided', async () => {
       await service.runSession({
         cwd: '/home/user/dev/my-repo',
         prompt: 'hello',
@@ -345,16 +405,16 @@ describe('RunProcessorService', () => {
       expect(activeSessionTracker.untrack).not.toHaveBeenCalled();
     });
 
-    it('should delegate abort to the tracker', async () => {
-      await service.abortSession('linear-session-1');
+    it('should delegate abort to the tracker', () => {
+      service.abortSession('linear-session-1');
 
       expect(activeSessionTracker.abort).toHaveBeenCalledWith(
         'linear-session-1',
       );
     });
 
-    it('should delegate abortByRunId to the tracker', async () => {
-      await service.abortByRunId('run-123');
+    it('should delegate abortByRunId to the tracker', () => {
+      service.abortByRunId('run-123');
 
       expect(activeSessionTracker.abort).toHaveBeenCalledWith('run-123');
     });
@@ -369,7 +429,7 @@ describe('RunProcessorService', () => {
 
       expect(activeSessionTracker.track).toHaveBeenCalledWith(
         'linear-session-1',
-        mockSession,
+        expect.any(AbortController),
         'run-abc',
       );
       expect(activeSessionTracker.untrack).toHaveBeenCalledWith(
@@ -387,7 +447,7 @@ describe('RunProcessorService', () => {
 
       expect(activeSessionTracker.track).toHaveBeenCalledWith(
         'run-abc',
-        mockSession,
+        expect.any(AbortController),
         'run-abc',
       );
       expect(activeSessionTracker.untrack).toHaveBeenCalledWith(
@@ -396,7 +456,7 @@ describe('RunProcessorService', () => {
       );
     });
 
-    it('should wrap prompt execution in propagateAttributes when Langfuse context is provided', async () => {
+    it('should wrap execution in propagateAttributes when Langfuse context is provided', async () => {
       await service.runSession({
         cwd: '/home/user/dev/my-repo',
         prompt: 'hello',
@@ -407,7 +467,6 @@ describe('RunProcessorService', () => {
         mockLangfuseTraceContext,
         expect.any(Function),
       );
-      expect(mockSession.prompt).toHaveBeenCalledWith('hello');
     });
   });
 
@@ -427,7 +486,6 @@ describe('RunProcessorService', () => {
         completedAt: null,
         errorMessage: null,
         externalSessionId: null,
-        prependSystemPrompt: null,
         appendSystemPrompt: null,
         timeoutMs: null,
         queueJobId: null,
@@ -444,7 +502,6 @@ describe('RunProcessorService', () => {
       await service.processRun('run-123');
 
       expect(runRepository.save).not.toHaveBeenCalled();
-      expect(mockSession.prompt).not.toHaveBeenCalled();
     });
 
     it('should throw when run is not found', async () => {
@@ -459,7 +516,6 @@ describe('RunProcessorService', () => {
       const run = makeRun();
       (runRepository.findById as jest.Mock).mockResolvedValue(run);
 
-      // Capture state at each save call since the object is mutated in place
       const savedStates: Array<{
         status: string;
         startedAt: Date | null;
@@ -479,16 +535,13 @@ describe('RunProcessorService', () => {
       await service.processRun('run-123');
 
       expect(savedStates).toHaveLength(2);
-      // First save: mark running
       expect(savedStates[0].status).toBe('running');
       expect(savedStates[0].startedAt).toBeInstanceOf(Date);
       expect(savedStates[0].attemptsMade).toBe(1);
-      // Second save: mark succeeded
       expect(savedStates[1].status).toBe('succeeded');
       expect(savedStates[1].completedAt).toBeInstanceOf(Date);
 
-      // Session was prompted
-      expect(mockSession.prompt).toHaveBeenCalledWith('do something');
+      expect(sdkSessionFactory.create).toHaveBeenCalled();
       expect(langfuseCallbackHandlerFactory.createForRun).toHaveBeenCalledWith(
         run,
       );
@@ -497,6 +550,11 @@ describe('RunProcessorService', () => {
     it('should mark run as errored when session throws', async () => {
       const run = makeRun();
       (runRepository.findById as jest.Mock).mockResolvedValue(run);
+
+      // Make session throw
+      (sdkSessionFactory.create as jest.Mock).mockResolvedValueOnce(
+        makeThrowingHandle(new Error('session crashed')),
+      );
 
       const savedStates: Array<{
         status: string;
@@ -511,8 +569,6 @@ describe('RunProcessorService', () => {
         });
         return Promise.resolve();
       });
-
-      mockSession.prompt.mockRejectedValueOnce(new Error('session crashed'));
 
       await expect(service.processRun('run-123')).rejects.toThrow(
         'session crashed',
@@ -541,17 +597,7 @@ describe('RunProcessorService', () => {
 
       await service.processRun('run-123');
 
-      // Verify factory was called with externalSessionId
-      expect(piSessionFactory.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          externalSessionId: 'linear-session-id',
-          externalSessionProvider: 'linear',
-        }),
-      );
-
-      // The linear handler should have been attached — we can verify
-      // by checking subscribe was called (handlers were attached)
-      expect(mockSession.subscribe).toHaveBeenCalled();
+      expect(sdkSessionFactory.create).toHaveBeenCalled();
     });
 
     it('should not attach linear handler when trigger config not found', async () => {
@@ -567,7 +613,6 @@ describe('RunProcessorService', () => {
 
       await service.processRun('run-123');
 
-      // Should still succeed — just without the Linear handler
       const lastSave = (runRepository.save as jest.Mock).mock.calls.at(-1)?.[0];
       expect(lastSave.status).toBe('succeeded');
     });
@@ -587,9 +632,6 @@ describe('RunProcessorService', () => {
         api_key: 'test-api-key',
       });
 
-      // The run should still succeed even though emitResponse would fail
-      // (LinearCallbackHandler is constructed internally; we verify the run
-      // completes as succeeded despite any Linear API issues)
       await service.processRun('run-123');
 
       const lastSave = (runRepository.save as jest.Mock).mock.calls.at(-1)?.[0];
@@ -603,15 +645,27 @@ describe('RunProcessorService', () => {
         triggerName: 'daniel-assistant',
       });
       (runRepository.findById as jest.Mock).mockResolvedValue(run);
-      mockSession.prompt.mockImplementationOnce(async () => {
-        subscribeFn?.({
-          type: 'message_end',
-          message: {
-            role: 'assistant',
-            content: [{ type: 'text', text: 'Telegram final reply' }],
-          },
-        });
-      });
+
+      // Yield an assistant message before the result so AssistantMessageHandler captures it
+      const assistantMsg: SDKMessage = {
+        type: 'assistant',
+        message: {
+          id: 'msg-1',
+          type: 'message',
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'Telegram final reply', citations: null },
+          ],
+          model: 'test',
+          stop_reason: 'end_turn',
+          stop_sequence: null,
+          usage: { input_tokens: 1, output_tokens: 1 },
+        } as never,
+        parent_tool_use_id: null,
+        uuid: '00000000-0000-0000-0000-000000000000' as never,
+        session_id: 'test',
+      };
+      mockMessages = [assistantMsg, defaultResult];
 
       await service.processRun('run-123');
 
@@ -629,7 +683,11 @@ describe('RunProcessorService', () => {
         triggerName: 'daniel-assistant',
       });
       (runRepository.findById as jest.Mock).mockResolvedValue(run);
-      mockSession.prompt.mockRejectedValueOnce(new Error('telegram crashed'));
+
+      // Make session throw
+      (sdkSessionFactory.create as jest.Mock).mockResolvedValueOnce(
+        makeThrowingHandle(new Error('telegram crashed')),
+      );
 
       await expect(service.processRun('run-123')).rejects.toThrow(
         'telegram crashed',
@@ -645,9 +703,11 @@ describe('RunProcessorService', () => {
     it('should re-throw original error when save fails in catch block', async () => {
       const run = makeRun();
       (runRepository.findById as jest.Mock).mockResolvedValue(run);
-      mockSession.prompt.mockRejectedValueOnce(new Error('session crashed'));
 
-      // First save (mark running) succeeds, second save (mark errored) fails
+      (sdkSessionFactory.create as jest.Mock).mockResolvedValueOnce(
+        makeThrowingHandle(new Error('session crashed')),
+      );
+
       (runRepository.save as jest.Mock)
         .mockResolvedValueOnce(undefined)
         .mockRejectedValueOnce(new Error('DB write failed'));
@@ -669,7 +729,10 @@ describe('RunProcessorService', () => {
     it('should notify on error completion', async () => {
       const run = makeRun();
       (runRepository.findById as jest.Mock).mockResolvedValue(run);
-      mockSession.prompt.mockRejectedValueOnce(new Error('session crashed'));
+
+      (sdkSessionFactory.create as jest.Mock).mockResolvedValueOnce(
+        makeThrowingHandle(new Error('session crashed')),
+      );
 
       await expect(service.processRun('run-123')).rejects.toThrow(
         'session crashed',
@@ -682,40 +745,59 @@ describe('RunProcessorService', () => {
       const run = makeRun();
       (runRepository.findById as jest.Mock).mockResolvedValue(run);
 
-      mockSession.prompt.mockImplementationOnce(async () => {
-        // Simulate a session event while prompt is running
-        subscribeFn?.({ type: 'agent_start' });
-        subscribeFn?.({ type: 'message_update', content: 'noisy' });
-        subscribeFn?.({ type: 'turn_end', toolResults: [] });
-      });
+      const assistantMsg: SDKMessage = {
+        type: 'assistant',
+        message: {
+          id: 'msg-1',
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'text', text: 'hello', citations: null }],
+          model: 'test',
+          stop_reason: 'end_turn',
+          stop_sequence: null,
+          usage: { input_tokens: 1, output_tokens: 1 },
+        } as never,
+        parent_tool_use_id: null,
+        uuid: '00000000-0000-0000-0000-000000000000' as never,
+        session_id: 'test',
+      };
+      const streamMsg: SDKMessage = {
+        type: 'stream_event',
+        event: {},
+        parent_tool_use_id: null,
+        uuid: '00000000-0000-0000-0000-000000000000' as never,
+        session_id: 'test',
+      } as unknown as SDKMessage;
+      mockMessages = [assistantMsg, streamMsg, defaultResult];
 
       await service.processRun('run-123');
 
-      // Registry handler should have persisted agent_start and turn_end but NOT message_update
+      // Registry handler should have persisted assistant and result but NOT stream_event
       const appendCalls = (runEventRepository.append as jest.Mock).mock.calls;
       const persistedTypes = appendCalls.map(
         (call: [string, string, unknown]) => call[1],
       );
-      expect(persistedTypes).toContain('agent_start');
-      expect(persistedTypes).toContain('turn_end');
-      expect(persistedTypes).not.toContain('message_update');
+      expect(persistedTypes).toContain('assistant');
+      expect(persistedTypes).toContain('result');
+      expect(persistedTypes).not.toContain('stream_event');
     });
 
     it('should skip errored write when run is already in terminal state (abort race)', async () => {
       const run = makeRun();
       (runRepository.findById as jest.Mock).mockResolvedValue(run);
-      mockSession.prompt.mockRejectedValueOnce(new Error('session aborted'));
 
-      // On the second findById call (in the catch block), return a run that's already aborted
+      (sdkSessionFactory.create as jest.Mock).mockResolvedValueOnce(
+        makeThrowingHandle(new Error('session aborted')),
+      );
+
       (runRepository.findById as jest.Mock)
-        .mockResolvedValueOnce(run) // first call in processRun
-        .mockResolvedValueOnce(makeRun({ status: 'aborted' })); // re-read in catch
+        .mockResolvedValueOnce(run)
+        .mockResolvedValueOnce(makeRun({ status: 'aborted' }));
 
       await expect(service.processRun('run-123')).rejects.toThrow(
         'session aborted',
       );
 
-      // save should only be called once (mark running), NOT for errored
       const saveCalls = (runRepository.save as jest.Mock).mock.calls;
       expect(saveCalls).toHaveLength(1);
       expect(saveCalls[0][0].status).toBe('running');
@@ -727,7 +809,6 @@ describe('RunProcessorService', () => {
 
       await service.processRun('run-123');
 
-      // Run succeeds normally — just verify it doesn't crash with a custom timeout
       const lastSave = (runRepository.save as jest.Mock).mock.calls.at(-1)?.[0];
       expect(lastSave.status).toBe('succeeded');
     });
@@ -736,8 +817,10 @@ describe('RunProcessorService', () => {
       const run = makeRun({ timeoutMs: 1 }); // 1ms timeout — will fire immediately
       (runRepository.findById as jest.Mock).mockResolvedValue(run);
 
-      // Make prompt hang longer than the 1ms timeout, then reject
-      mockSession.prompt.mockImplementation(delayedReject);
+      // Make the session take long enough for the 1ms timer to fire
+      (sdkSessionFactory.create as jest.Mock).mockResolvedValueOnce(
+        makeDelayedThrowingHandle(50),
+      );
 
       await expect(service.processRun('run-123')).rejects.toThrow();
 

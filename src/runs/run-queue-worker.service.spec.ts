@@ -28,7 +28,7 @@ describe('RunQueueWorkerService', () => {
     };
 
     mockSessionTracker = {
-      abortAll: jest.fn().mockResolvedValue(0),
+      abortAll: jest.fn().mockReturnValue(0),
     };
 
     const module = await Test.createTestingModule({

@@ -1,7 +1,8 @@
-import type { AgentSessionEvent } from '@mariozechner/pi-coding-agent';
-import type { CallbackHandler } from '../callback-handler.interface.js';
+import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { BetaTextBlock } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs';
+import type { RunEventHandler } from '../run-event-handler.interface.js';
 
-export class AssistantMessageCallbackHandler implements CallbackHandler {
+export class AssistantMessageCallbackHandler implements RunEventHandler {
   readonly name = 'assistant-message';
   private lastAssistantMessage: string | undefined;
 
@@ -9,20 +10,11 @@ export class AssistantMessageCallbackHandler implements CallbackHandler {
     return this.lastAssistantMessage;
   }
 
-  onEvent(event: AgentSessionEvent): void {
-    if (event.type !== 'message_end') {
-      return;
-    }
+  onMessage(message: SDKMessage): void {
+    if (message.type !== 'assistant') return;
 
-    const msg = event.message as
-      | { role?: string; content?: Array<{ type: string; text?: string }> }
-      | undefined;
-    if (msg?.role !== 'assistant' || !Array.isArray(msg.content)) {
-      return;
-    }
-
-    const text = msg.content
-      .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
+    const text = message.message.content
+      .filter((c): c is BetaTextBlock => c.type === 'text')
       .map((c) => c.text)
       .join('\n');
 

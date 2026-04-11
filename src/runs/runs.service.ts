@@ -24,7 +24,6 @@ export interface EnqueueRunCommand {
   cwd: string;
   prompt: string;
   externalSessionId?: string;
-  prependSystemPrompt?: string;
   appendSystemPrompt?: string;
   timeoutMs?: number;
 }
@@ -57,7 +56,7 @@ export class RunsService {
    * Abort a tracked session by its external session ID (e.g. Linear agentSessionId).
    * Returns true if the session was found and aborted.
    */
-  async abortSession(externalSessionId: string): Promise<boolean> {
+  abortSession(externalSessionId: string): boolean {
     return this.runProcessorService.abortSession(externalSessionId);
   }
 
@@ -76,7 +75,6 @@ export class RunsService {
       cwd,
       prompt: command.prompt,
       externalSessionId: command.externalSessionId,
-      prependSystemPrompt: command.prependSystemPrompt,
       appendSystemPrompt: command.appendSystemPrompt,
       timeoutMs: command.timeoutMs,
     };
@@ -144,7 +142,7 @@ export class RunsService {
     }
 
     if (run.status === 'running') {
-      const aborted = await this.runProcessorService.abortByRunId(runId);
+      const aborted = this.runProcessorService.abortByRunId(runId);
       if (aborted) {
         run.status = 'aborted';
         run.completedAt = new Date();

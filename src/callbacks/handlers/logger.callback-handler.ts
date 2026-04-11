@@ -1,7 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
-import type { AgentSessionEvent } from '@mariozechner/pi-coding-agent';
-import { CallbackHandler } from '../callback-handler.interface.js';
-import { FILTERED_EVENT_TYPES } from '../callback.constants.js';
+import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { RunEventHandler } from '../run-event-handler.interface.js';
 
 const MAX_LOG_LENGTH = 500;
 
@@ -11,126 +10,98 @@ function truncate(text: string): string {
 }
 
 @Injectable()
-export class LoggerCallbackHandler implements CallbackHandler {
+export class LoggerCallbackHandler implements RunEventHandler {
   readonly name = 'logger';
   private readonly logger = new Logger(LoggerCallbackHandler.name);
 
-  onEvent(event: AgentSessionEvent): void {
-    if (!FILTERED_EVENT_TYPES.has(event.type)) return;
-
-    switch (event.type) {
-      case 'agent_start':
-        this.logger.log('Agent started');
+  onMessage(message: SDKMessage): void {
+    // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- only logging relevant types
+    switch (message.type) {
+      case 'system':
+        this.handleSystemMessage(message);
         break;
 
-      case 'agent_end':
-        this.logger.log('Agent ended', {
-          messageCount: event.messages.length,
+      case 'assistant':
+        this.handleAssistantMessage(message);
+        break;
+
+      case 'result':
+        this.logger.log('Run completed', {
+          subtype: message.subtype,
+          durationMs: message.duration_ms,
+          costUsd: message.total_cost_usd,
+          numTurns: message.num_turns,
+          isError: message.is_error,
         });
         break;
 
-      case 'turn_start':
-        this.logger.debug('Turn started');
+      // All other types: skip silently
+      default:
         break;
+    }
+  }
 
-      case 'turn_end':
-        this.logger.debug('Turn ended', {
-          toolResults: event.toolResults.length,
+  private handleSystemMessage(message: SDKMessage & { type: 'system' }): void {
+    if (!('subtype' in message)) return;
+
+    // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- only logging relevant subtypes
+    switch (message.subtype) {
+      case 'init':
+        this.logger.log('Session started', {
+          model: message.model,
+          toolCount: message.tools.length,
+          mcpServerCount: message.mcp_servers.length,
+          agents: message.agents,
         });
         break;
 
-      case 'message_end': {
-        const msg = event.message;
-        if ('role' in msg && msg.role === 'assistant' && 'content' in msg) {
-          const content = msg.content as Array<{ type: string; text?: string }>;
-          const textParts = content
-            .filter(
-              (c): c is { type: 'text'; text: string } => c.type === 'text',
-            )
-            .map((c) => c.text);
+      case 'api_retry':
+        this.logger.warn('API retry', {
+          attempt: message.attempt,
+          maxRetries: message.max_retries,
+          retryDelayMs: message.retry_delay_ms,
+          error: message.error,
+        });
+        break;
 
-          if (textParts.length > 0) {
-            this.logger.log('Assistant message', {
-              text: truncate(textParts.join('\n')),
-            });
-          }
-
-          const toolCalls = content.filter(
-            (c) => c.type === 'toolCall',
-          ) as Array<{
-            type: 'toolCall';
-            name: string;
-            arguments: Record<string, unknown>;
-          }>;
-
-          for (const tc of toolCalls) {
-            this.logger.log(`Tool call: ${tc.name}`, {
-              args: truncate(JSON.stringify(tc.arguments)),
-            });
-          }
+      case 'status':
+        if (message.status === 'compacting') {
+          this.logger.log('Context compacting');
         }
         break;
+
+      case 'compact_boundary':
+        this.logger.log('Compaction boundary', {
+          trigger: message.compact_metadata.trigger,
+          preTokens: message.compact_metadata.pre_tokens,
+        });
+        break;
+
+      default:
+        break;
+    }
+  }
+
+  private handleAssistantMessage(
+    message: SDKMessage & { type: 'assistant' },
+  ): void {
+    const content = message.message.content;
+
+    const textParts = content
+      .filter((c) => c.type === 'text')
+      .map((c) => ('text' in c ? c.text : ''));
+    const text = textParts.join('\n');
+
+    if (text) {
+      this.logger.log('Assistant message', { text: truncate(text) });
+    }
+
+    for (const block of content) {
+      if (block.type === 'tool_use') {
+        this.logger.log(`Tool call: ${block.name}`, {
+          args: truncate(JSON.stringify(block.input)),
+        });
       }
-
-      case 'tool_execution_start':
-        this.logger.log(`Tool started: ${event.toolName}`, {
-          toolCallId: event.toolCallId,
-          args: truncate(JSON.stringify(event.args)),
-        });
-        break;
-
-      case 'tool_execution_end': {
-        const result = event.result as
-          | { content: Array<{ type: string; text?: string }> }
-          | undefined;
-        const resultText = result?.content
-          .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
-          .map((c) => c.text)
-          .join('\n');
-
-        this.logger.log(
-          `Tool ended: ${event.toolName} (${event.isError ? 'error' : 'ok'})`,
-          {
-            toolCallId: event.toolCallId,
-            result: resultText ? truncate(resultText) : undefined,
-          },
-        );
-        break;
-      }
-
-      case 'compaction_start':
-        this.logger.log('Compaction started', { reason: event.reason });
-        break;
-
-      case 'compaction_end':
-        this.logger.log('Compaction ended', {
-          reason: event.reason,
-          aborted: event.aborted,
-        });
-        break;
-
-      case 'auto_retry_start':
-        this.logger.warn('Auto retry started', {
-          attempt: event.attempt,
-          maxAttempts: event.maxAttempts,
-          delayMs: event.delayMs,
-          error: event.errorMessage,
-        });
-        break;
-
-      case 'auto_retry_end':
-        this.logger.log('Auto retry ended', {
-          success: event.success,
-          attempt: event.attempt,
-        });
-        break;
-
-      case 'message_start':
-      case 'message_update':
-      case 'tool_execution_update':
-      case 'queue_update':
-        // Filtered out by FILTERED_EVENT_TYPES early return above.
-        break;
     }
   }
 }

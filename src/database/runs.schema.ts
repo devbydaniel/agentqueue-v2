@@ -31,7 +31,6 @@ export interface Run {
   completedAt: Date | null;
   errorMessage: string | null;
   externalSessionId: string | null;
-  prependSystemPrompt: string | null;
   appendSystemPrompt: string | null;
   timeoutMs: number | null;
   queueJobId: string | null;
@@ -52,7 +51,6 @@ export interface NewRun {
   completedAt?: Date | null;
   errorMessage?: string | null;
   externalSessionId?: string | null;
-  prependSystemPrompt?: string | null;
   appendSystemPrompt?: string | null;
   timeoutMs?: number | null;
   queueJobId?: string | null;
