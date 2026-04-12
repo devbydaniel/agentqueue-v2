@@ -194,6 +194,23 @@ export class RunRepository {
     return result.rows as { id: string }[];
   }
 
+  async findTriggerNameByExternalSessionId(
+    externalSessionId: string,
+  ): Promise<string | null> {
+    const result = await this.pool.query(
+      `SELECT trigger_name FROM runs
+       WHERE external_session_id = $1
+       ORDER BY created_at ASC
+       LIMIT 1`,
+      [externalSessionId],
+    );
+    return (
+      ((result.rows[0] as Record<string, unknown> | undefined)?.[
+        'trigger_name'
+      ] as string | null) ?? null
+    );
+  }
+
   async markWaitingQueueJob(runId: string, queueJobId: string): Promise<void> {
     const result = await this.pool.query(
       `UPDATE runs

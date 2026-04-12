@@ -15,6 +15,10 @@ import { LinearCallbackHandlerFactory } from './handlers/linear.callback-handler
       inject: [LoggerCallbackHandler],
     },
   ],
-  exports: [RUN_EVENT_HANDLERS, LangfuseCallbackHandlerFactory, LinearCallbackHandlerFactory],
+  exports: [
+    RUN_EVENT_HANDLERS,
+    LangfuseCallbackHandlerFactory,
+    LinearCallbackHandlerFactory,
+  ],
 })
 export class CallbacksModule {}

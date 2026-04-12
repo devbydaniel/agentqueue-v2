@@ -9,9 +9,12 @@ export interface CronTrigger {
   timeout_ms?: number;
 }
 
+export type LinearEventType = 'assigned' | 'mentioned';
+
 export interface LinearTrigger {
   name: string;
   type: 'linear';
+  on?: LinearEventType;
   cwd: string;
   signing_secret: string;
   api_key: string;

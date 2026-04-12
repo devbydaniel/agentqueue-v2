@@ -174,6 +174,69 @@ describe('LinearWebhookParserService', () => {
         }),
       ).toThrow(BadRequestException);
     });
+
+    describe('eventType derivation', () => {
+      it('should set eventType to "assigned" for created payload without commentId', () => {
+        const result = service.parsePayload({
+          action: 'created',
+          type: 'AgentSession',
+          data: {
+            id: 'session-1',
+            promptContext: 'Fix the bug',
+            issueId: 'issue-1',
+          },
+        });
+
+        expect(result.eventType).toBe('assigned');
+        expect(result.commentId).toBeUndefined();
+        expect(result.sessionType).toBeUndefined();
+      });
+
+      it('should set eventType to "mentioned" when commentId is present', () => {
+        const result = service.parsePayload({
+          action: 'created',
+          type: 'AgentSession',
+          data: {
+            id: 'session-2',
+            promptContext: 'Look at this',
+            issueId: 'issue-1',
+            commentId: 'comment-1',
+          },
+        });
+
+        expect(result.eventType).toBe('mentioned');
+        expect(result.commentId).toBe('comment-1');
+      });
+
+      it('should set eventType to "mentioned" when session type is commentThread', () => {
+        const result = service.parsePayload({
+          action: 'created',
+          type: 'AgentSession',
+          data: {
+            id: 'session-3',
+            promptContext: 'Check this thread',
+            issueId: 'issue-1',
+            type: 'commentThread',
+          },
+        });
+
+        expect(result.eventType).toBe('mentioned');
+        expect(result.sessionType).toBe('commentThread');
+      });
+
+      it('should not set eventType for prompted action', () => {
+        const result = service.parsePayload({
+          action: 'prompted',
+          type: 'AgentSession',
+          data: { id: 'session-1', commentId: 'comment-1' },
+          agentActivity: {
+            content: { type: 'prompt', body: 'Follow up' },
+          },
+        });
+
+        expect(result.eventType).toBeUndefined();
+      });
+    });
   });
 
   describe('createLinearClient', () => {

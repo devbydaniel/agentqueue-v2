@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { LinearClient } from '@linear/sdk';
+import type { LinearEventType } from '../config/trigger-config.interface.js';
 
 export interface LinearWebhookPayload {
   action: string;
@@ -9,6 +10,10 @@ export interface LinearWebhookPayload {
   agentActivityBody?: string;
   issueId?: string;
   signal?: string;
+  /** Only set for action: "created". Derived from commentId / session type. */
+  eventType?: LinearEventType;
+  commentId?: string;
+  sessionType?: string;
 }
 
 @Injectable()
@@ -51,6 +56,16 @@ export class LinearWebhookParserService {
       | undefined;
     const signal = agentActivity?.['signal'] as string | undefined;
 
+    const commentId = data['commentId'] as string | undefined;
+    const sessionType = data['type'] as string | undefined;
+
+    // Derive eventType for "created" actions based on session structure
+    let eventType: LinearEventType | undefined;
+    if (action === 'created') {
+      eventType =
+        commentId || sessionType === 'commentThread' ? 'mentioned' : 'assigned';
+    }
+
     return {
       action,
       agentSessionId: data['id'] as string,
@@ -58,6 +73,9 @@ export class LinearWebhookParserService {
       agentActivityBody: data['agentActivityBody'] as string | undefined,
       issueId: data['issueId'] as string | undefined,
       signal,
+      eventType,
+      commentId,
+      sessionType,
     };
   }
 

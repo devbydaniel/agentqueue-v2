@@ -6,6 +6,7 @@ import * as yaml from 'js-yaml';
 import type {
   CronTrigger,
   GithubTrigger,
+  LinearEventType,
   LinearTrigger,
   TelegramTrigger,
   TriggersFile,
@@ -13,6 +14,18 @@ import type {
 } from './trigger-config.interface.js';
 import { interpolateEnvVars } from './trigger-config.interface.js';
 import { normalizeCwd } from '../common/utils/cwd-path.js';
+
+const EMPTY_TRIGGERS = {
+  cron: [] as CronTrigger[],
+  linear: [] as LinearTrigger[],
+  github: [] as GithubTrigger[],
+  telegram: [] as TelegramTrigger[],
+};
+
+const VALID_LINEAR_EVENT_TYPES: ReadonlySet<string> = new Set<string>([
+  'assigned',
+  'mentioned',
+]);
 
 export interface TelegramBotConfig {
   botName: string;
@@ -23,6 +36,7 @@ export interface TelegramBotConfig {
 @Injectable()
 export class TriggerConfigService implements OnModuleInit {
   private readonly logger = new Logger(TriggerConfigService.name);
+
   private cronTriggers: CronTrigger[] = [];
   private linearTriggers: LinearTrigger[] = [];
   private githubTriggers: GithubTrigger[] = [];
@@ -40,12 +54,40 @@ export class TriggerConfigService implements OnModuleInit {
     return this.cronTriggers;
   }
 
+  static triggerKey(trigger: LinearTrigger): string {
+    return trigger.on ? `${trigger.name}:${trigger.on}` : trigger.name;
+  }
+
   getLinearTriggers(): LinearTrigger[] {
     return this.linearTriggers;
   }
 
   getLinearTrigger(name: string): LinearTrigger | undefined {
     return this.linearTriggers.find((t) => t.name === name);
+  }
+
+  /** Returns all Linear triggers sharing the given name (webhook endpoint). */
+  getLinearTriggersByName(name: string): LinearTrigger[] {
+    return this.linearTriggers.filter((t) => t.name === name);
+  }
+
+  /**
+   * Resolves a composite trigger key (`"name:on"` or plain `"name"`)
+   * back to a specific LinearTrigger. Falls back to first match by name.
+   */
+  getLinearTriggerByKey(key: string): LinearTrigger | undefined {
+    const colonIdx = key.lastIndexOf(':');
+    if (colonIdx > 0) {
+      const possibleEvent = key.slice(colonIdx + 1);
+      if (VALID_LINEAR_EVENT_TYPES.has(possibleEvent)) {
+        const name = key.slice(0, colonIdx);
+        const match = this.linearTriggers.find(
+          (t) => t.name === name && t.on === possibleEvent,
+        );
+        if (match) return match;
+      }
+    }
+    return this.getLinearTrigger(key);
   }
 
   getGithubTriggers(): GithubTrigger[] {
@@ -95,12 +137,7 @@ export class TriggerConfigService implements OnModuleInit {
     return path.join(os.homedir(), '.agentqueue', 'triggers.yaml');
   }
 
-  private loadTriggers(): {
-    cron: CronTrigger[];
-    linear: LinearTrigger[];
-    github: GithubTrigger[];
-    telegram: TelegramTrigger[];
-  } {
+  private loadTriggers(): typeof EMPTY_TRIGGERS {
     const configPath = this.getConfigPath();
 
     // eslint-disable-next-line security/detect-non-literal-fs-filename -- path is built from os.homedir(), not user input
@@ -108,7 +145,7 @@ export class TriggerConfigService implements OnModuleInit {
       this.logger.warn(
         `Triggers config not found at ${configPath}, no cron triggers will be registered`,
       );
-      return { cron: [], linear: [], github: [], telegram: [] };
+      return { ...EMPTY_TRIGGERS };
     }
 
     try {
@@ -117,7 +154,7 @@ export class TriggerConfigService implements OnModuleInit {
       const parsed = yaml.load(content) as TriggersFile | null;
 
       if (!parsed?.triggers) {
-        return { cron: [], linear: [], github: [], telegram: [] };
+        return { ...EMPTY_TRIGGERS };
       }
 
       const raw = parsed.triggers as unknown as Record<string, unknown>[];
@@ -151,6 +188,7 @@ export class TriggerConfigService implements OnModuleInit {
           (entry): LinearTrigger => ({
             name: entry['name'] as string,
             type: 'linear',
+            ...(entry['on'] ? { on: entry['on'] as LinearEventType } : {}),
             cwd: normalizeCwd(entry['cwd'] as string, 'linear trigger cwd'),
             signing_secret: interpolateEnvVars(
               entry['signing_secret'] as string,
@@ -225,39 +263,73 @@ export class TriggerConfigService implements OnModuleInit {
           }),
         );
 
-      if (linearEntries.length > 0) {
-        this.logger.log(
-          `Loaded ${linearEntries.length} linear trigger(s) from ${configPath}`,
-        );
-      }
+      const validatedLinearEntries =
+        this.crossValidateLinearTriggers(linearEntries);
 
-      if (githubEntries.length > 0) {
-        this.logger.log(
-          `Loaded ${githubEntries.length} github trigger(s) from ${configPath}`,
-        );
-      }
-
-      if (telegramEntries.length > 0) {
-        this.logger.log(
-          `Loaded ${telegramEntries.length} telegram trigger(s) from ${configPath}`,
-        );
-      }
-
-      this.logger.log(
-        `Loaded ${cronEntries.length} cron trigger(s) from ${configPath}`,
-      );
-      return {
+      const result = {
         cron: cronEntries,
-        linear: linearEntries,
+        linear: validatedLinearEntries,
         github: githubEntries,
         telegram: telegramEntries,
       };
+      for (const [type, entries] of Object.entries(result)) {
+        if (entries.length > 0) {
+          this.logger.log(
+            `Loaded ${entries.length} ${type} trigger(s) from ${configPath}`,
+          );
+        }
+      }
+      return result;
     } catch (error) {
       this.logger.error(
         `Failed to load triggers config: ${error instanceof Error ? error.message : String(error)}`,
       );
-      return { cron: [], linear: [], github: [], telegram: [] };
+      return { ...EMPTY_TRIGGERS };
     }
+  }
+
+  private crossValidateLinearTriggers(
+    triggers: LinearTrigger[],
+  ): LinearTrigger[] {
+    const byName = new Map<string, LinearTrigger[]>();
+    for (const t of triggers) {
+      const group = byName.get(t.name) ?? [];
+      group.push(t);
+      byName.set(t.name, group);
+    }
+
+    const valid: LinearTrigger[] = [];
+    for (const [name, group] of byName) {
+      if (group.length === 1) {
+        valid.push(group[0]);
+        continue;
+      }
+
+      const first = group[0];
+      if (
+        group.some(
+          (t) =>
+            t.signing_secret !== first.signing_secret ||
+            t.api_key !== first.api_key,
+        )
+      ) {
+        this.logger.error(
+          `Linear triggers sharing name "${name}" have inconsistent signing_secret/api_key — discarding group`,
+        );
+      } else if (group.some((t) => t.on === undefined)) {
+        this.logger.error(
+          `Linear trigger "${name}" without "on" cannot coexist with other triggers sharing the same name — discarding group`,
+        );
+      } else if (new Set(group.map((t) => t.on)).size !== group.length) {
+        this.logger.error(
+          `Linear triggers sharing name "${name}" have duplicate "on" values — discarding group`,
+        );
+      } else {
+        valid.push(...group);
+      }
+    }
+
+    return valid;
   }
 
   private validateCronTrigger(trigger: Record<string, unknown>): boolean {
@@ -294,6 +366,16 @@ export class TriggerConfigService implements OnModuleInit {
     if (!name || !cwd || !signingSecret || !apiKey) {
       this.logger.warn(
         `Linear trigger missing required fields (name, cwd, signing_secret, api_key): ${JSON.stringify(trigger)}`,
+      );
+      return false;
+    }
+
+    if (
+      trigger['on'] !== undefined &&
+      !VALID_LINEAR_EVENT_TYPES.has(trigger['on'] as string)
+    ) {
+      this.logger.warn(
+        `Linear trigger "${name}" has invalid "on" value: "${trigger['on'] as string}". Must be "assigned" or "mentioned".`,
       );
       return false;
     }

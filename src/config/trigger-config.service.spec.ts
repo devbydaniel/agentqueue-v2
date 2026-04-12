@@ -618,4 +618,224 @@ describe('TriggerConfigService', () => {
     expect(service.getTelegramTriggers()).toEqual([]);
     expect(service.getTelegramBotConfig('main-bot')).toBeUndefined();
   });
+
+  // --- Linear trigger "on" field tests ---
+
+  describe('linear trigger event filtering', () => {
+    it('should load a linear trigger with on: assigned', () => {
+      mockConfigFile({
+        triggers: [
+          {
+            name: 'coding-agent',
+            type: 'linear',
+            on: 'assigned',
+            cwd: '/tmp/my-repo',
+            signing_secret: 'secret',
+            api_key: 'key',
+          },
+        ],
+      });
+
+      service = createService();
+      const trigger = service.getLinearTrigger('coding-agent');
+      expect(trigger).toBeDefined();
+      expect(trigger!.on).toBe('assigned');
+    });
+
+    it('should load two triggers sharing the same name with different on values', () => {
+      mockConfigFile({
+        triggers: [
+          {
+            name: 'coding-agent',
+            type: 'linear',
+            on: 'assigned',
+            cwd: '/tmp/my-repo',
+            signing_secret: 'secret',
+            api_key: 'key',
+            agent: 'opus-coder',
+          },
+          {
+            name: 'coding-agent',
+            type: 'linear',
+            on: 'mentioned',
+            cwd: '/tmp/my-repo',
+            signing_secret: 'secret',
+            api_key: 'key',
+            agent: 'opus-reviewer',
+          },
+        ],
+      });
+
+      service = createService();
+      expect(service.getLinearTriggers()).toHaveLength(2);
+
+      const byName = service.getLinearTriggersByName('coding-agent');
+      expect(byName).toHaveLength(2);
+      expect(
+        byName
+          .map((t) => t.on)
+          .sort((a, b) => (a ?? '').localeCompare(b ?? '')),
+      ).toEqual(['assigned', 'mentioned']);
+    });
+
+    it('should reject invalid on value', () => {
+      mockConfigFile({
+        triggers: [
+          {
+            name: 'bad-agent',
+            type: 'linear',
+            on: 'invalid',
+            cwd: '/tmp/my-repo',
+            signing_secret: 'secret',
+            api_key: 'key',
+          },
+        ],
+      });
+
+      service = createService();
+      expect(service.getLinearTriggers()).toEqual([]);
+    });
+
+    it('should discard group with inconsistent signing_secret', () => {
+      mockConfigFile({
+        triggers: [
+          {
+            name: 'coding-agent',
+            type: 'linear',
+            on: 'assigned',
+            cwd: '/tmp/my-repo',
+            signing_secret: 'secret-a',
+            api_key: 'key',
+          },
+          {
+            name: 'coding-agent',
+            type: 'linear',
+            on: 'mentioned',
+            cwd: '/tmp/my-repo',
+            signing_secret: 'secret-b',
+            api_key: 'key',
+          },
+        ],
+      });
+
+      service = createService();
+      expect(service.getLinearTriggers()).toEqual([]);
+    });
+
+    it('should discard group when catch-all coexists with specific on', () => {
+      mockConfigFile({
+        triggers: [
+          {
+            name: 'coding-agent',
+            type: 'linear',
+            cwd: '/tmp/my-repo',
+            signing_secret: 'secret',
+            api_key: 'key',
+          },
+          {
+            name: 'coding-agent',
+            type: 'linear',
+            on: 'mentioned',
+            cwd: '/tmp/my-repo',
+            signing_secret: 'secret',
+            api_key: 'key',
+          },
+        ],
+      });
+
+      service = createService();
+      expect(service.getLinearTriggers()).toEqual([]);
+    });
+
+    it('should discard group with duplicate on values', () => {
+      mockConfigFile({
+        triggers: [
+          {
+            name: 'coding-agent',
+            type: 'linear',
+            on: 'assigned',
+            cwd: '/tmp/my-repo',
+            signing_secret: 'secret',
+            api_key: 'key',
+          },
+          {
+            name: 'coding-agent',
+            type: 'linear',
+            on: 'assigned',
+            cwd: '/tmp/my-repo',
+            signing_secret: 'secret',
+            api_key: 'key',
+          },
+        ],
+      });
+
+      service = createService();
+      expect(service.getLinearTriggers()).toEqual([]);
+    });
+  });
+
+  describe('getLinearTriggerByKey', () => {
+    it('should resolve composite key "name:on"', () => {
+      mockConfigFile({
+        triggers: [
+          {
+            name: 'coding-agent',
+            type: 'linear',
+            on: 'assigned',
+            cwd: '/tmp/my-repo',
+            signing_secret: 'secret',
+            api_key: 'key',
+            agent: 'opus-coder',
+          },
+          {
+            name: 'coding-agent',
+            type: 'linear',
+            on: 'mentioned',
+            cwd: '/tmp/my-repo',
+            signing_secret: 'secret',
+            api_key: 'key',
+            agent: 'opus-reviewer',
+          },
+        ],
+      });
+
+      service = createService();
+
+      const assigned = service.getLinearTriggerByKey('coding-agent:assigned');
+      expect(assigned).toBeDefined();
+      expect(assigned!.agent).toBe('opus-coder');
+
+      const mentioned = service.getLinearTriggerByKey('coding-agent:mentioned');
+      expect(mentioned).toBeDefined();
+      expect(mentioned!.agent).toBe('opus-reviewer');
+    });
+
+    it('should fall back to name lookup for plain key', () => {
+      mockConfigFile({
+        triggers: [
+          {
+            name: 'coding-agent',
+            type: 'linear',
+            cwd: '/tmp/my-repo',
+            signing_secret: 'secret',
+            api_key: 'key',
+          },
+        ],
+      });
+
+      service = createService();
+
+      const result = service.getLinearTriggerByKey('coding-agent');
+      expect(result).toBeDefined();
+      expect(result!.name).toBe('coding-agent');
+    });
+
+    it('should return undefined for unknown key', () => {
+      mockNoFile();
+      service = createService();
+      expect(
+        service.getLinearTriggerByKey('nonexistent:assigned'),
+      ).toBeUndefined();
+    });
+  });
 });

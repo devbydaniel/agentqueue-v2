@@ -61,6 +61,14 @@ export class RunsService {
     return this.runProcessorService.abortSession(externalSessionId);
   }
 
+  async findTriggerNameByExternalSessionId(
+    externalSessionId: string,
+  ): Promise<string | null> {
+    return this.runRepository.findTriggerNameByExternalSessionId(
+      externalSessionId,
+    );
+  }
+
   async enqueue(command: EnqueueRunCommand): Promise<EnqueueRunResult> {
     this.logger.log('Enqueueing run', {
       cwd: command.cwd,

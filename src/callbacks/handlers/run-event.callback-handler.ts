@@ -28,7 +28,10 @@ export class RunEventCallbackHandler implements RunEventHandler {
 
     // For system messages, only persist meaningful subtypes
     if (message.type === 'system') {
-      if (!('subtype' in message) || !PERSISTED_SYSTEM_SUBTYPES.has(message.subtype)) {
+      if (
+        !('subtype' in message) ||
+        !PERSISTED_SYSTEM_SUBTYPES.has(message.subtype)
+      ) {
         return;
       }
     }

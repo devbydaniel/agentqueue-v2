@@ -155,8 +155,12 @@ export class LinearCallbackHandler implements RunEventHandler {
 export class LinearCallbackHandlerFactory {
   constructor(private readonly triggerConfigService: TriggerConfigService) {}
 
-  createForRun(triggerName: string, agentSessionId: string): LinearCallbackHandler | undefined {
-    const linearConfig = this.triggerConfigService.getLinearTrigger(triggerName);
+  createForRun(
+    triggerName: string,
+    agentSessionId: string,
+  ): LinearCallbackHandler | undefined {
+    const linearConfig =
+      this.triggerConfigService.getLinearTriggerByKey(triggerName);
     if (!linearConfig) return undefined;
 
     const linearClient = new LinearClient({ apiKey: linearConfig.api_key });
