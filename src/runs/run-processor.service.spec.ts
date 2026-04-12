@@ -6,7 +6,7 @@ import type {
 } from '@anthropic-ai/claude-agent-sdk';
 import { RunProcessorService } from './run-processor.service.js';
 import { AppConfigService } from '../config/app-config.service.js';
-import { TriggerConfigService } from '../config/trigger-config.service.js';
+import { LinearCallbackHandlerFactory } from '../callbacks/handlers/linear.callback-handler.js';
 import {
   SdkSessionFactory,
   type SdkSessionHandle,
@@ -21,6 +21,7 @@ import { LangfuseCallbackHandlerFactory } from '../callbacks/handlers/langfuse.c
 import type { Run } from '../database/runs.schema.js';
 import { TelegramService } from '../telegram/telegram.service.js';
 import { AgentProfileService } from '../agents/agent-profile.service.js';
+import { ExternalSessionRepository } from './external-session.repository.js';
 
 /** Build a mock SdkSessionHandle whose async generator throws immediately. */
 function makeThrowingHandle(error: Error): SdkSessionHandle {
@@ -70,7 +71,7 @@ describe('RunProcessorService', () => {
   let runRepository: RunRepository;
   let runCompletionNotifier: RunCompletionNotifier;
   let runEventRepository: RunEventRepository;
-  let triggerConfigService: TriggerConfigService;
+  let linearCallbackHandlerFactory: LinearCallbackHandlerFactory;
   let telegramService: TelegramService;
   let langfuseCallbackHandlerFactory: LangfuseCallbackHandlerFactory;
 
@@ -182,9 +183,9 @@ describe('RunProcessorService', () => {
           },
         },
         {
-          provide: TriggerConfigService,
+          provide: LinearCallbackHandlerFactory,
           useValue: {
-            getLinearTrigger: jest.fn(),
+            createForRun: jest.fn().mockReturnValue(undefined),
           },
         },
         {
@@ -198,6 +199,13 @@ describe('RunProcessorService', () => {
           provide: AgentProfileService,
           useValue: {
             getProfile: jest.fn().mockReturnValue(undefined),
+          },
+        },
+        {
+          provide: ExternalSessionRepository,
+          useValue: {
+            findSessionId: jest.fn().mockResolvedValue(null),
+            upsertSession: jest.fn().mockResolvedValue(undefined),
           },
         },
         {
@@ -222,14 +230,14 @@ describe('RunProcessorService', () => {
     runRepository = module.get(RunRepository);
     runCompletionNotifier = module.get(RunCompletionNotifier);
     runEventRepository = module.get(RunEventRepository);
-    triggerConfigService = module.get(TriggerConfigService);
+    linearCallbackHandlerFactory = module.get(LinearCallbackHandlerFactory);
     telegramService = module.get(TelegramService);
     langfuseCallbackHandlerFactory = module.get(LangfuseCallbackHandlerFactory);
   });
 
   describe('runSession', () => {
     it('should call the factory with cwd + prompt + system prompt', async () => {
-      await service.runSession({
+      await (service as any).runSession({
         cwd: '/home/user/dev/my-repo',
         prompt: 'do something',
         appendSystemPrompt: 'append',
@@ -244,12 +252,12 @@ describe('RunProcessorService', () => {
     });
 
     it('should return success true on completion', async () => {
-      const result = await service.runSession({
+      const result = await (service as any).runSession({
         cwd: '/home/user/dev/my-repo',
         prompt: 'hello',
       });
 
-      expect(result).toEqual({ success: true });
+      expect(result).toMatchObject({ success: true });
     });
 
     it('should dispatch messages to all handlers', async () => {
@@ -276,7 +284,7 @@ describe('RunProcessorService', () => {
         onMessage: jest.fn(),
       };
 
-      await service.runSession({
+      await (service as any).runSession({
         cwd: '/home/user/dev/my-repo',
         prompt: 'hello',
         additionalHandlers: [additionalHandler],
@@ -296,7 +304,7 @@ describe('RunProcessorService', () => {
         onComplete: jest.fn(),
       };
 
-      await service.runSession({
+      await (service as any).runSession({
         cwd: '/home/user/dev/my-repo',
         prompt: 'hello',
         additionalHandlers: [handlerWithComplete],
@@ -319,7 +327,7 @@ describe('RunProcessorService', () => {
       };
 
       await expect(
-        service.runSession({
+        (service as any).runSession({
           cwd: '/home/user/dev/my-repo',
           prompt: 'hello',
           additionalHandlers: [handlerWithComplete],
@@ -341,7 +349,7 @@ describe('RunProcessorService', () => {
         onMessage: jest.fn(),
       };
 
-      await service.runSession({
+      await (service as any).runSession({
         cwd: '/home/user/dev/my-repo',
         prompt: 'hello',
         additionalHandlers: [throwingHandler, safeHandler],
@@ -356,17 +364,17 @@ describe('RunProcessorService', () => {
         onMessage: jest.fn().mockRejectedValue(new Error('async boom')),
       };
 
-      const result = await service.runSession({
+      const result = await (service as any).runSession({
         cwd: '/home/user/dev/my-repo',
         prompt: 'hello',
         additionalHandlers: [rejectingHandler],
       });
 
-      expect(result).toEqual({ success: true });
+      expect(result).toMatchObject({ success: true });
     });
 
     it('should track and untrack via AbortController', async () => {
-      await service.runSession({
+      await (service as any).runSession({
         cwd: '/home/user/dev/my-repo',
         prompt: 'hello',
         externalSessionId: 'linear-session-1',
@@ -391,7 +399,7 @@ describe('RunProcessorService', () => {
       );
 
       await expect(
-        service.runSession({
+        (service as any).runSession({
           cwd: '/home/user/dev/my-repo',
           prompt: 'hello',
           externalSessionId: 'linear-session-1',
@@ -405,7 +413,7 @@ describe('RunProcessorService', () => {
     });
 
     it('should not track when no externalSessionId or runId is provided', async () => {
-      await service.runSession({
+      await (service as any).runSession({
         cwd: '/home/user/dev/my-repo',
         prompt: 'hello',
       });
@@ -429,7 +437,7 @@ describe('RunProcessorService', () => {
     });
 
     it('should track by both externalSessionId and runId when both are provided', async () => {
-      await service.runSession({
+      await (service as any).runSession({
         cwd: '/home/user/dev/my-repo',
         prompt: 'hello',
         externalSessionId: 'linear-session-1',
@@ -448,7 +456,7 @@ describe('RunProcessorService', () => {
     });
 
     it('should track by runId alone when no externalSessionId', async () => {
-      await service.runSession({
+      await (service as any).runSession({
         cwd: '/home/user/dev/my-repo',
         prompt: 'hello',
         runId: 'run-abc',
@@ -466,7 +474,7 @@ describe('RunProcessorService', () => {
     });
 
     it('should wrap execution in propagateAttributes when Langfuse context is provided', async () => {
-      await service.runSession({
+      await (service as any).runSession({
         cwd: '/home/user/dev/my-repo',
         prompt: 'hello',
         langfuseTraceContext: mockLangfuseTraceContext,
@@ -591,35 +599,44 @@ describe('RunProcessorService', () => {
     });
 
     it('should reconstruct LinearCallbackHandler for linear source', async () => {
+      const mockLinearHandler = {
+        name: 'linear',
+        onMessage: jest.fn(),
+        onComplete: jest.fn(),
+        getLastAssistantMessage: jest.fn().mockReturnValue('Done.'),
+        emitResponse: jest.fn().mockResolvedValue(undefined),
+        emitError: jest.fn().mockResolvedValue(undefined),
+        flush: jest.fn().mockResolvedValue(undefined),
+      };
+      (linearCallbackHandlerFactory.createForRun as jest.Mock).mockReturnValue(
+        mockLinearHandler,
+      );
       const run = makeRun({
         source: 'linear',
         externalSessionId: 'linear-session-id',
         triggerName: 'my-agent',
       });
       (runRepository.findById as jest.Mock).mockResolvedValue(run);
-      (triggerConfigService.getLinearTrigger as jest.Mock).mockReturnValue({
-        name: 'my-agent',
-        type: 'linear',
-        cwd: '/home/user/dev/my-repo',
-        signing_secret: 'secret',
-        api_key: 'test-api-key',
-      });
 
       await service.processRun('run-123');
 
+      expect(linearCallbackHandlerFactory.createForRun).toHaveBeenCalledWith(
+        'my-agent',
+        'linear-session-id',
+      );
       expect(sdkSessionFactory.create).toHaveBeenCalled();
     });
 
-    it('should not attach linear handler when trigger config not found', async () => {
+    it('should not attach linear handler when factory returns undefined', async () => {
+      (linearCallbackHandlerFactory.createForRun as jest.Mock).mockReturnValue(
+        undefined,
+      );
       const run = makeRun({
         source: 'linear',
         externalSessionId: 'linear-session-id',
         triggerName: 'missing-agent',
       });
       (runRepository.findById as jest.Mock).mockResolvedValue(run);
-      (triggerConfigService.getLinearTrigger as jest.Mock).mockReturnValue(
-        undefined,
-      );
 
       await service.processRun('run-123');
 
@@ -628,19 +645,24 @@ describe('RunProcessorService', () => {
     });
 
     it('should not re-throw when emitResponse fails on success path', async () => {
+      const mockLinearHandler = {
+        name: 'linear',
+        onMessage: jest.fn(),
+        onComplete: jest.fn(),
+        getLastAssistantMessage: jest.fn().mockReturnValue('Done.'),
+        emitResponse: jest.fn().mockResolvedValue(undefined),
+        emitError: jest.fn().mockResolvedValue(undefined),
+        flush: jest.fn().mockResolvedValue(undefined),
+      };
+      (linearCallbackHandlerFactory.createForRun as jest.Mock).mockReturnValue(
+        mockLinearHandler,
+      );
       const run = makeRun({
         source: 'linear',
         externalSessionId: 'linear-session-id',
         triggerName: 'my-agent',
       });
       (runRepository.findById as jest.Mock).mockResolvedValue(run);
-      (triggerConfigService.getLinearTrigger as jest.Mock).mockReturnValue({
-        name: 'my-agent',
-        type: 'linear',
-        cwd: '/home/user/dev/my-repo',
-        signing_secret: 'secret',
-        api_key: 'test-api-key',
-      });
 
       await service.processRun('run-123');
 

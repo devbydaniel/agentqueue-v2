@@ -439,7 +439,7 @@ describe('TriggerConfigService', () => {
 
   // --- system prompt fields ---
 
-  it('should parse prepend_system_prompt and append_system_prompt for cron triggers', () => {
+  it('should parse append_system_prompt for cron triggers', () => {
     mockConfigFile({
       triggers: [
         {
@@ -447,7 +447,6 @@ describe('TriggerConfigService', () => {
           schedule: '0 8 * * *',
           cwd: '/tmp/assistant',
           prompt: 'Hello',
-          prepend_system_prompt: 'You are a cron agent.',
           append_system_prompt: 'Always be concise.',
         },
       ],
@@ -455,11 +454,10 @@ describe('TriggerConfigService', () => {
 
     service = createService();
     const trigger = service.getCronTriggers()[0];
-    expect(trigger.prepend_system_prompt).toBe('You are a cron agent.');
     expect(trigger.append_system_prompt).toBe('Always be concise.');
   });
 
-  it('should leave system prompt fields undefined for cron triggers when not set', () => {
+  it('should leave append_system_prompt undefined for cron triggers when not set', () => {
     mockConfigFile({
       triggers: [
         {
@@ -473,11 +471,10 @@ describe('TriggerConfigService', () => {
 
     service = createService();
     const trigger = service.getCronTriggers()[0];
-    expect(trigger.prepend_system_prompt).toBeUndefined();
     expect(trigger.append_system_prompt).toBeUndefined();
   });
 
-  it('should parse prepend_system_prompt and append_system_prompt for linear triggers', () => {
+  it('should parse append_system_prompt for linear triggers', () => {
     mockConfigFile({
       triggers: [
         {
@@ -486,7 +483,6 @@ describe('TriggerConfigService', () => {
           cwd: '/tmp/my-repo',
           signing_secret: 'secret',
           api_key: 'key',
-          prepend_system_prompt: 'You are working on Linear issue {{issueId}}.',
           append_system_prompt: 'Post updates back to Linear.',
         },
       ],
@@ -494,13 +490,10 @@ describe('TriggerConfigService', () => {
 
     service = createService();
     const trigger = service.getLinearTrigger('coding-agent');
-    expect(trigger!.prepend_system_prompt).toBe(
-      'You are working on Linear issue {{issueId}}.',
-    );
     expect(trigger!.append_system_prompt).toBe('Post updates back to Linear.');
   });
 
-  it('should leave system prompt fields undefined for linear triggers when not set', () => {
+  it('should leave append_system_prompt undefined for linear triggers when not set', () => {
     mockConfigFile({
       triggers: [
         {
@@ -515,7 +508,6 @@ describe('TriggerConfigService', () => {
 
     service = createService();
     const trigger = service.getLinearTrigger('coding-agent');
-    expect(trigger!.prepend_system_prompt).toBeUndefined();
     expect(trigger!.append_system_prompt).toBeUndefined();
   });
 

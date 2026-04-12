@@ -27,12 +27,10 @@ export class RunEventCallbackHandler implements RunEventHandler {
     if (SKIPPED_MESSAGE_TYPES.has(message.type)) return;
 
     // For system messages, only persist meaningful subtypes
-    if (
-      message.type === 'system' &&
-      'subtype' in message &&
-      !PERSISTED_SYSTEM_SUBTYPES.has(message.subtype)
-    ) {
-      return;
+    if (message.type === 'system') {
+      if (!('subtype' in message) || !PERSISTED_SYSTEM_SUBTYPES.has(message.subtype)) {
+        return;
+      }
     }
 
     const eventType = this.resolveEventType(message);

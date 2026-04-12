@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AgentsModule } from '../agents/agents.module.js';
 import { CallbacksModule } from '../callbacks/callbacks.module.js';
 import { TelegramModule } from '../telegram/telegram.module.js';
 import { RunsController } from './runs.controller.js';
@@ -13,7 +14,7 @@ import { RunEventRepository } from './run-event.repository.js';
 import { RunStartupRecoveryService } from './run-startup-recovery.service.js';
 
 @Module({
-  imports: [CallbacksModule, TelegramModule],
+  imports: [CallbacksModule, TelegramModule, AgentsModule],
   controllers: [RunsController],
   providers: [
     RunsService,

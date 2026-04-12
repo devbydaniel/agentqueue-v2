@@ -5,7 +5,6 @@ export interface CronTrigger {
   prompt: string;
   agent?: string;
   before?: string;
-  prepend_system_prompt?: string;
   append_system_prompt?: string;
   timeout_ms?: number;
 }
@@ -17,7 +16,6 @@ export interface LinearTrigger {
   signing_secret: string;
   api_key: string;
   agent?: string;
-  prepend_system_prompt?: string;
   append_system_prompt?: string;
   timeout_ms?: number;
 }
@@ -32,7 +30,6 @@ export interface TelegramTrigger {
   cwd: string;
   chat_id?: string;
   agent?: string;
-  prepend_system_prompt?: string;
   append_system_prompt?: string;
   timeout_ms?: number;
 }
@@ -54,7 +51,6 @@ export interface GithubTrigger {
   filters?: WebhookFilter[];
   before?: string;
   agent?: string;
-  prepend_system_prompt?: string;
   append_system_prompt?: string;
   timeout_ms?: number;
 }

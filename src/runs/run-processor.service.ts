@@ -1,5 +1,4 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { LinearClient } from '@linear/sdk';
 import { propagateAttributes } from '@langfuse/tracing';
 import type {
   SDKMessage,
@@ -12,13 +11,16 @@ import {
   LangfuseCallbackHandlerFactory,
   type LangfuseTraceContext,
 } from '../callbacks/handlers/langfuse.callback-handler.js';
-import { LinearCallbackHandler } from '../callbacks/handlers/linear.callback-handler.js';
+import {
+  LinearCallbackHandler,
+  LinearCallbackHandlerFactory,
+} from '../callbacks/handlers/linear.callback-handler.js';
 import { AgentProfileService } from '../agents/agent-profile.service.js';
 import type { AgentProfile } from '../agents/agent-profile.interface.js';
 import { AppConfigService } from '../config/app-config.service.js';
-import { TriggerConfigService } from '../config/trigger-config.service.js';
 import { ActiveSessionTrackerService } from './active-session-tracker.service.js';
 import { SdkSessionFactory } from './sdk-session.factory.js';
+import { ExternalSessionRepository } from './external-session.repository.js';
 import { RunRepository } from './run.repository.js';
 import { RunCompletionNotifier } from './run-completion.notifier.js';
 import type { Run } from '../database/runs.schema.js';
@@ -32,6 +34,8 @@ export interface RunSessionParams {
   /** Resolved agent profile (enables model/tool/subagent overrides) */
   profile?: AgentProfile;
   additionalHandlers?: RunEventHandler[];
+  /** Session ID to resume a previous SDK session */
+  resumeSessionId?: string;
   /** Optional external ID to track the session for later cancellation (e.g. Linear agentSessionId) */
   externalSessionId?: string;
   /** Run ID for dual-indexed tracker (enables abort-by-runId from dashboard) */
@@ -46,6 +50,7 @@ export interface RunSessionParams {
 
 export interface RunSessionResult {
   success: boolean;
+  sessionId?: string;
 }
 
 @Injectable()
@@ -58,10 +63,11 @@ export class RunProcessorService {
     private readonly activeSessionTracker: ActiveSessionTrackerService,
     private readonly runRepository: RunRepository,
     private readonly runCompletionNotifier: RunCompletionNotifier,
+    private readonly externalSessionRepository: ExternalSessionRepository,
     private readonly runEventRepository: RunEventRepository,
-    private readonly triggerConfigService: TriggerConfigService,
     private readonly telegramService: TelegramService,
     private readonly langfuseCallbackHandlerFactory: LangfuseCallbackHandlerFactory,
+    private readonly linearCallbackHandlerFactory: LinearCallbackHandlerFactory,
     private readonly agentProfileService: AgentProfileService,
     @Inject(RUN_EVENT_HANDLERS)
     private readonly globalHandlers: RunEventHandler[],
@@ -140,11 +146,19 @@ export class RunProcessorService {
     const abortController = new AbortController();
     const timer = setTimeout(() => abortController.abort(), timeoutMs);
 
+    // Look up existing SDK session ID for resume
+    const resumeSessionId = run.externalSessionId
+      ? await this.externalSessionRepository.findSessionId(
+          run.externalSessionId,
+        )
+      : null;
+
     try {
-      await this.runSession({
+      const result = await this.runSession({
         cwd: effectiveCwd,
         prompt: run.prompt,
         profile,
+        resumeSessionId: resumeSessionId ?? undefined,
         externalSessionId: run.externalSessionId ?? undefined,
         runId,
         appendSystemPrompt: run.appendSystemPrompt ?? undefined,
@@ -152,6 +166,15 @@ export class RunProcessorService {
         abortController,
         langfuseTraceContext,
       });
+
+      // Persist SDK session ID for future resumes
+      if (run.externalSessionId && result.sessionId) {
+        await this.externalSessionRepository.upsertSession({
+          provider: run.source as 'linear' | 'telegram',
+          sessionKey: run.externalSessionId,
+          sessionId: result.sessionId,
+        });
+      }
 
       run.status = 'succeeded';
       run.completedAt = new Date();
@@ -263,17 +286,11 @@ export class RunProcessorService {
     let assistantMessageHandler: AssistantMessageCallbackHandler | undefined;
 
     if (run.source === 'linear' && run.externalSessionId && run.triggerName) {
-      const linearConfig = this.triggerConfigService.getLinearTrigger(
+      linearHandler = this.linearCallbackHandlerFactory.createForRun(
         run.triggerName,
+        run.externalSessionId,
       );
-      if (linearConfig) {
-        const linearClient = new LinearClient({
-          apiKey: linearConfig.api_key,
-        });
-        linearHandler = new LinearCallbackHandler(
-          run.externalSessionId,
-          linearClient,
-        );
+      if (linearHandler) {
         additionalHandlers.push(linearHandler);
       }
     }
@@ -326,7 +343,9 @@ export class RunProcessorService {
     }
   }
 
-  async runSession(params: RunSessionParams): Promise<RunSessionResult> {
+  private async runSession(
+    params: RunSessionParams,
+  ): Promise<RunSessionResult> {
     this.logger.log('Running session', { cwd: params.cwd });
 
     const abortController = params.abortController ?? new AbortController();
@@ -343,6 +362,7 @@ export class RunProcessorService {
       additionalSystemPrompts:
         systemPrompts.length > 0 ? systemPrompts : undefined,
       abortController,
+      resumeSessionId: params.resumeSessionId,
     });
 
     // Track for abort-on-demand
@@ -356,13 +376,13 @@ export class RunProcessorService {
       ...(params.additionalHandlers ?? []),
     ];
 
+    let lastResult: SDKResultMessage | undefined;
+
     try {
       const executeSession = async (): Promise<void> => {
-        let lastResult: SDKResultMessage | undefined;
-
         try {
           for await (const message of handle.messages) {
-            this.dispatchToHandlers(handlers, message);
+            await this.dispatchToHandlers(handlers, message);
             if (message.type === 'result') {
               lastResult = message;
             }
@@ -380,7 +400,18 @@ export class RunProcessorService {
         await executeSession();
       }
 
-      return { success: true };
+      if (lastResult?.is_error) {
+        throw new Error(
+          lastResult.subtype === 'error_max_turns'
+            ? 'Agent run exceeded maximum turns'
+            : `Agent run failed: ${lastResult.subtype}`,
+        );
+      }
+
+      return {
+        success: !lastResult?.is_error,
+        sessionId: handle.sessionId,
+      };
     } finally {
       if (params.externalSessionId || params.runId) {
         const trackKey = params.externalSessionId ?? params.runId!;
@@ -390,23 +421,18 @@ export class RunProcessorService {
   }
 
   /**
-   * Dispatch a single SDK message to all handlers.
+   * Dispatch a single SDK message to all handlers sequentially.
    * Errors in one handler don't prevent others from being called.
    */
-  private dispatchToHandlers(
+  private async dispatchToHandlers(
     handlers: RunEventHandler[],
     message: SDKMessage,
-  ): void {
+  ): Promise<void> {
     for (const handler of handlers) {
       try {
         const result = handler.onMessage(message);
         if (result instanceof Promise) {
-          result.catch((err) => {
-            this.logger.error(`Async handler "${handler.name}" rejected`, {
-              error: err as Error,
-              messageType: message.type,
-            });
-          });
+          await result;
         }
       } catch (error) {
         this.logger.error(`Handler "${handler.name}" threw`, {

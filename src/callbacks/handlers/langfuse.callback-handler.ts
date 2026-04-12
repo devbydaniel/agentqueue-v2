@@ -5,6 +5,7 @@ import type {
   SDKResultMessage,
 } from '@anthropic-ai/claude-agent-sdk';
 import { AppConfigService } from '../../config/app-config.service.js';
+import { extractAssistantText } from '../extract-assistant-text.js';
 import {
   startObservation,
   type LangfuseSpan,
@@ -191,10 +192,7 @@ export class LangfuseCallbackHandler implements RunEventHandler {
     const content = message.message.content;
 
     // Create a generation span for text output
-    const textParts = content
-      .filter((c) => c.type === 'text')
-      .map((c) => ('text' in c ? c.text : ''));
-    const text = textParts.join('\n');
+    const text = extractAssistantText(message);
 
     const toolCalls = content.filter((c) => c.type === 'tool_use');
 

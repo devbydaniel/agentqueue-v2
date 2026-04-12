@@ -60,7 +60,7 @@ export class ExternalSessionRepository {
       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
       ON CONFLICT (session_key) DO UPDATE SET
         provider = EXCLUDED.provider,
-        session_id = EXCLUDED.session_id,
+        session_id = COALESCE(EXCLUDED.session_id, external_sessions.session_id),
         bot_name = COALESCE(EXCLUDED.bot_name, external_sessions.bot_name),
         chat_id = COALESCE(EXCLUDED.chat_id, external_sessions.chat_id),
         message_thread_id = COALESCE(

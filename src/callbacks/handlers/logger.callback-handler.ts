@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { RunEventHandler } from '../run-event-handler.interface.js';
+import { extractAssistantText } from '../extract-assistant-text.js';
 
 const MAX_LOG_LENGTH = 500;
 
@@ -86,11 +87,7 @@ export class LoggerCallbackHandler implements RunEventHandler {
     message: SDKMessage & { type: 'assistant' },
   ): void {
     const content = message.message.content;
-
-    const textParts = content
-      .filter((c) => c.type === 'text')
-      .map((c) => ('text' in c ? c.text : ''));
-    const text = textParts.join('\n');
+    const text = extractAssistantText(message);
 
     if (text) {
       this.logger.log('Assistant message', { text: truncate(text) });

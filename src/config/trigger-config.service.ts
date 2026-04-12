@@ -133,13 +133,6 @@ export class TriggerConfigService implements OnModuleInit {
             prompt: entry['prompt'] as string,
             ...(entry['agent'] ? { agent: entry['agent'] as string } : {}),
             ...(entry['before'] ? { before: entry['before'] as string } : {}),
-            ...(entry['prepend_system_prompt']
-              ? {
-                  prepend_system_prompt: entry[
-                    'prepend_system_prompt'
-                  ] as string,
-                }
-              : {}),
             ...(entry['append_system_prompt']
               ? {
                   append_system_prompt: entry['append_system_prompt'] as string,
@@ -164,13 +157,6 @@ export class TriggerConfigService implements OnModuleInit {
             ),
             api_key: interpolateEnvVars(entry['api_key'] as string),
             ...(entry['agent'] ? { agent: entry['agent'] as string } : {}),
-            ...(entry['prepend_system_prompt']
-              ? {
-                  prepend_system_prompt: entry[
-                    'prepend_system_prompt'
-                  ] as string,
-                }
-              : {}),
             ...(entry['append_system_prompt']
               ? {
                   append_system_prompt: entry['append_system_prompt'] as string,
@@ -197,13 +183,6 @@ export class TriggerConfigService implements OnModuleInit {
               ? { filters: entry['filters'] as WebhookFilter[] }
               : {}),
             ...(entry['before'] ? { before: entry['before'] as string } : {}),
-            ...(entry['prepend_system_prompt']
-              ? {
-                  prepend_system_prompt: entry[
-                    'prepend_system_prompt'
-                  ] as string,
-                }
-              : {}),
             ...(entry['append_system_prompt']
               ? {
                   append_system_prompt: entry['append_system_prompt'] as string,
@@ -235,13 +214,6 @@ export class TriggerConfigService implements OnModuleInit {
               ? { chat_id: String(entry['chat_id']) }
               : {}),
             ...(entry['agent'] ? { agent: entry['agent'] as string } : {}),
-            ...(entry['prepend_system_prompt']
-              ? {
-                  prepend_system_prompt: entry[
-                    'prepend_system_prompt'
-                  ] as string,
-                }
-              : {}),
             ...(entry['append_system_prompt']
               ? {
                   append_system_prompt: entry['append_system_prompt'] as string,

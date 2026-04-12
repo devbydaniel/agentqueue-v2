@@ -1,7 +1,9 @@
-import { Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { LinearClient } from '@linear/sdk';
+import { LinearClient } from '@linear/sdk';
 import type { RunEventHandler } from '../run-event-handler.interface.js';
+import { extractAssistantText } from '../extract-assistant-text.js';
+import { TriggerConfigService } from '../../config/trigger-config.service.js';
 
 const MAX_BODY_LENGTH = 10_000;
 
@@ -96,10 +98,7 @@ export class LinearCallbackHandler implements RunEventHandler {
     const content = message.message.content;
 
     // Extract text blocks → thought activity
-    const textParts = content
-      .filter((c) => c.type === 'text')
-      .map((c) => ('text' in c ? c.text : ''));
-    const text = textParts.join('\n');
+    const text = extractAssistantText(message) ?? '';
 
     if (text) {
       this.lastAssistantMessage = text;
@@ -149,5 +148,18 @@ export class LinearCallbackHandler implements RunEventHandler {
         contentType: content['type'],
       });
     }
+  }
+}
+
+@Injectable()
+export class LinearCallbackHandlerFactory {
+  constructor(private readonly triggerConfigService: TriggerConfigService) {}
+
+  createForRun(triggerName: string, agentSessionId: string): LinearCallbackHandler | undefined {
+    const linearConfig = this.triggerConfigService.getLinearTrigger(triggerName);
+    if (!linearConfig) return undefined;
+
+    const linearClient = new LinearClient({ apiKey: linearConfig.api_key });
+    return new LinearCallbackHandler(agentSessionId, linearClient);
   }
 }
