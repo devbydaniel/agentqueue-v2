@@ -1,5 +1,4 @@
 import { Test } from '@nestjs/testing';
-import { propagateAttributes } from '@langfuse/tracing';
 import type {
   SDKMessage,
   SDKResultMessage,
@@ -7,6 +6,7 @@ import type {
 import { RunProcessorService } from './run-processor.service.js';
 import { AppConfigService } from '../config/app-config.service.js';
 import { LinearCallbackHandlerFactory } from '../callbacks/handlers/linear.callback-handler.js';
+import { TracingEnrichmentHandlerFactory } from '../callbacks/handlers/tracing-enrichment.callback-handler.js';
 import {
   SdkSessionFactory,
   type SdkSessionHandle,
@@ -17,7 +17,6 @@ import { RunCompletionNotifier } from './run-completion.notifier.js';
 import { RunEventRepository } from './run-event.repository.js';
 import { RUN_EVENT_HANDLERS } from '../callbacks/constants.js';
 import type { RunEventHandler } from '../callbacks/run-event-handler.interface.js';
-import { LangfuseCallbackHandlerFactory } from '../callbacks/handlers/langfuse.callback-handler.js';
 import type { Run } from '../database/runs.schema.js';
 import { TelegramService } from '../telegram/telegram.service.js';
 import { AgentProfileService } from '../agents/agent-profile.service.js';
@@ -55,15 +54,6 @@ function makeDelayedThrowingHandle(delayMs: number): SdkSessionHandle {
   } as unknown as SdkSessionHandle;
 }
 
-jest.mock('@langfuse/tracing', () => ({
-  propagateAttributes: jest.fn(
-    async (
-      _params: unknown,
-      fn: (() => Promise<unknown>) | (() => unknown),
-    ): Promise<unknown> => await fn(),
-  ),
-}));
-
 describe('RunProcessorService', () => {
   let service: RunProcessorService;
   let sdkSessionFactory: SdkSessionFactory;
@@ -73,7 +63,7 @@ describe('RunProcessorService', () => {
   let runEventRepository: RunEventRepository;
   let linearCallbackHandlerFactory: LinearCallbackHandlerFactory;
   let telegramService: TelegramService;
-  let langfuseCallbackHandlerFactory: LangfuseCallbackHandlerFactory;
+  let tracingEnrichmentHandlerFactory: TracingEnrichmentHandlerFactory;
 
   /** Messages that the mock SDK session will yield. Set before calling runSession/processRun. */
   let mockMessages: SDKMessage[];
@@ -85,11 +75,11 @@ describe('RunProcessorService', () => {
     name: 'test-global',
     onMessage: jest.fn(),
   };
-  const mockLangfuseHandler: RunEventHandler = {
-    name: 'langfuse',
+  const mockTracingHandler: RunEventHandler = {
+    name: 'tracing-enrichment',
     onMessage: jest.fn(),
   };
-  const mockLangfuseTraceContext = {
+  const mockTraceContext = {
     traceName: 'manual-run',
     tags: ['source:manual', 'session:ephemeral'],
     metadata: { runId: 'run-123', source: 'manual', repoName: 'my-repo' },
@@ -209,12 +199,18 @@ describe('RunProcessorService', () => {
           },
         },
         {
-          provide: LangfuseCallbackHandlerFactory,
+          provide: TracingEnrichmentHandlerFactory,
           useValue: {
             createForRun: jest.fn().mockReturnValue({
-              handler: mockLangfuseHandler,
-              traceContext: mockLangfuseTraceContext,
+              handler: mockTracingHandler,
+              traceContext: mockTraceContext,
             }),
+            wrapWithContext: jest.fn(
+              async (
+                _ctx: unknown,
+                fn: () => Promise<unknown>,
+              ): Promise<unknown> => await fn(),
+            ),
           },
         },
         {
@@ -232,7 +228,9 @@ describe('RunProcessorService', () => {
     runEventRepository = module.get(RunEventRepository);
     linearCallbackHandlerFactory = module.get(LinearCallbackHandlerFactory);
     telegramService = module.get(TelegramService);
-    langfuseCallbackHandlerFactory = module.get(LangfuseCallbackHandlerFactory);
+    tracingEnrichmentHandlerFactory = module.get(
+      TracingEnrichmentHandlerFactory,
+    );
   });
 
   describe('runSession', () => {
@@ -473,17 +471,16 @@ describe('RunProcessorService', () => {
       );
     });
 
-    it('should wrap execution in propagateAttributes when Langfuse context is provided', async () => {
+    it('should wrap execution in wrapWithContext when trace context is provided', async () => {
       await (service as any).runSession({
         cwd: '/home/user/dev/my-repo',
         prompt: 'hello',
-        langfuseTraceContext: mockLangfuseTraceContext,
+        traceContext: mockTraceContext,
       });
 
-      expect(propagateAttributes).toHaveBeenCalledWith(
-        mockLangfuseTraceContext,
-        expect.any(Function),
-      );
+      expect(
+        tracingEnrichmentHandlerFactory.wrapWithContext,
+      ).toHaveBeenCalledWith(mockTraceContext, expect.any(Function));
     });
   });
 
@@ -560,7 +557,7 @@ describe('RunProcessorService', () => {
       expect(savedStates[1].completedAt).toBeInstanceOf(Date);
 
       expect(sdkSessionFactory.create).toHaveBeenCalled();
-      expect(langfuseCallbackHandlerFactory.createForRun).toHaveBeenCalledWith(
+      expect(tracingEnrichmentHandlerFactory.createForRun).toHaveBeenCalledWith(
         run,
       );
     });

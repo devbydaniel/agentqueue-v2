@@ -160,17 +160,4 @@ describe('AppConfigService', () => {
       delete process.env.RUN_TIMEOUT_MS;
     });
   });
-
-  describe('langfuseEnabled', () => {
-    it('should return false when not set', () => {
-      delete process.env.LANGFUSE_SECRET_KEY;
-      expect(service.langfuseEnabled).toBe(false);
-    });
-
-    it('should return true when set', () => {
-      process.env.LANGFUSE_SECRET_KEY = 'lf-key';
-      expect(service.langfuseEnabled).toBe(true);
-      delete process.env.LANGFUSE_SECRET_KEY;
-    });
-  });
 });

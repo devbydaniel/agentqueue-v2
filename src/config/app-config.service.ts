@@ -1,4 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { detectTracingProvider } from './detect-tracing-provider.js';
+import type { TracingProvider } from './detect-tracing-provider.js';
 
 /**
  * Centralized, typed access to all environment variables.
@@ -78,9 +80,9 @@ export class AppConfigService {
     return parsed;
   }
 
-  // ── Langfuse ─────────────────────────────────────────────────────
+  // ── Tracing ──────────────────────────────────────────────────────
 
-  get langfuseEnabled(): boolean {
-    return !!process.env.LANGFUSE_SECRET_KEY;
+  get tracingProvider(): TracingProvider {
+    return detectTracingProvider();
   }
 }

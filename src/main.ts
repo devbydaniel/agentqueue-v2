@@ -1,10 +1,12 @@
-import './instrumentation.js';
+import { tracingReady } from './instrumentation.js';
 import { NestFactory } from '@nestjs/core';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module.js';
 
 async function bootstrap() {
+  await tracingReady;
+
   const logger = new Logger('Bootstrap');
   const app = await NestFactory.create(AppModule, { rawBody: true });
 

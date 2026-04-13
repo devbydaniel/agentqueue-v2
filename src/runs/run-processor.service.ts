@@ -1,5 +1,4 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { propagateAttributes } from '@langfuse/tracing';
 import type {
   SDKMessage,
   SDKResultMessage,
@@ -7,10 +6,8 @@ import type {
 import { RUN_EVENT_HANDLERS } from '../callbacks/constants.js';
 import type { RunEventHandler } from '../callbacks/run-event-handler.interface.js';
 import { AssistantMessageCallbackHandler } from '../callbacks/handlers/assistant-message.callback-handler.js';
-import {
-  LangfuseCallbackHandlerFactory,
-  type LangfuseTraceContext,
-} from '../callbacks/handlers/langfuse.callback-handler.js';
+import { TracingEnrichmentHandlerFactory } from '../callbacks/handlers/tracing-enrichment.callback-handler.js';
+import type { TraceContext } from '../callbacks/build-trace-context.js';
 import {
   LinearCallbackHandler,
   LinearCallbackHandlerFactory,
@@ -44,8 +41,8 @@ export interface RunSessionParams {
   appendSystemPrompt?: string;
   /** AbortController for per-run timeout + cancellation */
   abortController?: AbortController;
-  /** Trace-level Langfuse attributes applied for the duration of the run */
-  langfuseTraceContext?: LangfuseTraceContext;
+  /** Trace-level attributes applied for the duration of the run */
+  traceContext?: TraceContext;
 }
 
 export interface RunSessionResult {
@@ -66,7 +63,7 @@ export class RunProcessorService {
     private readonly externalSessionRepository: ExternalSessionRepository,
     private readonly runEventRepository: RunEventRepository,
     private readonly telegramService: TelegramService,
-    private readonly langfuseCallbackHandlerFactory: LangfuseCallbackHandlerFactory,
+    private readonly tracingEnrichmentHandlerFactory: TracingEnrichmentHandlerFactory,
     private readonly linearCallbackHandlerFactory: LinearCallbackHandlerFactory,
     private readonly agentProfileService: AgentProfileService,
     @Inject(RUN_EVENT_HANDLERS)
@@ -132,9 +129,9 @@ export class RunProcessorService {
     // Build additional handlers
     const { additionalHandlers, linearHandler, assistantMessageHandler } =
       this.buildSourceHandlers(run);
-    const { handler: langfuseHandler, traceContext: langfuseTraceContext } =
-      this.langfuseCallbackHandlerFactory.createForRun(run);
-    additionalHandlers.push(langfuseHandler);
+    const { handler: tracingHandler, traceContext } =
+      this.tracingEnrichmentHandlerFactory.createForRun(run);
+    additionalHandlers.push(tracingHandler);
 
     // Attach registry handler to persist filtered events
     additionalHandlers.push(
@@ -164,7 +161,7 @@ export class RunProcessorService {
         appendSystemPrompt: run.appendSystemPrompt ?? undefined,
         additionalHandlers,
         abortController,
-        langfuseTraceContext,
+        traceContext,
       });
 
       // Persist SDK session ID for future resumes
@@ -389,13 +386,16 @@ export class RunProcessorService {
           }
         } finally {
           // Always call onComplete — handlers use this for cleanup (e.g.
-          // closing Langfuse spans, flushing Linear activities).
+          // closing tracing spans, flushing Linear activities).
           await this.completeHandlers(handlers, lastResult);
         }
       };
 
-      if (params.langfuseTraceContext) {
-        await propagateAttributes(params.langfuseTraceContext, executeSession);
+      if (params.traceContext) {
+        await this.tracingEnrichmentHandlerFactory.wrapWithContext(
+          params.traceContext,
+          executeSession,
+        );
       } else {
         await executeSession();
       }
