@@ -101,10 +101,10 @@ export class TracingEnrichmentHandler implements RunEventHandler {
             this.traceContext.metadata['externalSessionId'],
           );
         }
-        if (this.traceContext.metadata['parentFlowRunId']) {
+        if (this.traceContext.metadata['parentRunId']) {
           span.setAttribute(
-            'run.parent_flow_run_id',
-            this.traceContext.metadata['parentFlowRunId'],
+            'run.parent_run_id',
+            this.traceContext.metadata['parentRunId'],
           );
         }
 

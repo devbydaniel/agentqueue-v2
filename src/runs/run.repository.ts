@@ -14,6 +14,7 @@ export interface ListRunsFilters {
   source?: string;
   cwd?: string;
   trigger?: string;
+  parent?: string;
   since?: string;
   limit?: number;
   offset?: number;
@@ -23,7 +24,7 @@ export interface CreateRunCommand {
   source: (typeof runSources)[number];
   triggerName?: string;
   agentName?: string;
-  parentFlowRunId?: string;
+  parentRunId?: string;
   cwd: string;
   prompt: string;
   externalSessionId?: string;
@@ -51,7 +52,7 @@ export class RunRepository {
       source: command.source,
       triggerName: command.triggerName,
       agentName: command.agentName,
-      parentFlowRunId: command.parentFlowRunId,
+      parentRunId: command.parentRunId,
       cwd: command.cwd,
       prompt: command.prompt,
       promptPreview: command.prompt.slice(0, 500),
@@ -64,7 +65,7 @@ export class RunRepository {
         source,
         trigger_name,
         agent_name,
-        parent_flow_run_id,
+        parent_run_id,
         cwd,
         prompt,
         prompt_preview,
@@ -77,7 +78,7 @@ export class RunRepository {
         newRun.source,
         newRun.triggerName ?? null,
         newRun.agentName ?? null,
-        newRun.parentFlowRunId ?? null,
+        newRun.parentRunId ?? null,
         newRun.cwd,
         newRun.prompt,
         newRun.promptPreview ?? null,
@@ -152,6 +153,10 @@ export class RunRepository {
     if (filters.trigger) {
       conditions.push(`trigger_name = $${index++}`);
       values.push(filters.trigger);
+    }
+    if (filters.parent) {
+      conditions.push(`parent_run_id = $${index++}`);
+      values.push(filters.parent);
     }
     if (filters.since) {
       conditions.push(`created_at >= $${index++}`);

@@ -38,7 +38,8 @@ export class RunsController {
   })
   @ApiResponse({ status: 400, description: 'Invalid request body' })
   async enqueueRun(@Body() dto: EnqueueRunDto) {
-    return this.runsService.enqueue({ ...dto, source: 'manual' });
+    const source = dto.parentRunId ? 'spawned' : 'manual';
+    return this.runsService.enqueue({ ...dto, source });
   }
 
   @Get()

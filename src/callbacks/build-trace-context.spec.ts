@@ -9,7 +9,7 @@ function makeRun(overrides: Partial<TraceableRun> = {}): TraceableRun {
     id: 'run-123',
     source: 'manual',
     triggerName: null,
-    parentFlowRunId: null,
+    parentRunId: null,
     cwd: '/home/user/dev/my-repo',
     externalSessionId: null,
     ...overrides,
@@ -36,10 +36,16 @@ describe('buildSessionId', () => {
     ).toBe('telegram:bot:123:main');
   });
 
-  it('should return parentFlowRunId for flow child runs', () => {
+  it('should return parentRunId for flow child runs', () => {
     expect(
-      buildSessionId(makeRun({ source: 'flow', parentFlowRunId: 'flow-99' })),
+      buildSessionId(makeRun({ source: 'flow', parentRunId: 'flow-99' })),
     ).toBe('flow-99');
+  });
+
+  it('should return parentRunId for non-flow spawned runs', () => {
+    expect(
+      buildSessionId(makeRun({ source: 'spawned', parentRunId: 'parent-42' })),
+    ).toBe('parent-42');
   });
 
   it('should return undefined for manual runs', () => {
@@ -75,9 +81,9 @@ describe('buildTraceContext', () => {
     });
   });
 
-  it('should group flow child runs by parentFlowRunId', () => {
+  it('should group flow child runs by parentRunId', () => {
     const context = buildTraceContext(
-      makeRun({ source: 'flow', parentFlowRunId: 'flow-run-99' }),
+      makeRun({ source: 'flow', parentRunId: 'flow-run-99' }),
     );
 
     expect(context).toEqual({
@@ -87,9 +93,27 @@ describe('buildTraceContext', () => {
         runId: 'run-123',
         source: 'flow',
         repoName: 'my-repo',
-        parentFlowRunId: 'flow-run-99',
+        parentRunId: 'flow-run-99',
       },
       sessionId: 'flow-run-99',
+    });
+  });
+
+  it('should tag non-flow spawned runs as spawned and group by parentRunId', () => {
+    const context = buildTraceContext(
+      makeRun({ source: 'spawned', parentRunId: 'parent-42' }),
+    );
+
+    expect(context).toEqual({
+      traceName: 'spawned-run',
+      tags: ['source:spawned', 'spawned', 'session:shared'],
+      metadata: {
+        runId: 'run-123',
+        source: 'spawned',
+        repoName: 'my-repo',
+        parentRunId: 'parent-42',
+      },
+      sessionId: 'parent-42',
     });
   });
 

@@ -10,7 +10,7 @@ function makeRun(overrides: Partial<Run> = {}): Run {
     source: 'flow',
     triggerName: null,
     agentName: null,
-    parentFlowRunId: 'flow-run-1',
+    parentRunId: 'flow-run-1',
     cwd: '/tmp/core',
     prompt: 'do something',
     promptPreview: 'do something',

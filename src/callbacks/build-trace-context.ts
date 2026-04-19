@@ -11,7 +11,7 @@ export interface TraceableRun {
   id: string;
   source: string;
   triggerName: string | null;
-  parentFlowRunId: string | null;
+  parentRunId: string | null;
   cwd: string;
   externalSessionId: string | null;
 }
@@ -24,8 +24,8 @@ export function buildSessionId(run: TraceableRun): string | undefined {
     return run.externalSessionId;
   }
 
-  if (run.source === 'flow' && run.parentFlowRunId) {
-    return run.parentFlowRunId;
+  if (run.parentRunId) {
+    return run.parentRunId;
   }
 
   return undefined;
@@ -39,8 +39,8 @@ export function buildTraceContext(run: TraceableRun): TraceContext {
     tags.push(`trigger:${run.triggerName}`);
   }
 
-  if (run.parentFlowRunId) {
-    tags.push('flow:child');
+  if (run.parentRunId) {
+    tags.push(run.source === 'flow' ? 'flow:child' : 'spawned');
   }
 
   tags.push(sessionId ? 'session:shared' : 'session:ephemeral');
@@ -59,8 +59,8 @@ export function buildTraceContext(run: TraceableRun): TraceContext {
     metadata['externalSessionId'] = run.externalSessionId;
   }
 
-  if (run.parentFlowRunId) {
-    metadata['parentFlowRunId'] = run.parentFlowRunId;
+  if (run.parentRunId) {
+    metadata['parentRunId'] = run.parentRunId;
   }
 
   return {

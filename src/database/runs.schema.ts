@@ -5,6 +5,7 @@ export const runSources = [
   'github',
   'flow',
   'telegram',
+  'spawned',
 ] as const;
 
 export const runStatuses = [
@@ -22,7 +23,7 @@ export interface Run {
   source: (typeof runSources)[number];
   triggerName: string | null;
   agentName: string | null;
-  parentFlowRunId: string | null;
+  parentRunId: string | null;
   cwd: string;
   prompt: string;
   promptPreview: string | null;
@@ -43,7 +44,7 @@ export interface NewRun {
   source: Run['source'];
   triggerName?: string | null;
   agentName?: string | null;
-  parentFlowRunId?: string | null;
+  parentRunId?: string | null;
   cwd: string;
   prompt: string;
   promptPreview?: string | null;

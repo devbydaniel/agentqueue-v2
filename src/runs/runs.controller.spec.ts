@@ -88,6 +88,34 @@ describe('RunsController', () => {
       });
     });
 
+    it('should set source to "spawned" and forward parentRunId', async () => {
+      const parentId = 'ac10f5e2-2a1e-4f1a-9c1a-111111111111';
+      await request(app.getHttpServer())
+        .post('/runs')
+        .send({
+          cwd: '/tmp/core',
+          prompt: 'do something',
+          parentRunId: parentId,
+        })
+        .expect(202);
+
+      expect(runsService.enqueue).toHaveBeenCalledWith({
+        source: 'spawned',
+        cwd: '/tmp/core',
+        prompt: 'do something',
+        parentRunId: parentId,
+      });
+    });
+
+    it('should return 400 when parentRunId is not a UUID', async () => {
+      const response = await request(app.getHttpServer()).post('/runs').send({
+        cwd: '/tmp/core',
+        prompt: 'do something',
+        parentRunId: 'not-a-uuid',
+      });
+      expect(response.status).toBe(400);
+    });
+
     it('should return 400 when externalSessionId is provided', async () => {
       const response = await request(app.getHttpServer()).post('/runs').send({
         cwd: '/tmp/core',

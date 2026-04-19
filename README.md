@@ -132,6 +132,7 @@ Accepted request fields:
 - `prependSystemPrompt` (optional)
 - `appendSystemPrompt` (optional)
 - `timeoutMs` (optional)
+- `parentRunId` (optional) — the runId of the parent run. When set, the new run is recorded with `source: 'spawned'` and is grouped under the parent's Langfuse session. Intended for agents enqueueing child runs from inside a queue session; the executing agent's own runId is available as `$AGENTQUEUE_RUN_ID` and is also stated in its system prompt.
 
 > `POST /runs` does **not** accept `externalSessionId`. Session resumption IDs are internal integration fields populated by webhook-based sources such as Linear.
 
@@ -163,7 +164,9 @@ curl -s 'http://localhost:3000/runs?status=running&source=cron&limit=10' \
   -H "Authorization: Bearer $AUTH_TOKEN"
 ```
 
-Query parameters: `status`, `source`, `cwd`, `trigger`, `since`, `limit`, `offset`.
+Query parameters: `status`, `source`, `cwd`, `trigger`, `parent`, `since`, `limit`, `offset`.
+
+Use `?parent=<runId>` to list a run's spawned children (including flow-spawned children, which use `source=flow`).
 
 ### GET /runs/:id
 

@@ -18,10 +18,17 @@ import { RUNS_QUEUE_NAME } from './runs.constants.js';
 import { ensureDirectoryExists } from '../common/utils/cwd-path.js';
 
 export interface EnqueueRunCommand {
-  source: 'manual' | 'cron' | 'linear' | 'github' | 'flow' | 'telegram';
+  source:
+    | 'manual'
+    | 'cron'
+    | 'linear'
+    | 'github'
+    | 'flow'
+    | 'telegram'
+    | 'spawned';
   triggerName?: string;
   agentName?: string;
-  parentFlowRunId?: string;
+  parentRunId?: string;
   cwd: string;
   prompt: string;
   externalSessionId?: string;
@@ -81,7 +88,7 @@ export class RunsService {
       source: command.source,
       triggerName: command.triggerName,
       agentName: command.agentName,
-      parentFlowRunId: command.parentFlowRunId,
+      parentRunId: command.parentRunId,
       cwd,
       prompt: command.prompt,
       externalSessionId: command.externalSessionId,

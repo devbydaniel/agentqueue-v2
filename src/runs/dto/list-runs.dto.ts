@@ -4,6 +4,7 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  IsUUID,
   Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -27,6 +28,10 @@ export class ListRunsDto {
   @IsOptional()
   @IsString()
   trigger?: string;
+
+  @IsOptional()
+  @IsUUID()
+  parent?: string;
 
   @IsOptional()
   @IsISO8601()

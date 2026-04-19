@@ -22,6 +22,8 @@ export interface CreateSdkSessionOptions {
   prompt: string;
   /** Resolved agent profile (already looked up by caller) */
   profile?: AgentProfile;
+  /** The executing run's id — exposed to the session via env var + system prompt so child enqueues can set parentRunId */
+  runId?: string;
   /** Additional system prompt snippets appended to the Claude Code preset prompt (in order) */
   additionalSystemPrompts?: string[];
   /** AbortController for cancellation/timeout */
@@ -85,6 +87,13 @@ export class SdkSessionFactory {
       settingSources: ['project'],
     };
 
+    if (options.runId) {
+      sdkOptions.env = {
+        ...process.env,
+        AGENTQUEUE_RUN_ID: options.runId,
+      };
+    }
+
     const profile = options.profile;
 
     sdkOptions.model = profile?.model ?? DEFAULT_MODEL;
@@ -92,6 +101,7 @@ export class SdkSessionFactory {
     const promptParts = this.collectSystemPromptParts(
       profile?.append_prompt,
       options.additionalSystemPrompts,
+      options.runId,
     );
     if (promptParts.length > 0) {
       sdkOptions.systemPrompt = {
@@ -127,11 +137,21 @@ export class SdkSessionFactory {
   private collectSystemPromptParts(
     profileAppend?: string,
     additionalPrompts?: string[],
+    runId?: string,
   ): string[] {
     const parts: string[] = [];
+    if (runId) parts.push(this.buildRunIdPromptPart(runId));
     if (profileAppend) parts.push(profileAppend);
     if (additionalPrompts) parts.push(...additionalPrompts);
     return parts;
+  }
+
+  private buildRunIdPromptPart(runId: string): string {
+    return [
+      `You are executing as AgentQueue run \`${runId}\`.`,
+      `Your runId is also available in the \`AGENTQUEUE_RUN_ID\` environment variable.`,
+      `When you enqueue child runs via the queue's \`POST /runs\` API, include \`"parentRunId": "${runId}"\` in the JSON body so the parent→child lineage is preserved.`,
+    ].join(' ');
   }
 
   private mapSubagents(

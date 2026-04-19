@@ -364,6 +364,39 @@ describe('SdkSessionFactory', () => {
     expect(capturedOptions!['maxTurns']).toBeUndefined();
   });
 
+  it('should inject runId into env and system prompt when provided', async () => {
+    const handle = await factory.create({
+      cwd: '/tmp/test',
+      prompt: 'Hello',
+      runId: 'run-abc-123',
+    });
+
+    const iterator = handle.messages[Symbol.asyncIterator]();
+    await iterator.next();
+
+    const env = capturedOptions!['env'] as Record<string, string | undefined>;
+    expect(env['AGENTQUEUE_RUN_ID']).toBe('run-abc-123');
+
+    const systemPrompt = capturedOptions!['systemPrompt'] as {
+      append: string;
+    };
+    expect(systemPrompt.append).toContain('run-abc-123');
+    expect(systemPrompt.append).toContain('AGENTQUEUE_RUN_ID');
+    expect(systemPrompt.append).toContain('parentRunId');
+  });
+
+  it('should not set env when runId is not provided', async () => {
+    const handle = await factory.create({
+      cwd: '/tmp/test',
+      prompt: 'Hello',
+    });
+
+    const iterator = handle.messages[Symbol.asyncIterator]();
+    await iterator.next();
+
+    expect(capturedOptions!['env']).toBeUndefined();
+  });
+
   it('should yield all messages from the SDK query', async () => {
     const handle = await factory.create({
       cwd: '/tmp/test',

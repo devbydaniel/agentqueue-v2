@@ -282,7 +282,7 @@ describe('FlowRunnerService', () => {
     expect(run.steps[0].success).toBe(false);
   });
 
-  it('enqueue includes source=flow and parentFlowRunId', async () => {
+  it('enqueue includes source=flow and parentRunId', async () => {
     mockResolver
       .mockResolvedValueOnce({ agent: 'dev', vars: { task: 'feat-1' } })
       .mockResolvedValueOnce({ done: true });
@@ -293,7 +293,7 @@ describe('FlowRunnerService', () => {
     expect(mockRunsService.enqueue).toHaveBeenCalledWith(
       expect.objectContaining({
         source: 'flow',
-        parentFlowRunId: flowRunId,
+        parentRunId: flowRunId,
         cwd: '/tmp/my-repo',
         prompt: 'Build feat-1',
       }),

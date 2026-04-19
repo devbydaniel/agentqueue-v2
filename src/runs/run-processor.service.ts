@@ -356,6 +356,7 @@ export class RunProcessorService {
       cwd: params.cwd,
       prompt: params.prompt,
       profile: params.profile,
+      runId: params.runId,
       additionalSystemPrompts:
         systemPrompts.length > 0 ? systemPrompts : undefined,
       abortController,

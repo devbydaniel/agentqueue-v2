@@ -491,7 +491,7 @@ describe('RunProcessorService', () => {
         source: 'manual',
         triggerName: null,
         agentName: null,
-        parentFlowRunId: null,
+        parentRunId: null,
         cwd: '/home/user/dev/my-repo',
         prompt: 'do something',
         promptPreview: 'do something',

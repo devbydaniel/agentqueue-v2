@@ -24,7 +24,7 @@ describe('RunsService', () => {
       source: 'manual',
       triggerName: null,
       agentName: null,
-      parentFlowRunId: null,
+      parentRunId: null,
       cwd: tmpDir,
       prompt: 'do something',
       promptPreview: 'do something',
@@ -118,7 +118,7 @@ describe('RunsService', () => {
       expect(runRepository.create).toHaveBeenCalledWith({
         source: 'manual',
         triggerName: undefined,
-        parentFlowRunId: undefined,
+        parentRunId: undefined,
         cwd: tmpDir,
         prompt: 'do something',
         externalSessionId: undefined,

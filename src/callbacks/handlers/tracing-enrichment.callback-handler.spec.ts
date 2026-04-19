@@ -163,7 +163,7 @@ describe('TracingEnrichmentHandlerFactory', () => {
       id: 'run-123',
       source: 'manual',
       triggerName: null,
-      parentFlowRunId: null,
+      parentRunId: null,
       cwd: '/home/user/dev/my-repo',
       externalSessionId: null,
     });
@@ -181,7 +181,7 @@ describe('TracingEnrichmentHandlerFactory', () => {
       id: 'run-123',
       source: 'manual',
       triggerName: null,
-      parentFlowRunId: null,
+      parentRunId: null,
       cwd: '/home/user/dev/my-repo',
       externalSessionId: null,
     });

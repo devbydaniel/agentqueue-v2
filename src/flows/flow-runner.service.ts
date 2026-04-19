@@ -170,7 +170,7 @@ export class FlowRunnerService {
     try {
       const { runId } = await this.runsService.enqueue({
         source: 'flow',
-        parentFlowRunId: ctx.run.flowRunId,
+        parentRunId: ctx.run.flowRunId,
         cwd: agentConfig.cwd,
         prompt: renderedPrompt,
       });

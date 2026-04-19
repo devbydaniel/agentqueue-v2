@@ -4,6 +4,7 @@ import {
   IsOptional,
   IsPositive,
   IsString,
+  IsUUID,
 } from 'class-validator';
 
 export class EnqueueRunDto {
@@ -23,4 +24,8 @@ export class EnqueueRunDto {
   @IsPositive()
   @IsOptional()
   timeoutMs?: number;
+
+  @IsUUID()
+  @IsOptional()
+  parentRunId?: string;
 }
