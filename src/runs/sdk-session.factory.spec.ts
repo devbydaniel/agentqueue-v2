@@ -357,7 +357,7 @@ describe('SdkSessionFactory', () => {
     const iterator = handle.messages[Symbol.asyncIterator]();
     await iterator.next();
 
-    expect(capturedOptions!['model']).toBeUndefined();
+    expect(capturedOptions!['model']).toBe('opus');
     expect(capturedOptions!['agents']).toBeUndefined();
     expect(capturedOptions!['mcpServers']).toBeUndefined();
     expect(capturedOptions!['allowedTools']).toBeUndefined();

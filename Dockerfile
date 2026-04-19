@@ -11,8 +11,7 @@ WORKDIR /app
 COPY --from=builder --chown=app:app /app/dist ./dist
 COPY --from=builder --chown=app:app /app/node_modules ./node_modules
 COPY --from=builder --chown=app:app /app/package.json ./
-COPY --from=builder --chown=app:app /app/drizzle.config.ts ./
 COPY --from=builder --chown=app:app /app/src/database/migrations ./src/database/migrations
 USER app
 EXPOSE 3000
-CMD ["sh", "-c", "npx drizzle-kit migrate && node dist/src/main.js"]
+CMD ["sh", "-c", "npx dbmate --migrations-dir src/database/migrations --no-dump-schema up && node dist/src/main.js"]

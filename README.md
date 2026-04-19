@@ -479,10 +479,12 @@ npm run deps:check      # Dependency-cruiser architecture checks
 ./scripts/check-duplication.sh
 ./scripts/check-file-size.sh
 
-# Deployment (production — bare-metal)
-./scripts/deploy.sh     # Pull, build, restart with health check
-./scripts/stop.sh       # Stop the running process
-./scripts/status.sh     # Check if running and healthy
+# Deployment (production — bare-metal, supervised by systemd)
+./scripts/deploy.sh     # Pull, build, migrate, restart via systemctl, health check
+#                       # Override service name: AGENTQUEUE_SERVICE=...
+#                       # Override scope (--user / --system): AGENTQUEUE_SYSTEMCTL_SCOPE=...
+systemctl --user status agentqueue   # Check status
+systemctl --user stop agentqueue     # Stop
 ```
 
 ## Docker

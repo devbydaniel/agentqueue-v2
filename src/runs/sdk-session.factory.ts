@@ -11,6 +11,12 @@ import type {
   McpServerProfile,
 } from '../agents/agent-profile.interface.js';
 
+/**
+ * Default model when no agent profile overrides it. Uses the `claude` CLI's
+ * `opus` alias so new Opus releases are picked up automatically on CLI upgrade.
+ */
+const DEFAULT_MODEL = 'opus';
+
 export interface CreateSdkSessionOptions {
   cwd: string;
   prompt: string;
@@ -81,9 +87,7 @@ export class SdkSessionFactory {
 
     const profile = options.profile;
 
-    if (profile?.model) {
-      sdkOptions.model = profile.model;
-    }
+    sdkOptions.model = profile?.model ?? DEFAULT_MODEL;
 
     const promptParts = this.collectSystemPromptParts(
       profile?.append_prompt,

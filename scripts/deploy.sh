@@ -3,9 +3,8 @@ set -euo pipefail
 
 #─── Config ───────────────────────────────────────────────────────────────────
 APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-PID_FILE="$APP_DIR/.agentqueue.pid"
-LOG_DIR="$APP_DIR/logs"
-LOG_FILE="$LOG_DIR/agentqueue.log"
+SERVICE="${AGENTQUEUE_SERVICE:-agentqueue}"
+SYSTEMCTL_SCOPE="${AGENTQUEUE_SYSTEMCTL_SCOPE:---user}"
 HEALTH_URL="http://localhost:${PORT:-3000}/health"
 HEALTH_TIMEOUT=15
 
@@ -33,6 +32,9 @@ if ! node -e "const p=new (require('pg').Pool)({connectionString:process.env.DAT
 fi
 ok "Database reachable"
 
+systemctl "$SYSTEMCTL_SCOPE" status "$SERVICE" >/dev/null 2>&1 || \
+  fail "systemd unit '$SERVICE' not found (scope: $SYSTEMCTL_SCOPE) — install it before using deploy.sh"
+
 #─── Pull latest ──────────────────────────────────────────────────────────────
 info "Pulling latest changes"
 git pull --ff-only || fail "git pull failed — resolve manually"
@@ -52,44 +54,14 @@ info "Running database migrations"
 npm run db:migrate
 ok "Migrations applied"
 
-# NOTE: do NOT prune devDependencies without verifying — historically some
-# transitive deps required at runtime by the agent runner were only listed
-# as devDeps, and pruning them caused runtime crashes. Re-verify before
-# enabling `npm prune --production` here.
-
-#─── Stop existing process ────────────────────────────────────────────────────
-if [[ -f "$PID_FILE" ]]; then
-  OLD_PID=$(cat "$PID_FILE")
-  if kill -0 "$OLD_PID" 2>/dev/null; then
-    info "Stopping existing process (PID $OLD_PID)"
-    kill "$OLD_PID"
-    # Wait up to 10s for graceful shutdown
-    for i in $(seq 1 10); do
-      kill -0 "$OLD_PID" 2>/dev/null || break
-      sleep 1
-    done
-    # Force kill if still running
-    if kill -0 "$OLD_PID" 2>/dev/null; then
-      kill -9 "$OLD_PID" 2>/dev/null || true
-    fi
-    ok "Stopped"
-  else
-    info "Stale PID file (process $OLD_PID not running)"
-  fi
-  rm -f "$PID_FILE"
-fi
-
-#─── Start ────────────────────────────────────────────────────────────────────
-mkdir -p "$LOG_DIR"
-info "Starting (NODE_ENV=production)"
-
-NODE_ENV=production nohup node dist/main.js >> "$LOG_FILE" 2>&1 &
-echo $! > "$PID_FILE"
-ok "Started (PID $(cat "$PID_FILE")) — logs: $LOG_FILE"
+#─── Restart ──────────────────────────────────────────────────────────────────
+info "Restarting $SERVICE ($SYSTEMCTL_SCOPE)"
+systemctl "$SYSTEMCTL_SCOPE" restart "$SERVICE"
+ok "Restart requested"
 
 #─── Health check ─────────────────────────────────────────────────────────────
 info "Waiting for health check ($HEALTH_URL)"
-for i in $(seq 1 "$HEALTH_TIMEOUT"); do
+for _ in $(seq 1 "$HEALTH_TIMEOUT"); do
   if curl -sf "$HEALTH_URL" >/dev/null 2>&1; then
     ok "Healthy — deploy complete ✨"
     exit 0
@@ -97,4 +69,4 @@ for i in $(seq 1 "$HEALTH_TIMEOUT"); do
   sleep 1
 done
 
-fail "Health check failed after ${HEALTH_TIMEOUT}s — check logs:\n  tail -50 $LOG_FILE"
+fail "Health check failed after ${HEALTH_TIMEOUT}s — check logs:\n  journalctl $SYSTEMCTL_SCOPE -u $SERVICE -n 100"
