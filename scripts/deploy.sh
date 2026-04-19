@@ -52,9 +52,10 @@ info "Running database migrations"
 npm run db:migrate
 ok "Migrations applied"
 
-# NOTE: do NOT prune devDependencies — transitive deps (e.g. @sinclair/typebox)
-# required at runtime by @mariozechner/pi-coding-agent are listed as devDeps
-# and would be removed, causing runtime crashes.
+# NOTE: do NOT prune devDependencies without verifying — historically some
+# transitive deps required at runtime by the agent runner were only listed
+# as devDeps, and pruning them caused runtime crashes. Re-verify before
+# enabling `npm prune --production` here.
 
 #─── Stop existing process ────────────────────────────────────────────────────
 if [[ -f "$PID_FILE" ]]; then

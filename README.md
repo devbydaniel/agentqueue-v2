@@ -1,6 +1,6 @@
 # AgentQueue v2
 
-Centralized agent orchestrator for AI agent workloads. Receives triggers (cron schedules, Linear webhooks, GitHub webhooks, Telegram webhooks), resolves a working directory, and runs a [pi](https://github.com/mariozechner/pi-coding-agent) agent session against it.
+Centralized agent orchestrator for AI agent workloads. Receives triggers (cron schedules, Linear webhooks, GitHub webhooks, Telegram webhooks), resolves a working directory, and runs a [Claude Agent SDK](https://docs.claude.com/en/api/agent-sdk/overview) session against it.
 
 ## Architecture
 
@@ -20,7 +20,7 @@ NestJS modular backend backed by Postgres (via raw `pg`) and pg-boss for job que
                      └──────────┬──────────┘
                                 │
                      ┌──────────▼──────────┐
-                     │ pi session factory  │
+                     │ SDK session factory │
                      │ + agent session     │
                      └──────────┬──────────┘
                                 │
@@ -35,7 +35,7 @@ NestJS modular backend backed by Postgres (via raw `pg`) and pg-boss for job que
 ## Requirements
 
 - Node.js >= 20
-- pi agent CLI installed (`@mariozechner/pi-coding-agent`)
+- Claude Agent SDK (installed as an npm dependency; see `@anthropic-ai/claude-agent-sdk` in `package.json`)
 
 ## Quick Start
 
@@ -349,7 +349,7 @@ triggers:
 
 The `${VAR}` syntax interpolates from environment variables. The webhook URL is `POST /webhooks/linear/<name>`.
 
-For Linear-triggered runs, AgentQueue stores the incoming Linear `agentSessionId` as an internal `externalSessionId` so follow-up webhook events can resume or abort the same underlying pi session.
+For Linear-triggered runs, AgentQueue stores the incoming Linear `agentSessionId` as an internal `externalSessionId` so follow-up webhook events can resume or abort the same underlying agent session.
 
 #### GitHub Triggers
 
@@ -440,7 +440,7 @@ src/
 │   ├── run-processor.service.ts
 │   ├── run-queue-worker.service.ts
 │   ├── active-session-tracker.service.ts
-│   ├── pi-session.factory.ts
+│   ├── sdk-session.factory.ts
 │   ├── external-session.repository.ts
 │   └── dto/
 ├── telegram/                         # Telegram API client + response delivery
