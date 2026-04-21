@@ -521,7 +521,6 @@ describe('TriggerConfigService', () => {
           type: 'telegram',
           bot_name: 'main-bot',
           bot_token: 'bot-token',
-          webhook_secret: 'secret',
           user_id: 456,
           chat_id: 123,
           cwd: '/tmp/assistant',
@@ -545,7 +544,6 @@ describe('TriggerConfigService', () => {
           type: 'telegram',
           bot_name: 'main-bot',
           bot_token: 'bot-token',
-          webhook_secret: 'secret',
           user_id: '456',
           cwd: '/tmp/assistant',
         },
@@ -554,7 +552,6 @@ describe('TriggerConfigService', () => {
           type: 'telegram',
           bot_name: 'ops-bot',
           bot_token: 'ops-token',
-          webhook_secret: 'ops-secret',
           user_id: '789',
           cwd: '/tmp/ops',
         },
@@ -571,7 +568,6 @@ describe('TriggerConfigService', () => {
 
   it('should interpolate env vars in telegram bot credentials', () => {
     process.env['TEST_TELEGRAM_BOT_TOKEN'] = 'interpolated_bot_token';
-    process.env['TEST_TELEGRAM_SECRET'] = 'interpolated_secret';
 
     mockConfigFile({
       triggers: [
@@ -580,7 +576,6 @@ describe('TriggerConfigService', () => {
           type: 'telegram',
           bot_name: 'main-bot',
           bot_token: '${TEST_TELEGRAM_BOT_TOKEN}',
-          webhook_secret: '${TEST_TELEGRAM_SECRET}',
           user_id: '456',
           cwd: '/tmp/assistant',
         },
@@ -588,16 +583,11 @@ describe('TriggerConfigService', () => {
     });
 
     service = createService();
-    const bot = service.getTelegramBotConfig('main-bot');
+    const trigger = service.getTelegramTrigger('daniel-assistant');
 
-    expect(bot).toEqual({
-      botName: 'main-bot',
-      botToken: 'interpolated_bot_token',
-      webhookSecret: 'interpolated_secret',
-    });
+    expect(trigger?.bot_token).toBe('interpolated_bot_token');
 
     delete process.env['TEST_TELEGRAM_BOT_TOKEN'];
-    delete process.env['TEST_TELEGRAM_SECRET'];
   });
 
   it('should skip invalid telegram triggers missing required fields', () => {
@@ -616,7 +606,6 @@ describe('TriggerConfigService', () => {
     service = createService();
 
     expect(service.getTelegramTriggers()).toEqual([]);
-    expect(service.getTelegramBotConfig('main-bot')).toBeUndefined();
   });
 
   // --- Linear trigger "on" field tests ---

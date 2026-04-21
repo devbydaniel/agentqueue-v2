@@ -16,7 +16,6 @@ describe('TelegramService', () => {
         type: 'telegram',
         bot_name: 'main-bot',
         bot_token: 'bot-token',
-        webhook_secret: 'secret',
         user_id: '456',
         cwd: '/tmp/assistant',
       }),
@@ -63,6 +62,11 @@ describe('TelegramService', () => {
           chat_id: '123',
           text: 'Completed',
           message_thread_id: 22,
+          reply_markup: {
+            keyboard: [[{ text: '🆕 New Session' }]],
+            resize_keyboard: true,
+            is_persistent: true,
+          },
         }),
       }),
     );

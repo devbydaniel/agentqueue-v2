@@ -1,73 +1,44 @@
-import {
-  Injectable,
-  Logger,
-  NotFoundException,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { TriggerConfigService } from '../config/trigger-config.service.js';
-import { interpolateTemplate } from '../config/trigger-config.interface.js';
+import {
+  interpolateTemplate,
+  type TelegramTrigger,
+} from '../config/trigger-config.interface.js';
 import { RunsService } from '../runs/runs.service.js';
 import { ExternalSessionRepository } from '../runs/external-session.repository.js';
-import { TelegramService } from '../telegram/telegram.service.js';
+import { NEW_SESSION_BUTTON, TelegramService } from './telegram.service.js';
 import { ensureDirectoryExists } from '../common/utils/cwd-path.js';
 
 const TELEGRAM_SESSION_IDLE_MS = 60 * 60 * 1000;
 
-interface TelegramUser {
-  id?: number | string;
-}
-
-interface TelegramChat {
-  id?: number | string;
-}
-
-interface TelegramMessage {
-  message_id?: number;
-  message_thread_id?: number;
-  text?: string;
-  chat?: TelegramChat;
-  from?: TelegramUser;
-}
-
-interface TelegramUpdate {
-  message?: TelegramMessage;
-}
-
-export interface HandleTelegramWebhookParams {
+export interface IngestMessageParams {
   botName: string;
-  secretTokenHeader: string | undefined;
-  body: Record<string, unknown>;
+  chatId: string;
+  userId: string;
+  messageThreadId?: number;
+  replyToMessageId?: number;
+  text: string;
+  /** Extra system-prompt lines appended by the caller (e.g. poller formatting guidance). Merged with the trigger's append_system_prompt. */
+  extraAppendSystemPrompt?: string;
 }
 
-export interface HandleTelegramWebhookResult {
+export interface IngestMessageResult {
   accepted: boolean;
   handled: boolean;
 }
 
-function toTelegramId(value: number | string | undefined): string | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  return String(value);
-}
-
 function isResetCommand(text: string): boolean {
   const trimmed = text.trim();
-  if (trimmed === '/reset') {
-    return true;
-  }
-
-  if (!trimmed.startsWith('/reset@')) {
-    return false;
-  }
-
+  if (trimmed === '/reset') return true;
+  if (trimmed === NEW_SESSION_BUTTON) return true;
+  if (!trimmed.startsWith('/reset@')) return false;
   const suffix = trimmed.slice('/reset@'.length);
   return suffix.length > 0 && !suffix.includes(' ');
 }
 
 @Injectable()
-export class TelegramWebhooksService {
-  private readonly logger = new Logger(TelegramWebhooksService.name);
+export class TelegramIngestService {
+  private readonly logger = new Logger(TelegramIngestService.name);
 
   constructor(
     private readonly triggerConfigService: TriggerConfigService,
@@ -76,50 +47,33 @@ export class TelegramWebhooksService {
     private readonly telegramService: TelegramService,
   ) {}
 
-  async handleWebhook(
-    params: HandleTelegramWebhookParams,
-  ): Promise<HandleTelegramWebhookResult> {
-    const botConfig = this.triggerConfigService.getTelegramBotConfig(
-      params.botName,
-    );
-    if (!botConfig) {
-      throw new NotFoundException(
-        `Telegram webhook not configured for bot '${params.botName}'`,
-      );
-    }
-
-    if (
-      !params.secretTokenHeader ||
-      params.secretTokenHeader !== botConfig.webhookSecret
-    ) {
-      throw new UnauthorizedException('Invalid Telegram webhook secret');
-    }
-
-    const update = params.body as TelegramUpdate;
-    const message = update.message;
-    if (!message?.text || !message.chat || !message.from) {
-      return { accepted: true, handled: false };
-    }
-
-    const chatId = toTelegramId(message.chat.id);
-    const userId = toTelegramId(message.from.id);
-    if (!chatId || !userId) {
-      return { accepted: true, handled: false };
-    }
-
-    const trigger = this.triggerConfigService
-      .getTelegramTriggersForBot(params.botName)
+  resolveTrigger(
+    botName: string,
+    userId: string,
+    chatId: string,
+  ): TelegramTrigger | undefined {
+    return this.triggerConfigService
+      .getTelegramTriggersForBot(botName)
       .find(
         (candidate) =>
           candidate.user_id === userId &&
           (!candidate.chat_id || candidate.chat_id === chatId),
       );
+  }
 
+  async ingestMessage(
+    params: IngestMessageParams,
+  ): Promise<IngestMessageResult> {
+    const trigger = this.resolveTrigger(
+      params.botName,
+      params.userId,
+      params.chatId,
+    );
     if (!trigger) {
-      this.logger.debug('Ignoring Telegram update with no matching trigger', {
+      this.logger.debug('Ignoring Telegram message with no matching trigger', {
         botName: params.botName,
-        userId,
-        chatId,
+        userId: params.userId,
+        chatId: params.chatId,
       });
       return { accepted: true, handled: false };
     }
@@ -128,11 +82,11 @@ export class TelegramWebhooksService {
 
     const sessionKey = this.buildSessionKey(
       params.botName,
-      chatId,
-      message.message_thread_id,
+      params.chatId,
+      params.messageThreadId,
     );
 
-    if (isResetCommand(message.text)) {
+    if (isResetCommand(params.text)) {
       await this.externalSessionRepository.deleteBySessionKey(sessionKey);
       try {
         this.runsService.abortSession(sessionKey);
@@ -145,10 +99,10 @@ export class TelegramWebhooksService {
       void this.telegramService
         .sendDirectMessage({
           botToken: trigger.bot_token,
-          chatId,
+          chatId: params.chatId,
           text: 'Session reset. Send a new message to start fresh.',
-          messageThreadId: message.message_thread_id,
-          replyToMessageId: message.message_id,
+          messageThreadId: params.messageThreadId,
+          replyToMessageId: params.replyToMessageId,
         })
         .catch((error: unknown) => {
           this.logger.error('Failed to send Telegram reset confirmation', {
@@ -184,36 +138,33 @@ export class TelegramWebhooksService {
       sessionKey,
       sessionId: null,
       botName: params.botName,
-      chatId,
-      messageThreadId: message.message_thread_id,
+      chatId: params.chatId,
+      messageThreadId: params.messageThreadId,
       lastActivityAt: now,
     });
 
-    void this.telegramService
-      .sendAcknowledgement({
-        botToken: trigger.bot_token,
-        chatId,
-        messageThreadId: message.message_thread_id,
-        replyToMessageId: message.message_id,
-      })
-      .catch((error: unknown) => {
-        this.logger.error('Failed to send Telegram acknowledgement', {
-          error: error as Error,
-          sessionKey,
-        });
-      });
+    this.telegramService.startTypingIndicator({
+      sessionKey,
+      botToken: trigger.bot_token,
+      chatId: params.chatId,
+      messageThreadId: params.messageThreadId,
+    });
 
     const templateVars = {
       botName: params.botName,
-      userId,
-      chatId,
+      userId: params.userId,
+      chatId: params.chatId,
       triggerName: trigger.name,
       cwd,
     };
 
-    const appendSystemPrompt = trigger.append_system_prompt
+    const triggerAppend = trigger.append_system_prompt
       ? interpolateTemplate(trigger.append_system_prompt, templateVars)
       : undefined;
+    const appendSystemPrompt =
+      [triggerAppend, params.extraAppendSystemPrompt]
+        .filter((s): s is string => Boolean(s))
+        .join('\n\n') || undefined;
 
     void this.runsService
       .enqueue({
@@ -221,7 +172,7 @@ export class TelegramWebhooksService {
         triggerName: trigger.name,
         agentName: trigger.agent,
         cwd,
-        prompt: message.text,
+        prompt: params.text,
         externalSessionId: sessionKey,
         appendSystemPrompt,
         timeoutMs: trigger.timeout_ms,

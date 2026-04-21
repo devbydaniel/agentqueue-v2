@@ -32,6 +32,12 @@ export class AppConfigService {
     return process.env.GITHUB_WEBHOOK_SECRET;
   }
 
+  // ── Telegram ─────────────────────────────────────────────────────
+
+  get mistralApiKey(): string | undefined {
+    return process.env.MISTRAL_API_KEY;
+  }
+
   // ── Hooks ────────────────────────────────────────────────────────
 
   get beforeHookTimeout(): number {

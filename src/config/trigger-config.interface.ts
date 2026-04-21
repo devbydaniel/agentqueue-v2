@@ -28,7 +28,6 @@ export interface TelegramTrigger {
   type: 'telegram';
   bot_name: string;
   bot_token: string;
-  webhook_secret: string;
   user_id: string;
   cwd: string;
   chat_id?: string;

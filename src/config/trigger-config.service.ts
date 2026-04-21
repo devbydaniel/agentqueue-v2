@@ -27,12 +27,6 @@ const VALID_LINEAR_EVENT_TYPES: ReadonlySet<string> = new Set<string>([
   'mentioned',
 ]);
 
-export interface TelegramBotConfig {
-  botName: string;
-  botToken: string;
-  webhookSecret: string;
-}
-
 @Injectable()
 export class TriggerConfigService implements OnModuleInit {
   private readonly logger = new Logger(TriggerConfigService.name);
@@ -104,33 +98,6 @@ export class TriggerConfigService implements OnModuleInit {
 
   getTelegramTriggersForBot(botName: string): TelegramTrigger[] {
     return this.telegramTriggers.filter((t) => t.bot_name === botName);
-  }
-
-  getTelegramBotConfig(botName: string): TelegramBotConfig | undefined {
-    const triggers = this.getTelegramTriggersForBot(botName);
-    if (triggers.length === 0) {
-      return undefined;
-    }
-
-    const [first, ...rest] = triggers;
-    const isConsistent = rest.every(
-      (trigger) =>
-        trigger.bot_token === first.bot_token &&
-        trigger.webhook_secret === first.webhook_secret,
-    );
-
-    if (!isConsistent) {
-      this.logger.error(
-        `Telegram bot "${botName}" has inconsistent bot_token/webhook_secret values across triggers`,
-      );
-      return undefined;
-    }
-
-    return {
-      botName,
-      botToken: first.bot_token,
-      webhookSecret: first.webhook_secret,
-    };
   }
 
   getConfigPath(): string {
@@ -241,9 +208,6 @@ export class TriggerConfigService implements OnModuleInit {
             type: 'telegram',
             bot_name: entry['bot_name'] as string,
             bot_token: interpolateEnvVars(entry['bot_token'] as string),
-            webhook_secret: interpolateEnvVars(
-              entry['webhook_secret'] as string,
-            ),
             user_id: String(entry['user_id']),
             cwd: normalizeCwd(entry['cwd'] as string, 'telegram trigger cwd'),
             ...((typeof entry['chat_id'] === 'string' ||
@@ -438,20 +402,12 @@ export class TriggerConfigService implements OnModuleInit {
     const name = trigger['name'] as string | undefined;
     const botName = trigger['bot_name'] as string | undefined;
     const botToken = trigger['bot_token'] as string | undefined;
-    const webhookSecret = trigger['webhook_secret'] as string | undefined;
     const userId = trigger['user_id'];
     const cwd = trigger['cwd'] as string | undefined;
 
-    if (
-      !name ||
-      !botName ||
-      !botToken ||
-      !webhookSecret ||
-      userId === undefined ||
-      !cwd
-    ) {
+    if (!name || !botName || !botToken || userId === undefined || !cwd) {
       this.logger.warn(
-        `Telegram trigger missing required fields (name, bot_name, bot_token, webhook_secret, user_id, cwd): ${JSON.stringify(trigger)}`,
+        `Telegram trigger missing required fields (name, bot_name, bot_token, user_id, cwd): ${JSON.stringify(trigger)}`,
       );
       return false;
     }

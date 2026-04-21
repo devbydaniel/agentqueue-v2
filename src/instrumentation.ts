@@ -11,15 +11,11 @@ import { detectTracingProvider } from './config/detect-tracing-provider.js';
 
 async function initLangfuse(): Promise<void> {
   const { NodeSDK } = await import('@opentelemetry/sdk-node');
-  const { OTLPTraceExporter } = await import(
-    '@opentelemetry/exporter-trace-otlp-http'
-  );
-  const { SimpleSpanProcessor } = await import(
-    '@opentelemetry/sdk-trace-base'
-  );
+  const { OTLPTraceExporter } =
+    await import('@opentelemetry/exporter-trace-otlp-http');
+  const { SimpleSpanProcessor } = await import('@opentelemetry/sdk-trace-base');
 
-  const baseUrl =
-    process.env.LANGFUSE_BASE_URL ?? 'https://cloud.langfuse.com';
+  const baseUrl = process.env.LANGFUSE_BASE_URL ?? 'https://cloud.langfuse.com';
   const publicKey = process.env.LANGFUSE_PUBLIC_KEY ?? '';
   const secretKey = process.env.LANGFUSE_SECRET_KEY ?? '';
 
@@ -56,9 +52,8 @@ async function initPhoenix(): Promise<void> {
 }
 
 async function instrumentClaudeSDK(): Promise<void> {
-  const { ClaudeAgentSDKInstrumentation } = await import(
-    '@arizeai/openinference-instrumentation-claude-agent-sdk'
-  );
+  const { ClaudeAgentSDKInstrumentation } =
+    await import('@arizeai/openinference-instrumentation-claude-agent-sdk');
   const ClaudeAgentSDK = await import('@anthropic-ai/claude-agent-sdk');
 
   const instrumentation = new ClaudeAgentSDKInstrumentation();

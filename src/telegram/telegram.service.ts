@@ -1,9 +1,19 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, type OnModuleDestroy } from '@nestjs/common';
 import { TriggerConfigService } from '../config/trigger-config.service.js';
 import { ExternalSessionRepository } from '../runs/external-session.repository.js';
 
 const TELEGRAM_API_BASE_URL = 'https://api.telegram.org';
 const TELEGRAM_MESSAGE_CHUNK_SIZE = 4000;
+// Telegram expires a chat action after 5s, so we refresh well before that.
+const TYPING_REFRESH_INTERVAL_MS = 4000;
+
+export const NEW_SESSION_BUTTON = '🆕 New Session';
+
+const PERSISTENT_KEYBOARD = {
+  keyboard: [[{ text: NEW_SESSION_BUTTON }]],
+  resize_keyboard: true,
+  is_persistent: true,
+};
 
 function chunkMessage(text: string): string[] {
   if (text.length <= TELEGRAM_MESSAGE_CHUNK_SIZE) {
@@ -28,30 +38,53 @@ function chunkMessage(text: string): string[] {
 }
 
 @Injectable()
-export class TelegramService {
+export class TelegramService implements OnModuleDestroy {
   private readonly logger = new Logger(TelegramService.name);
+  private readonly typingTimers = new Map<string, NodeJS.Timeout>();
 
   constructor(
     private readonly triggerConfigService: TriggerConfigService,
     private readonly externalSessionRepository: ExternalSessionRepository,
   ) {}
 
-  async sendAcknowledgement(params: {
+  onModuleDestroy(): void {
+    for (const timer of this.typingTimers.values()) {
+      clearInterval(timer);
+    }
+    this.typingTimers.clear();
+  }
+
+  startTypingIndicator(params: {
+    sessionKey: string;
     botToken: string;
     chatId: string;
     messageThreadId?: number;
-    replyToMessageId?: number;
-  }): Promise<void> {
-    await this.sendMessage(params.botToken, {
-      chat_id: params.chatId,
-      text: 'Queued. I will reply here when it is done.',
-      ...(params.messageThreadId !== undefined
-        ? { message_thread_id: params.messageThreadId }
-        : {}),
-      ...(params.replyToMessageId !== undefined
-        ? { reply_parameters: { message_id: params.replyToMessageId } }
-        : {}),
-    });
+  }): void {
+    this.stopTypingIndicator(params.sessionKey);
+
+    const fire = (): void => {
+      void this.sendChatAction(params.botToken, params.chatId, {
+        messageThreadId: params.messageThreadId,
+      }).catch((error: unknown) => {
+        this.logger.debug('Telegram typing action failed', {
+          error: error as Error,
+          sessionKey: params.sessionKey,
+        });
+      });
+    };
+
+    // Fire immediately so the user sees the indicator without waiting a tick
+    fire();
+    const timer = setInterval(fire, TYPING_REFRESH_INTERVAL_MS);
+    this.typingTimers.set(params.sessionKey, timer);
+  }
+
+  stopTypingIndicator(sessionKey: string): void {
+    const timer = this.typingTimers.get(sessionKey);
+    if (timer) {
+      clearInterval(timer);
+      this.typingTimers.delete(sessionKey);
+    }
   }
 
   async sendDirectMessage(params: {
@@ -88,6 +121,9 @@ export class TelegramService {
     sessionKey: string,
     message: string,
   ): Promise<void> {
+    // Always stop the typing indicator; the response (or error) replaces it.
+    this.stopTypingIndicator(sessionKey);
+
     const trigger = this.triggerConfigService.getTelegramTrigger(triggerName);
     if (!trigger) {
       this.logger.warn(`Telegram trigger "${triggerName}" not found`);
@@ -96,7 +132,7 @@ export class TelegramService {
 
     const session =
       await this.externalSessionRepository.findBySessionKey(sessionKey);
-    if (!session || session.provider !== 'telegram' || !session.chatId) {
+    if (session?.provider !== 'telegram' || !session.chatId) {
       this.logger.debug('Skipping Telegram reply because session is missing', {
         triggerName,
         sessionKey,
@@ -109,6 +145,34 @@ export class TelegramService {
     });
   }
 
+  private async sendChatAction(
+    botToken: string,
+    chatId: string,
+    options: { messageThreadId?: number } = {},
+  ): Promise<void> {
+    const response = await fetch(
+      `${TELEGRAM_API_BASE_URL}/bot${botToken}/sendChatAction`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          action: 'typing',
+          ...(options.messageThreadId !== undefined
+            ? { message_thread_id: options.messageThreadId }
+            : {}),
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(
+        `Telegram API sendChatAction failed (${response.status}): ${errorText}`,
+      );
+    }
+  }
+
   private async sendChunkedText(
     botToken: string,
     chatId: string,
@@ -119,16 +183,19 @@ export class TelegramService {
     },
   ): Promise<void> {
     const chunks = chunkMessage(text);
-    for (const chunk of chunks) {
+    for (let i = 0; i < chunks.length; i++) {
+      const isLast = i === chunks.length - 1;
       await this.sendMessage(botToken, {
         chat_id: chatId,
-        text: chunk,
+        // eslint-disable-next-line security/detect-object-injection -- i is our own numeric loop counter
+        text: chunks[i],
         ...(options.messageThreadId !== undefined
           ? { message_thread_id: options.messageThreadId }
           : {}),
         ...(options.replyToMessageId !== undefined
           ? { reply_parameters: { message_id: options.replyToMessageId } }
           : {}),
+        ...(isLast ? { reply_markup: PERSISTENT_KEYBOARD } : {}),
       });
     }
   }

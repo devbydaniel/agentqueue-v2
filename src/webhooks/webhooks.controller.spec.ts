@@ -1,13 +1,11 @@
 import { WebhooksController } from './webhooks.controller.js';
 import type { LinearWebhooksService } from './linear-webhooks.service.js';
 import type { GithubWebhooksService } from './github-webhooks.service.js';
-import type { TelegramWebhooksService } from './telegram-webhooks.service.js';
 
 describe('WebhooksController', () => {
   let controller: WebhooksController;
   let linearWebhooksService: jest.Mocked<LinearWebhooksService>;
   let githubWebhooksService: jest.Mocked<GithubWebhooksService>;
-  let telegramWebhooksService: jest.Mocked<TelegramWebhooksService>;
 
   beforeEach(() => {
     linearWebhooksService = {
@@ -18,16 +16,9 @@ describe('WebhooksController', () => {
       handleWebhook: jest.fn().mockReturnValue({ triggered: 1 }),
     } as unknown as jest.Mocked<GithubWebhooksService>;
 
-    telegramWebhooksService = {
-      handleWebhook: jest
-        .fn()
-        .mockResolvedValue({ accepted: true, handled: true }),
-    } as unknown as jest.Mocked<TelegramWebhooksService>;
-
     controller = new WebhooksController(
       linearWebhooksService,
       githubWebhooksService,
-      telegramWebhooksService,
     );
   });
 
@@ -75,31 +66,6 @@ describe('WebhooksController', () => {
       signatureHeader: 'sha256=abc',
       eventType: 'issues',
       body: { action: 'opened' },
-    });
-  });
-
-  it('should delegate Telegram webhooks and return the handler result', async () => {
-    const req = {
-      headers: {
-        'x-telegram-bot-api-secret-token': 'secret',
-      },
-      body: {
-        message: {
-          message_id: 10,
-          text: 'hello',
-          chat: { id: 123 },
-          from: { id: 456 },
-        },
-      },
-    };
-
-    const result = await controller.handleTelegramWebhook('main-bot', req);
-
-    expect(result).toEqual({ accepted: true, handled: true });
-    expect(telegramWebhooksService.handleWebhook).toHaveBeenCalledWith({
-      botName: 'main-bot',
-      secretTokenHeader: 'secret',
-      body: req.body,
     });
   });
 });

@@ -9,6 +9,7 @@ import { RunsModule } from './runs/runs.module.js';
 import { TriggersModule } from './triggers/triggers.module.js';
 import { WebhooksModule } from './webhooks/webhooks.module.js';
 import { FlowsModule } from './flows/flows.module.js';
+import { TelegramPollerModule } from './telegram/telegram-poller.module.js';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { FlowsModule } from './flows/flows.module.js';
     TriggersModule,
     WebhooksModule,
     FlowsModule,
+    TelegramPollerModule,
   ],
 })
 export class AppModule {}
