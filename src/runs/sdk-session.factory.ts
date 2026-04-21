@@ -87,6 +87,11 @@ export class SdkSessionFactory {
       settingSources: ['project'],
     };
 
+    if (process.env.AGENTQUEUE_CLAUDE_PATH) {
+      sdkOptions.pathToClaudeCodeExecutable =
+        process.env.AGENTQUEUE_CLAUDE_PATH;
+    }
+
     if (options.runId) {
       sdkOptions.env = {
         ...process.env,
