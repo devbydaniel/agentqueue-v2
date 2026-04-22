@@ -46,7 +46,7 @@ ok "Up to date"
 
 #─── Install & Build ──────────────────────────────────────────────────────────
 info "Installing dependencies"
-npm ci --ignore-scripts 2>&1 | tail -1
+npm ci --include=dev --ignore-scripts 2>&1 | tail -1
 npm rebuild 2>&1 | tail -1
 ok "Dependencies installed"
 
