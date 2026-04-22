@@ -34,7 +34,7 @@ export class LinearWebhookParserService {
   verifyTimestamp(webhookTimestamp: number): boolean {
     const now = Date.now();
     const age = now - webhookTimestamp;
-    return age <= 60_000;
+    return age <= 8 * 60 * 60 * 1000;
   }
 
   parsePayload(body: unknown): LinearWebhookPayload {

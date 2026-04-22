@@ -39,18 +39,25 @@ describe('LinearWebhookParserService', () => {
   });
 
   describe('verifyTimestamp', () => {
+    const EIGHT_HOURS_MS = 8 * 60 * 60 * 1000;
+
     it('should return true for a fresh timestamp', () => {
       const fresh = Date.now() - 5_000; // 5 seconds ago
       expect(service.verifyTimestamp(fresh)).toBe(true);
     });
 
-    it('should return false for a stale timestamp (>60s)', () => {
-      const stale = Date.now() - 120_000; // 2 minutes ago
+    it('should return true for a timestamp a few minutes old', () => {
+      const recent = Date.now() - 5 * 60_000; // 5 minutes ago
+      expect(service.verifyTimestamp(recent)).toBe(true);
+    });
+
+    it('should return false for a timestamp older than 8 hours', () => {
+      const stale = Date.now() - (EIGHT_HOURS_MS + 60_000);
       expect(service.verifyTimestamp(stale)).toBe(false);
     });
 
-    it('should return true for exactly 60 seconds', () => {
-      const edge = Date.now() - 60_000;
+    it('should return true at exactly 8 hours', () => {
+      const edge = Date.now() - EIGHT_HOURS_MS;
       expect(service.verifyTimestamp(edge)).toBe(true);
     });
   });
