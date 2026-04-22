@@ -25,7 +25,9 @@ NODE_MAJOR=$(node -v | sed 's/v\([0-9]*\).*/\1/')
 [[ -f .env ]] || fail ".env file missing — copy .env.example and fill in values"
 
 # shellcheck disable=SC1091
+set -a
 source .env 2>/dev/null || true
+set +a
 [[ -n "${DATABASE_URL:-}" ]] || fail "DATABASE_URL not set — check .env"
 
 info "Checking database reachability"
