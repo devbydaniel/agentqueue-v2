@@ -47,7 +47,7 @@ npm install
 cp .env.example .env
 
 # Start dev Postgres (Docker required)
-docker compose -f docker-compose.dev.yml up -d
+docker compose -f docker-compose.services.yml up -d
 
 # Run database migrations
 npm run db:migrate
@@ -65,7 +65,7 @@ AgentQueue uses Postgres for run persistence and job queueing.
 
 ```bash
 # Start local Postgres
-docker compose -f docker-compose.dev.yml up -d
+docker compose -f docker-compose.services.yml up -d
 
 # Apply migrations
 npm run db:migrate
@@ -493,8 +493,8 @@ systemctl --user stop agentqueue     # Stop
 ## Docker
 
 ```bash
-# Development — start supporting services (Postgres)
-docker compose -f docker-compose.dev.yml up -d
+# Supporting services (Postgres) — dev or single-host prod
+docker compose -f docker-compose.services.yml up -d
 
 # Production — full stack (app + Postgres)
 docker compose up -d
