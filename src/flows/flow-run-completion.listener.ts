@@ -43,7 +43,7 @@ export class FlowRunCompletionListener
     });
 
     await this.client.connect();
-    // eslint-disable-next-line sonarjs/sql-queries -- channel name is a constant, not user input
+
     await this.client.query(`LISTEN ${RUN_COMPLETED_CHANNEL}`);
 
     this.client.on('notification', (msg) => {
