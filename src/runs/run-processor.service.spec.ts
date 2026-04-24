@@ -5,23 +5,26 @@ import type {
 } from '@anthropic-ai/claude-agent-sdk';
 import { RunProcessorService } from './run-processor.service.js';
 import { AppConfigService } from '../config/app-config.service.js';
-import { LinearCallbackHandlerFactory } from '../callbacks/handlers/linear.callback-handler.js';
-import { TracingEnrichmentHandlerFactory } from '../callbacks/handlers/tracing-enrichment.callback-handler.js';
 import {
   SdkSessionFactory,
   type SdkSessionHandle,
 } from './sdk-session.factory.js';
 import { ActiveSessionTrackerService } from './active-session-tracker.service.js';
 import { RunRepository } from './run.repository.js';
+import { ExternalSessionRepository } from './external-session.repository.js';
 import { RunCompletionNotifier } from './run-completion.notifier.js';
 import { RunEventRepository } from './run-event.repository.js';
 import { RUN_EVENT_HANDLERS } from '../callbacks/constants.js';
 import type { RunEventHandler } from '../callbacks/run-event-handler.interface.js';
 import type { Run } from '../database/runs.schema.js';
-import { TelegramService } from '../telegram/telegram.service.js';
-import { SlackStreamingCallbackHandlerFactory } from '../slack/slack-streaming.callback-handler.js';
 import { AgentProfileService } from '../agents/agent-profile.service.js';
-import { ExternalSessionRepository } from './external-session.repository.js';
+import { RunLifecycleService } from './run-lifecycle.service.js';
+import { RunHandlerBuilder } from './run-handler-builder.service.js';
+import { RunSourceNotifier } from './run-source-notifier.service.js';
+import { LinearCallbackHandlerFactory } from '../callbacks/handlers/linear.callback-handler.js';
+import { SlackStreamingCallbackHandlerFactory } from '../slack/slack-streaming.callback-handler.js';
+import { TracingEnrichmentHandlerFactory } from '../callbacks/handlers/tracing-enrichment.callback-handler.js';
+import { TelegramService } from '../telegram/telegram.service.js';
 
 /** Build a mock SdkSessionHandle whose async generator throws immediately. */
 function makeThrowingHandle(error: Error): SdkSessionHandle {
@@ -60,11 +63,11 @@ describe('RunProcessorService', () => {
   let sdkSessionFactory: SdkSessionFactory;
   let activeSessionTracker: ActiveSessionTrackerService;
   let runRepository: RunRepository;
-  let runCompletionNotifier: RunCompletionNotifier;
-  let runEventRepository: RunEventRepository;
-  let linearCallbackHandlerFactory: LinearCallbackHandlerFactory;
-  let telegramService: TelegramService;
-  let tracingEnrichmentHandlerFactory: TracingEnrichmentHandlerFactory;
+  let runCompletionNotifier: jest.Mocked<RunCompletionNotifier>;
+  let telegramService: jest.Mocked<TelegramService>;
+  let linearFactory: jest.Mocked<LinearCallbackHandlerFactory>;
+  let tracingFactory: jest.Mocked<TracingEnrichmentHandlerFactory>;
+  let mockRunEventAppend: jest.Mock;
 
   /** Messages that the mock SDK session will yield. Set before calling runSession/processRun. */
   let mockMessages: SDKMessage[];
@@ -127,15 +130,17 @@ describe('RunProcessorService', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
     mockMessages = [defaultResult];
+    mockRunEventAppend = jest.fn().mockResolvedValue(undefined);
 
     const module = await Test.createTestingModule({
       providers: [
         RunProcessorService,
+        RunLifecycleService,
+        RunHandlerBuilder,
+        RunSourceNotifier,
         {
           provide: AppConfigService,
-          useValue: {
-            runTimeoutMs: 1800000,
-          },
+          useValue: { runTimeoutMs: 1800000 },
         },
         {
           provide: SdkSessionFactory,
@@ -161,6 +166,13 @@ describe('RunProcessorService', () => {
           },
         },
         {
+          provide: ExternalSessionRepository,
+          useValue: {
+            findSessionId: jest.fn().mockResolvedValue(null),
+            upsertSession: jest.fn().mockResolvedValue(undefined),
+          },
+        },
+        {
           provide: RunCompletionNotifier,
           useValue: {
             notify: jest.fn().mockResolvedValue(undefined),
@@ -169,9 +181,13 @@ describe('RunProcessorService', () => {
         {
           provide: RunEventRepository,
           useValue: {
-            append: jest.fn().mockResolvedValue(undefined),
+            append: mockRunEventAppend,
             findByRunId: jest.fn().mockResolvedValue([]),
           },
+        },
+        {
+          provide: AgentProfileService,
+          useValue: { getProfile: jest.fn().mockReturnValue(undefined) },
         },
         {
           provide: LinearCallbackHandlerFactory,
@@ -180,29 +196,9 @@ describe('RunProcessorService', () => {
           },
         },
         {
-          provide: TelegramService,
-          useValue: {
-            emitRunResponse: jest.fn().mockResolvedValue(undefined),
-            emitRunError: jest.fn().mockResolvedValue(undefined),
-          },
-        },
-        {
           provide: SlackStreamingCallbackHandlerFactory,
           useValue: {
             createForRun: jest.fn().mockReturnValue(undefined),
-          },
-        },
-        {
-          provide: AgentProfileService,
-          useValue: {
-            getProfile: jest.fn().mockReturnValue(undefined),
-          },
-        },
-        {
-          provide: ExternalSessionRepository,
-          useValue: {
-            findSessionId: jest.fn().mockResolvedValue(null),
-            upsertSession: jest.fn().mockResolvedValue(undefined),
           },
         },
         {
@@ -221,6 +217,13 @@ describe('RunProcessorService', () => {
           },
         },
         {
+          provide: TelegramService,
+          useValue: {
+            emitRunResponse: jest.fn().mockResolvedValue(undefined),
+            emitRunError: jest.fn().mockResolvedValue(undefined),
+          },
+        },
+        {
           provide: RUN_EVENT_HANDLERS,
           useValue: [mockGlobalHandler],
         },
@@ -232,12 +235,9 @@ describe('RunProcessorService', () => {
     activeSessionTracker = module.get(ActiveSessionTrackerService);
     runRepository = module.get(RunRepository);
     runCompletionNotifier = module.get(RunCompletionNotifier);
-    runEventRepository = module.get(RunEventRepository);
-    linearCallbackHandlerFactory = module.get(LinearCallbackHandlerFactory);
     telegramService = module.get(TelegramService);
-    tracingEnrichmentHandlerFactory = module.get(
-      TracingEnrichmentHandlerFactory,
-    );
+    linearFactory = module.get(LinearCallbackHandlerFactory);
+    tracingFactory = module.get(TracingEnrichmentHandlerFactory);
   });
 
   describe('runSession', () => {
@@ -485,9 +485,10 @@ describe('RunProcessorService', () => {
         traceContext: mockTraceContext,
       });
 
-      expect(
-        tracingEnrichmentHandlerFactory.wrapWithContext,
-      ).toHaveBeenCalledWith(mockTraceContext, expect.any(Function));
+      expect(tracingFactory.wrapWithContext).toHaveBeenCalledWith(
+        mockTraceContext,
+        expect.any(Function),
+      );
     });
   });
 
@@ -564,9 +565,7 @@ describe('RunProcessorService', () => {
       expect(savedStates[1].completedAt).toBeInstanceOf(Date);
 
       expect(sdkSessionFactory.create).toHaveBeenCalled();
-      expect(tracingEnrichmentHandlerFactory.createForRun).toHaveBeenCalledWith(
-        run,
-      );
+      expect(tracingFactory.createForRun).toHaveBeenCalledWith(run);
     });
 
     it('should mark run as errored when session throws', async () => {
@@ -612,7 +611,7 @@ describe('RunProcessorService', () => {
         emitError: jest.fn().mockResolvedValue(undefined),
         flush: jest.fn().mockResolvedValue(undefined),
       };
-      (linearCallbackHandlerFactory.createForRun as jest.Mock).mockReturnValue(
+      (linearFactory.createForRun as jest.Mock).mockReturnValue(
         mockLinearHandler,
       );
       const run = makeRun({
@@ -624,7 +623,7 @@ describe('RunProcessorService', () => {
 
       await service.processRun('run-123');
 
-      expect(linearCallbackHandlerFactory.createForRun).toHaveBeenCalledWith(
+      expect(linearFactory.createForRun).toHaveBeenCalledWith(
         'my-agent',
         'linear-session-id',
       );
@@ -632,9 +631,7 @@ describe('RunProcessorService', () => {
     });
 
     it('should not attach linear handler when factory returns undefined', async () => {
-      (linearCallbackHandlerFactory.createForRun as jest.Mock).mockReturnValue(
-        undefined,
-      );
+      (linearFactory.createForRun as jest.Mock).mockReturnValue(undefined);
       const run = makeRun({
         source: 'linear',
         externalSessionId: 'linear-session-id',
@@ -658,7 +655,7 @@ describe('RunProcessorService', () => {
         emitError: jest.fn().mockResolvedValue(undefined),
         flush: jest.fn().mockResolvedValue(undefined),
       };
-      (linearCallbackHandlerFactory.createForRun as jest.Mock).mockReturnValue(
+      (linearFactory.createForRun as jest.Mock).mockReturnValue(
         mockLinearHandler,
       );
       const run = makeRun({
@@ -809,7 +806,7 @@ describe('RunProcessorService', () => {
       await service.processRun('run-123');
 
       // Registry handler should have persisted assistant and result but NOT stream_event
-      const appendCalls = (runEventRepository.append as jest.Mock).mock.calls;
+      const appendCalls = mockRunEventAppend.mock.calls;
       const persistedTypes = appendCalls.map(
         (call: [string, string, unknown]) => call[1],
       );

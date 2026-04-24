@@ -57,6 +57,12 @@ export default tseslint.config(
       eqeqeq: 'error',
       'unused-imports/no-unused-imports': 'error',
       'no-console': ['error', { allow: ['warn', 'error'] }],
+      complexity: ['error', 15],
+      'max-lines-per-function': [
+        'error',
+        { max: 75, skipBlankLines: true, skipComments: true, IIFEs: true },
+      ],
+      'max-params': ['error', 7],
 
       // Warn — tighten over time
       '@typescript-eslint/no-unnecessary-condition': 'warn',
@@ -82,6 +88,19 @@ export default tseslint.config(
       '@typescript-eslint/require-await': 'off',
       'no-console': 'off',
       'security/detect-object-injection': 'off',
+      'sonarjs/hardcoded-secret-signatures': 'off',
+      complexity: 'off',
+      'max-lines-per-function': 'off',
+      'max-params': 'off',
+    },
+  },
+  // Migrations and generated code: skip complexity metrics
+  {
+    files: ['src/database/migrations/**/*.ts', 'src/**/generated/**/*.ts'],
+    rules: {
+      complexity: 'off',
+      'max-lines-per-function': 'off',
+      'max-params': 'off',
     },
   },
 );

@@ -478,7 +478,6 @@ npm run format:check    # Check formatting
 npm run deps:check      # Dependency-cruiser architecture checks
 
 # Local quality scripts
-./scripts/check-complexity.sh
 ./scripts/check-duplication.sh
 ./scripts/check-file-size.sh
 
@@ -507,7 +506,6 @@ The production compose builds the app from the `Dockerfile`, wires it to Postgre
 | Workflow | Description |
 |---|---|
 | `lint-and-test.yml` | ESLint + Jest on every push/PR |
-| `complexity-check.yml` | Flag overly complex functions |
 | `dead-code.yml` | Detect unused exports |
 | `dependency-check.yml` | Circular dependency detection |
 | `duplication-check.yml` | Code duplication analysis |

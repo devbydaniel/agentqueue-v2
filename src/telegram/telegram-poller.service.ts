@@ -119,6 +119,20 @@ export class TelegramPollerService implements OnModuleInit, OnModuleDestroy {
     const allowedUserIds = new Set(triggers.map((t) => t.user_id));
     const bot = new Bot(botToken);
 
+    this.registerAuthMiddleware(bot, botName, allowedUserIds);
+    this.registerTextHandler(bot, botName);
+    this.registerPhotoHandler(bot, botName, botToken);
+    this.registerDocumentHandler(bot, botName, botToken);
+    this.registerAudioHandlers(bot, botName, botToken);
+
+    return bot;
+  }
+
+  private registerAuthMiddleware(
+    bot: Bot,
+    botName: string,
+    allowedUserIds: Set<string>,
+  ): void {
     bot.use(async (ctx, next) => {
       const userId = ctx.from?.id;
       if (userId === undefined || !allowedUserIds.has(String(userId))) {
@@ -130,7 +144,9 @@ export class TelegramPollerService implements OnModuleInit, OnModuleDestroy {
       }
       await next();
     });
+  }
 
+  private registerTextHandler(bot: Bot, botName: string): void {
     bot.on('message:text', (ctx) => {
       const context = this.extractContext(botName, ctx);
       if (!context) return;
@@ -144,7 +160,13 @@ export class TelegramPollerService implements OnModuleInit, OnModuleDestroy {
         text: ctx.message.text,
       });
     });
+  }
 
+  private registerPhotoHandler(
+    bot: Bot,
+    botName: string,
+    botToken: string,
+  ): void {
     bot.on('message:photo', async (ctx) => {
       const context = this.extractContext(botName, ctx);
       if (!context) return;
@@ -176,7 +198,13 @@ export class TelegramPollerService implements OnModuleInit, OnModuleDestroy {
         await ctx.reply('Failed to download image.').catch(() => {});
       }
     });
+  }
 
+  private registerDocumentHandler(
+    bot: Bot,
+    botName: string,
+    botToken: string,
+  ): void {
     bot.on('message:document', async (ctx) => {
       const context = this.extractContext(botName, ctx);
       if (!context) return;
@@ -210,7 +238,13 @@ export class TelegramPollerService implements OnModuleInit, OnModuleDestroy {
         await ctx.reply('Failed to download document.').catch(() => {});
       }
     });
+  }
 
+  private registerAudioHandlers(
+    bot: Bot,
+    botName: string,
+    botToken: string,
+  ): void {
     bot.on('message:voice', async (ctx) => {
       const context = this.extractContext(botName, ctx);
       if (!context) return;
@@ -236,8 +270,6 @@ export class TelegramPollerService implements OnModuleInit, OnModuleDestroy {
         '.mp3',
       );
     });
-
-    return bot;
   }
 
   private async handleAudioLike(

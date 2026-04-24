@@ -278,32 +278,59 @@ export class AgentProfileService implements OnModuleInit {
     }
 
     const entry = value as Record<string, unknown>;
-    const type = entry['type'] as string | undefined;
+    const type = this.validateMcpServerType(profileName, key, entry);
+    if (!type) return null;
 
+    if (!this.validateMcpServerRequiredFields(profileName, key, type, entry)) {
+      return null;
+    }
+
+    return this.buildMcpServerProfile(type, entry);
+  }
+
+  private validateMcpServerType(
+    profileName: string,
+    key: string,
+    entry: Record<string, unknown>,
+  ): McpServerProfile['type'] | null {
+    const type = entry['type'] as string | undefined;
     if (!type || !['stdio', 'sse', 'http'].includes(type)) {
       this.logger.warn(
         `Profile "${profileName}" mcp_server "${key}" has invalid or missing "type" (must be stdio, sse, or http)`,
       );
       return null;
     }
+    return type as McpServerProfile['type'];
+  }
 
+  private validateMcpServerRequiredFields(
+    profileName: string,
+    key: string,
+    type: McpServerProfile['type'],
+    entry: Record<string, unknown>,
+  ): boolean {
     if (type === 'stdio' && !entry['command']) {
       this.logger.warn(
         `Profile "${profileName}" mcp_server "${key}" (stdio) missing required "command" field`,
       );
-      return null;
+      return false;
     }
 
     if ((type === 'sse' || type === 'http') && !entry['url']) {
       this.logger.warn(
         `Profile "${profileName}" mcp_server "${key}" (${type}) missing required "url" field`,
       );
-      return null;
+      return false;
     }
 
-    const server: McpServerProfile = {
-      type: type as McpServerProfile['type'],
-    };
+    return true;
+  }
+
+  private buildMcpServerProfile(
+    type: McpServerProfile['type'],
+    entry: Record<string, unknown>,
+  ): McpServerProfile {
+    const server: McpServerProfile = { type };
 
     if (entry['command']) server.command = entry['command'] as string;
     if (entry['args'] && Array.isArray(entry['args']))

@@ -13,6 +13,9 @@ import { RunRepository } from './run.repository.js';
 import { RunCompletionNotifier } from './run-completion.notifier.js';
 import { RunEventRepository } from './run-event.repository.js';
 import { RunStartupRecoveryService } from './run-startup-recovery.service.js';
+import { RunLifecycleService } from './run-lifecycle.service.js';
+import { RunHandlerBuilder } from './run-handler-builder.service.js';
+import { RunSourceNotifier } from './run-source-notifier.service.js';
 
 @Module({
   imports: [CallbacksModule, TelegramModule, SlackModule, AgentsModule],
@@ -27,6 +30,9 @@ import { RunStartupRecoveryService } from './run-startup-recovery.service.js';
     RunCompletionNotifier,
     RunEventRepository,
     RunStartupRecoveryService,
+    RunLifecycleService,
+    RunHandlerBuilder,
+    RunSourceNotifier,
   ],
   exports: [RunsService, RunRepository],
 })

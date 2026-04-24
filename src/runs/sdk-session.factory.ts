@@ -87,22 +87,43 @@ export class SdkSessionFactory {
       settingSources: ['project'],
     };
 
+    this.applyExecutableOverride(sdkOptions);
+    this.applyRunIdEnv(sdkOptions, options.runId);
+
+    const profile = options.profile;
+    sdkOptions.model = profile?.model ?? DEFAULT_MODEL;
+
+    this.applySystemPrompt(sdkOptions, options, profile);
+    this.applyProfileOptions(sdkOptions, profile);
+
+    if (options.resumeSessionId) {
+      sdkOptions.resume = options.resumeSessionId;
+    }
+
+    return sdkOptions;
+  }
+
+  private applyExecutableOverride(sdkOptions: Options): void {
     if (process.env.AGENTQUEUE_CLAUDE_PATH) {
       sdkOptions.pathToClaudeCodeExecutable =
         process.env.AGENTQUEUE_CLAUDE_PATH;
     }
+  }
 
-    if (options.runId) {
+  private applyRunIdEnv(sdkOptions: Options, runId: string | undefined): void {
+    if (runId) {
       sdkOptions.env = {
         ...process.env,
-        AGENTQUEUE_RUN_ID: options.runId,
+        AGENTQUEUE_RUN_ID: runId,
       };
     }
+  }
 
-    const profile = options.profile;
-
-    sdkOptions.model = profile?.model ?? DEFAULT_MODEL;
-
+  private applySystemPrompt(
+    sdkOptions: Options,
+    options: CreateSdkSessionOptions,
+    profile: AgentProfile | undefined,
+  ): void {
     const promptParts = this.collectSystemPromptParts(
       profile?.append_prompt,
       options.additionalSystemPrompts,
@@ -115,28 +136,24 @@ export class SdkSessionFactory {
         append: promptParts.join('\n\n'),
       };
     }
+  }
 
+  private applyProfileOptions(
+    sdkOptions: Options,
+    profile: AgentProfile | undefined,
+  ): void {
     if (profile?.tools) {
       sdkOptions.allowedTools = profile.tools;
     }
-
     if (profile?.max_turns) {
       sdkOptions.maxTurns = profile.max_turns;
     }
-
     if (profile?.subagents) {
       sdkOptions.agents = this.mapSubagents(profile.subagents);
     }
-
     if (profile?.mcp_servers) {
       sdkOptions.mcpServers = this.mapMcpServers(profile.mcp_servers);
     }
-
-    if (options.resumeSessionId) {
-      sdkOptions.resume = options.resumeSessionId;
-    }
-
-    return sdkOptions;
   }
 
   private collectSystemPromptParts(

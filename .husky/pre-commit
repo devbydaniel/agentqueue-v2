@@ -53,15 +53,6 @@ run_tsc() {
   set -e
 }
 
-run_complexity() {
-  STATUS_FILE="$STATUS_DIR/complexity.status"
-  print_section "Complexity (staged TS)"
-  set +e
-  printf "%s" "$TS_STAGED" | tr '\n' ' ' | xargs ./scripts/check-complexity.sh
-  printf "%s" "$?" > "$STATUS_FILE"
-  set -e
-}
-
 run_depcruise() {
   STATUS_FILE="$STATUS_DIR/depcruise.status"
   print_section "Dependencies (dependency-cruiser)"
@@ -120,7 +111,6 @@ if [ -n "$TS_STAGED" ]; then
   run_prettier &
   run_eslint &
   run_tsc &
-  run_complexity &
   run_depcruise &
   run_duplication &
   run_file_size &
@@ -136,7 +126,6 @@ wait
 PRETTIER_STATUS=$(cat "$STATUS_DIR/prettier.status" 2>/dev/null || printf "0")
 ESLINT_STATUS=$(cat "$STATUS_DIR/eslint.status" 2>/dev/null || printf "0")
 TSC_STATUS=$(cat "$STATUS_DIR/tsc.status" 2>/dev/null || printf "0")
-COMPLEXITY_STATUS=$(cat "$STATUS_DIR/complexity.status" 2>/dev/null || printf "0")
 DEPCRUISE_STATUS=$(cat "$STATUS_DIR/depcruise.status" 2>/dev/null || printf "0")
 DUPLICATION_STATUS=$(cat "$STATUS_DIR/duplication.status" 2>/dev/null || printf "0")
 FILE_SIZE_STATUS=$(cat "$STATUS_DIR/file_size.status" 2>/dev/null || printf "0")
@@ -146,7 +135,7 @@ MARKDOWNLINT_STATUS=$(cat "$STATUS_DIR/markdownlint.status" 2>/dev/null || print
 FAILED=0
 
 if [ -n "$TS_STAGED" ]; then
-  for CHECK in "PRETTIER:Prettier" "ESLINT:ESLint" "TSC:TypeScript" "COMPLEXITY:Complexity" "DEPCRUISE:Dependencies" "DUPLICATION:Duplication" "FILE_SIZE:File size"; do
+  for CHECK in "PRETTIER:Prettier" "ESLINT:ESLint" "TSC:TypeScript" "DEPCRUISE:Dependencies" "DUPLICATION:Duplication" "FILE_SIZE:File size"; do
     VAR="${CHECK%%:*}_STATUS"; LABEL="${CHECK#*:}"
     STATUS=$(eval echo "\$$VAR")
     if [ "$STATUS" -ne 0 ]; then

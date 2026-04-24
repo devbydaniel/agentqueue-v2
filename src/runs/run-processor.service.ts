@@ -5,29 +5,15 @@ import type {
 } from '@anthropic-ai/claude-agent-sdk';
 import { RUN_EVENT_HANDLERS } from '../callbacks/constants.js';
 import type { RunEventHandler } from '../callbacks/run-event-handler.interface.js';
-import { AssistantMessageCallbackHandler } from '../callbacks/handlers/assistant-message.callback-handler.js';
-import { TracingEnrichmentHandlerFactory } from '../callbacks/handlers/tracing-enrichment.callback-handler.js';
 import type { TraceContext } from '../callbacks/build-trace-context.js';
-import {
-  LinearCallbackHandler,
-  LinearCallbackHandlerFactory,
-} from '../callbacks/handlers/linear.callback-handler.js';
 import { AgentProfileService } from '../agents/agent-profile.service.js';
 import type { AgentProfile } from '../agents/agent-profile.interface.js';
-import { AppConfigService } from '../config/app-config.service.js';
 import { ActiveSessionTrackerService } from './active-session-tracker.service.js';
 import { SdkSessionFactory } from './sdk-session.factory.js';
-import { ExternalSessionRepository } from './external-session.repository.js';
-import { RunRepository } from './run.repository.js';
-import { RunCompletionNotifier } from './run-completion.notifier.js';
 import type { Run } from '../database/runs.schema.js';
-import { RunEventRepository } from './run-event.repository.js';
-import { RunEventCallbackHandler } from '../callbacks/handlers/run-event.callback-handler.js';
-import { TelegramService } from '../telegram/telegram.service.js';
-import {
-  SlackStreamingCallbackHandler,
-  SlackStreamingCallbackHandlerFactory,
-} from '../slack/slack-streaming.callback-handler.js';
+import { RunLifecycleService } from './run-lifecycle.service.js';
+import { RunHandlerBuilder } from './run-handler-builder.service.js';
+import { RunSourceNotifier } from './run-source-notifier.service.js';
 
 export interface RunSessionParams {
   cwd: string;
@@ -59,18 +45,12 @@ export class RunProcessorService {
   private readonly logger = new Logger(RunProcessorService.name);
 
   constructor(
-    private readonly appConfigService: AppConfigService,
     private readonly sdkSessionFactory: SdkSessionFactory,
     private readonly activeSessionTracker: ActiveSessionTrackerService,
-    private readonly runRepository: RunRepository,
-    private readonly runCompletionNotifier: RunCompletionNotifier,
-    private readonly externalSessionRepository: ExternalSessionRepository,
-    private readonly runEventRepository: RunEventRepository,
-    private readonly telegramService: TelegramService,
-    private readonly slackStreamingHandlerFactory: SlackStreamingCallbackHandlerFactory,
-    private readonly tracingEnrichmentHandlerFactory: TracingEnrichmentHandlerFactory,
-    private readonly linearCallbackHandlerFactory: LinearCallbackHandlerFactory,
     private readonly agentProfileService: AgentProfileService,
+    private readonly lifecycle: RunLifecycleService,
+    private readonly handlerBuilder: RunHandlerBuilder,
+    private readonly sourceNotifier: RunSourceNotifier,
     @Inject(RUN_EVENT_HANDLERS)
     private readonly globalHandlers: RunEventHandler[],
   ) {}
@@ -96,265 +76,64 @@ export class RunProcessorService {
    * write terminal status. Called by the queue worker.
    */
   async processRun(runId: string): Promise<void> {
-    const run = await this.runRepository.findById(runId);
-    if (!run) {
-      throw new Error(`Run ${runId} not found`);
-    }
+    const run = await this.lifecycle.loadForProcessing(runId);
+    if (!run) return;
 
-    // Guard against re-processing a terminal run (e.g. pg-boss retry)
-    if (run.status !== 'waiting') {
-      this.logger.warn('Skipping non-waiting run', {
-        runId,
-        status: run.status,
-      });
-      return;
-    }
-
-    // Resolve agent profile (if the run references one)
-    const profile = run.agentName
-      ? this.agentProfileService.getProfile(run.agentName)
-      : undefined;
-
-    if (run.agentName && !profile) {
-      this.logger.warn(
-        `Agent profile "${run.agentName}" not found — running without profile overrides`,
-        { runId },
-      );
-    }
-
+    const profile = this.resolveAgentProfile(run, runId);
     // Agent profile repo overrides the run's cwd (already expanded by AgentProfileService)
     const effectiveCwd = profile?.repo ?? run.cwd;
 
-    // Mark running
-    run.status = 'running';
-    run.startedAt = new Date();
-    run.attemptsMade = run.attemptsMade + 1;
-    await this.runRepository.save(run);
+    await this.lifecycle.markRunning(run);
 
-    // Build additional handlers
-    const {
-      additionalHandlers,
-      linearHandler,
-      assistantMessageHandler,
-      slackStreamingHandler,
-    } = this.buildSourceHandlers(run);
-    const { handler: tracingHandler, traceContext } =
-      this.tracingEnrichmentHandlerFactory.createForRun(run);
-    additionalHandlers.push(tracingHandler);
-
-    // Attach registry handler to persist filtered events
-    additionalHandlers.push(
-      new RunEventCallbackHandler(runId, this.runEventRepository),
-    );
-
-    // Per-run timeout: use the run's configured timeout, fall back to global default
-    const timeoutMs = run.timeoutMs ?? this.appConfigService.runTimeoutMs;
+    const bundle = this.handlerBuilder.buildForRun(run);
+    const timeoutMs = this.lifecycle.resolveTimeoutMs(run);
     const abortController = new AbortController();
     const timer = setTimeout(() => abortController.abort(), timeoutMs);
-
-    // Look up existing SDK session ID for resume
-    const resumeSessionId = run.externalSessionId
-      ? await this.externalSessionRepository.findSessionId(
-          run.externalSessionId,
-        )
-      : null;
+    const resumeSessionId = await this.lifecycle.resolveResumeSessionId(
+      run.externalSessionId,
+    );
 
     try {
       const result = await this.runSession({
         cwd: effectiveCwd,
         prompt: run.prompt,
         profile,
-        resumeSessionId: resumeSessionId ?? undefined,
+        resumeSessionId,
         externalSessionId: run.externalSessionId ?? undefined,
         runId,
         appendSystemPrompt: run.appendSystemPrompt ?? undefined,
-        additionalHandlers,
+        additionalHandlers: bundle.additionalHandlers,
         abortController,
-        traceContext,
+        traceContext: bundle.traceContext,
       });
 
-      // Persist SDK session ID for future resumes
-      if (run.externalSessionId && result.sessionId) {
-        await this.externalSessionRepository.upsertSession({
-          provider: run.source as 'linear' | 'telegram' | 'slack',
-          sessionKey: run.externalSessionId,
-          sessionId: result.sessionId,
-        });
-      }
-
-      run.status = 'succeeded';
-      run.completedAt = new Date();
-      await this.runRepository.save(run);
-      await this.runCompletionNotifier.notify(runId);
-
-      if (linearHandler) {
-        await this.emitSafe('Failed to emit success response to Linear', () =>
-          linearHandler.emitResponse(
-            linearHandler.getLastAssistantMessage() ?? 'Completed.',
-          ),
-        );
-      }
-
-      if (
-        run.source === 'telegram' &&
-        run.externalSessionId &&
-        run.triggerName
-      ) {
-        await this.emitSafe('Failed to emit Telegram reply', () =>
-          this.telegramService.emitRunResponse(
-            run.triggerName!,
-            run.externalSessionId!,
-            assistantMessageHandler?.getLastAssistantMessage() ?? 'Completed.',
-          ),
-        );
-      }
-
-      if (slackStreamingHandler) {
-        await this.emitSafe('Failed to emit Slack reply', () =>
-          slackStreamingHandler.finalize(),
-        );
-      }
+      await this.lifecycle.finalizeSuccess(run, result.sessionId);
+      await this.sourceNotifier.notifySuccess(run, bundle);
     } catch (error) {
-      await this.handleRunError(run, runId, error, {
+      await this.lifecycle.persistTerminalError(run, error, {
         isTimeout: abortController.signal.aborted,
         timeoutMs,
-        linearHandler,
-        slackStreamingHandler,
       });
+      await this.sourceNotifier.notifyError(run, bundle);
       throw error;
     } finally {
       clearTimeout(timer);
     }
   }
 
-  private async handleRunError(
+  private resolveAgentProfile(
     run: Run,
     runId: string,
-    error: unknown,
-    ctx: {
-      isTimeout: boolean;
-      timeoutMs: number;
-      linearHandler: LinearCallbackHandler | undefined;
-      slackStreamingHandler: SlackStreamingCallbackHandler | undefined;
-    },
-  ): Promise<void> {
-    // Re-read run from DB to avoid overwriting a terminal state set by abort
-    const freshRun = await this.runRepository.findById(runId);
-    const terminalStatuses = new Set([
-      'succeeded',
-      'errored',
-      'aborted',
-      'timed_out',
-      'interrupted',
-    ]);
-    if (freshRun && terminalStatuses.has(freshRun.status)) {
+  ): AgentProfile | undefined {
+    if (!run.agentName) return undefined;
+    const profile = this.agentProfileService.getProfile(run.agentName);
+    if (!profile) {
       this.logger.warn(
-        'Skipping errored write — run already in terminal state',
-        { runId, status: freshRun.status },
-      );
-    } else {
-      if (ctx.isTimeout) {
-        run.status = 'timed_out';
-        run.errorMessage = `Run timed out after ${ctx.timeoutMs}ms`;
-      } else {
-        run.status = 'errored';
-        run.errorMessage =
-          error instanceof Error ? error.message : 'Unknown error';
-      }
-      run.completedAt = new Date();
-      try {
-        await this.runRepository.save(run);
-        await this.runCompletionNotifier.notify(runId);
-      } catch (saveErr) {
-        this.logger.error('Failed to save errored run status', {
-          runId,
-          error: saveErr as Error,
-        });
-      }
-    }
-
-    const { linearHandler, slackStreamingHandler } = ctx;
-    if (linearHandler) {
-      await this.emitSafe('Failed to emit error to Linear', () =>
-        linearHandler.emitError(run.errorMessage!),
+        `Agent profile "${run.agentName}" not found — running without profile overrides`,
+        { runId },
       );
     }
-
-    if (run.source === 'telegram' && run.externalSessionId && run.triggerName) {
-      await this.emitSafe('Failed to emit Telegram reply', () =>
-        this.telegramService.emitRunError(
-          run.triggerName!,
-          run.externalSessionId!,
-          run.errorMessage!,
-        ),
-      );
-    }
-
-    if (slackStreamingHandler) {
-      await this.emitSafe('Failed to emit Slack reply', () =>
-        slackStreamingHandler.emitError(run.errorMessage!),
-      );
-    }
-  }
-
-  private buildSourceHandlers(run: {
-    source: string;
-    externalSessionId: string | null;
-    triggerName: string | null;
-  }): {
-    additionalHandlers: RunEventHandler[];
-    linearHandler: LinearCallbackHandler | undefined;
-    assistantMessageHandler: AssistantMessageCallbackHandler | undefined;
-    slackStreamingHandler: SlackStreamingCallbackHandler | undefined;
-  } {
-    const additionalHandlers: RunEventHandler[] = [];
-    let linearHandler: LinearCallbackHandler | undefined;
-    let assistantMessageHandler: AssistantMessageCallbackHandler | undefined;
-    let slackStreamingHandler: SlackStreamingCallbackHandler | undefined;
-
-    if (run.source === 'linear' && run.externalSessionId && run.triggerName) {
-      linearHandler = this.linearCallbackHandlerFactory.createForRun(
-        run.triggerName,
-        run.externalSessionId,
-      );
-      if (linearHandler) {
-        additionalHandlers.push(linearHandler);
-      }
-    }
-
-    if (run.source === 'telegram' && run.externalSessionId && run.triggerName) {
-      assistantMessageHandler = new AssistantMessageCallbackHandler();
-      additionalHandlers.push(assistantMessageHandler);
-    }
-
-    if (run.source === 'slack' && run.externalSessionId && run.triggerName) {
-      slackStreamingHandler = this.slackStreamingHandlerFactory.createForRun(
-        run.triggerName,
-        run.externalSessionId,
-      );
-      if (slackStreamingHandler) {
-        additionalHandlers.push(slackStreamingHandler);
-      }
-    }
-
-    return {
-      additionalHandlers,
-      linearHandler,
-      assistantMessageHandler,
-      slackStreamingHandler,
-    };
-  }
-
-  private async emitSafe(
-    label: string,
-    action: () => Promise<unknown>,
-    context?: Record<string, unknown>,
-  ): Promise<void> {
-    try {
-      await action();
-    } catch (emitErr) {
-      this.logger.error(label, { error: emitErr as Error, ...context });
-    }
+    return profile;
   }
 
   private async runSession(
@@ -363,60 +142,21 @@ export class RunProcessorService {
     this.logger.log('Running session', { cwd: params.cwd });
 
     const abortController = params.abortController ?? new AbortController();
+    const handle = await this.createSdkHandle(params, abortController);
 
-    const systemPrompts: string[] = [];
-    if (params.appendSystemPrompt) {
-      systemPrompts.push(params.appendSystemPrompt);
-    }
-
-    const handle = await this.sdkSessionFactory.create({
-      cwd: params.cwd,
-      prompt: params.prompt,
-      profile: params.profile,
-      runId: params.runId,
-      additionalSystemPrompts:
-        systemPrompts.length > 0 ? systemPrompts : undefined,
-      abortController,
-      resumeSessionId: params.resumeSessionId,
-    });
-
-    // Track for abort-on-demand
-    if (params.externalSessionId || params.runId) {
-      const trackKey = params.externalSessionId ?? params.runId!;
-      this.activeSessionTracker.track(trackKey, abortController, params.runId);
-    }
+    const trackKey = this.trackSession(params, abortController);
 
     const handlers = [
       ...this.globalHandlers,
       ...(params.additionalHandlers ?? []),
     ];
 
-    let lastResult: SDKResultMessage | undefined;
-
     try {
-      const executeSession = async (): Promise<void> => {
-        try {
-          for await (const message of handle.messages) {
-            await this.dispatchToHandlers(handlers, message);
-            if (message.type === 'result') {
-              lastResult = message;
-            }
-          }
-        } finally {
-          // Always call onComplete — handlers use this for cleanup (e.g.
-          // closing tracing spans, flushing Linear activities).
-          await this.completeHandlers(handlers, lastResult);
-        }
-      };
-
-      if (params.traceContext) {
-        await this.tracingEnrichmentHandlerFactory.wrapWithContext(
-          params.traceContext,
-          executeSession,
-        );
-      } else {
-        await executeSession();
-      }
+      const lastResult = await this.consumeSession(
+        handle.messages,
+        handlers,
+        params.traceContext,
+      );
 
       if (lastResult?.is_error) {
         throw new Error(
@@ -431,11 +171,73 @@ export class RunProcessorService {
         sessionId: handle.sessionId,
       };
     } finally {
-      if (params.externalSessionId || params.runId) {
-        const trackKey = params.externalSessionId ?? params.runId!;
+      if (trackKey !== undefined) {
         this.activeSessionTracker.untrack(trackKey, params.runId);
       }
     }
+  }
+
+  private createSdkHandle(
+    params: RunSessionParams,
+    abortController: AbortController,
+  ): ReturnType<SdkSessionFactory['create']> {
+    const systemPrompts: string[] = [];
+    if (params.appendSystemPrompt) {
+      systemPrompts.push(params.appendSystemPrompt);
+    }
+    return this.sdkSessionFactory.create({
+      cwd: params.cwd,
+      prompt: params.prompt,
+      profile: params.profile,
+      runId: params.runId,
+      additionalSystemPrompts:
+        systemPrompts.length > 0 ? systemPrompts : undefined,
+      abortController,
+      resumeSessionId: params.resumeSessionId,
+    });
+  }
+
+  private trackSession(
+    params: RunSessionParams,
+    abortController: AbortController,
+  ): string | undefined {
+    if (!params.externalSessionId && !params.runId) return undefined;
+    const trackKey = params.externalSessionId ?? params.runId!;
+    this.activeSessionTracker.track(trackKey, abortController, params.runId);
+    return trackKey;
+  }
+
+  private async consumeSession(
+    messages: AsyncIterable<SDKMessage>,
+    handlers: RunEventHandler[],
+    traceContext: TraceContext | undefined,
+  ): Promise<SDKResultMessage | undefined> {
+    let lastResult: SDKResultMessage | undefined;
+
+    const executeSession = async (): Promise<void> => {
+      try {
+        for await (const message of messages) {
+          await this.dispatchToHandlers(handlers, message);
+          if (message.type === 'result') {
+            lastResult = message;
+          }
+        }
+      } finally {
+        // Always call onComplete — handlers use this for cleanup (e.g.
+        // closing tracing spans, flushing Linear activities).
+        await this.completeHandlers(handlers, lastResult);
+      }
+    };
+
+    if (traceContext) {
+      await this.handlerBuilder.wrapWithTraceContext(
+        traceContext,
+        executeSession,
+      );
+    } else {
+      await executeSession();
+    }
+    return lastResult;
   }
 
   /**

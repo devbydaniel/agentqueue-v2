@@ -79,7 +79,6 @@ export class TelegramIngestService {
     }
 
     const cwd = ensureDirectoryExists(trigger.cwd, 'telegram trigger cwd');
-
     const sessionKey = this.buildSessionKey(
       params.botName,
       params.chatId,
@@ -87,51 +86,12 @@ export class TelegramIngestService {
     );
 
     if (isResetCommand(params.text)) {
-      await this.externalSessionRepository.deleteBySessionKey(sessionKey);
-      try {
-        this.runsService.abortSession(sessionKey);
-      } catch (error) {
-        this.logger.error('Failed to abort Telegram session during reset', {
-          error: error as Error,
-          sessionKey,
-        });
-      }
-      void this.telegramService
-        .sendDirectMessage({
-          botToken: trigger.bot_token,
-          chatId: params.chatId,
-          text: 'Session reset. Send a new message to start fresh.',
-          messageThreadId: params.messageThreadId,
-          replyToMessageId: params.replyToMessageId,
-        })
-        .catch((error: unknown) => {
-          this.logger.error('Failed to send Telegram reset confirmation', {
-            error: error as Error,
-            sessionKey,
-          });
-        });
+      await this.handleResetCommand(trigger, params, sessionKey);
       return { accepted: true, handled: true };
     }
 
     const now = new Date();
-    const existingSession =
-      await this.externalSessionRepository.findBySessionKey(sessionKey);
-    const isExpired =
-      existingSession?.lastActivityAt &&
-      now.getTime() - existingSession.lastActivityAt.getTime() >
-        TELEGRAM_SESSION_IDLE_MS;
-
-    if (isExpired) {
-      await this.externalSessionRepository.deleteBySessionKey(sessionKey);
-      try {
-        this.runsService.abortSession(sessionKey);
-      } catch (error) {
-        this.logger.error('Failed to abort expired Telegram session', {
-          error: error as Error,
-          sessionKey,
-        });
-      }
-    }
+    await this.expireStaleSession(sessionKey, now);
 
     await this.externalSessionRepository.upsertSession({
       provider: 'telegram',
@@ -150,6 +110,76 @@ export class TelegramIngestService {
       messageThreadId: params.messageThreadId,
     });
 
+    const appendSystemPrompt = this.buildAppendSystemPrompt(
+      trigger,
+      params,
+      cwd,
+    );
+
+    this.enqueueRun(trigger, params, sessionKey, cwd, appendSystemPrompt);
+
+    return { accepted: true, handled: true };
+  }
+
+  private async handleResetCommand(
+    trigger: TelegramTrigger,
+    params: IngestMessageParams,
+    sessionKey: string,
+  ): Promise<void> {
+    await this.externalSessionRepository.deleteBySessionKey(sessionKey);
+    try {
+      this.runsService.abortSession(sessionKey);
+    } catch (error) {
+      this.logger.error('Failed to abort Telegram session during reset', {
+        error: error as Error,
+        sessionKey,
+      });
+    }
+    void this.telegramService
+      .sendDirectMessage({
+        botToken: trigger.bot_token,
+        chatId: params.chatId,
+        text: 'Session reset. Send a new message to start fresh.',
+        messageThreadId: params.messageThreadId,
+        replyToMessageId: params.replyToMessageId,
+      })
+      .catch((error: unknown) => {
+        this.logger.error('Failed to send Telegram reset confirmation', {
+          error: error as Error,
+          sessionKey,
+        });
+      });
+  }
+
+  private async expireStaleSession(
+    sessionKey: string,
+    now: Date,
+  ): Promise<void> {
+    const existingSession =
+      await this.externalSessionRepository.findBySessionKey(sessionKey);
+    const isExpired =
+      existingSession?.lastActivityAt &&
+      now.getTime() - existingSession.lastActivityAt.getTime() >
+        TELEGRAM_SESSION_IDLE_MS;
+
+    if (!isExpired) return;
+
+    await this.externalSessionRepository.deleteBySessionKey(sessionKey);
+    try {
+      this.runsService.abortSession(sessionKey);
+    } catch (error) {
+      this.logger.error('Failed to abort expired Telegram session', {
+        error: error as Error,
+        sessionKey,
+      });
+    }
+  }
+
+  private buildAppendSystemPrompt(
+    trigger: TelegramTrigger,
+    params: IngestMessageParams,
+    cwd: string,
+  ): string | undefined {
     const templateVars = {
       botName: params.botName,
       userId: params.userId,
@@ -161,11 +191,20 @@ export class TelegramIngestService {
     const triggerAppend = trigger.append_system_prompt
       ? interpolateTemplate(trigger.append_system_prompt, templateVars)
       : undefined;
-    const appendSystemPrompt =
+    return (
       [triggerAppend, params.extraAppendSystemPrompt]
         .filter((s): s is string => Boolean(s))
-        .join('\n\n') || undefined;
+        .join('\n\n') || undefined
+    );
+  }
 
+  private enqueueRun(
+    trigger: TelegramTrigger,
+    params: IngestMessageParams,
+    sessionKey: string,
+    cwd: string,
+    appendSystemPrompt: string | undefined,
+  ): void {
     void this.runsService
       .enqueue({
         source: 'telegram',
@@ -188,8 +227,6 @@ export class TelegramIngestService {
           'Failed to enqueue your request. Please try again.',
         );
       });
-
-    return { accepted: true, handled: true };
   }
 
   private buildSessionKey(
