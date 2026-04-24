@@ -24,6 +24,10 @@ import type { Run } from '../database/runs.schema.js';
 import { RunEventRepository } from './run-event.repository.js';
 import { RunEventCallbackHandler } from '../callbacks/handlers/run-event.callback-handler.js';
 import { TelegramService } from '../telegram/telegram.service.js';
+import {
+  SlackStreamingCallbackHandler,
+  SlackStreamingCallbackHandlerFactory,
+} from '../slack/slack-streaming.callback-handler.js';
 
 export interface RunSessionParams {
   cwd: string;
@@ -63,6 +67,7 @@ export class RunProcessorService {
     private readonly externalSessionRepository: ExternalSessionRepository,
     private readonly runEventRepository: RunEventRepository,
     private readonly telegramService: TelegramService,
+    private readonly slackStreamingHandlerFactory: SlackStreamingCallbackHandlerFactory,
     private readonly tracingEnrichmentHandlerFactory: TracingEnrichmentHandlerFactory,
     private readonly linearCallbackHandlerFactory: LinearCallbackHandlerFactory,
     private readonly agentProfileService: AgentProfileService,
@@ -127,8 +132,12 @@ export class RunProcessorService {
     await this.runRepository.save(run);
 
     // Build additional handlers
-    const { additionalHandlers, linearHandler, assistantMessageHandler } =
-      this.buildSourceHandlers(run);
+    const {
+      additionalHandlers,
+      linearHandler,
+      assistantMessageHandler,
+      slackStreamingHandler,
+    } = this.buildSourceHandlers(run);
     const { handler: tracingHandler, traceContext } =
       this.tracingEnrichmentHandlerFactory.createForRun(run);
     additionalHandlers.push(tracingHandler);
@@ -167,7 +176,7 @@ export class RunProcessorService {
       // Persist SDK session ID for future resumes
       if (run.externalSessionId && result.sessionId) {
         await this.externalSessionRepository.upsertSession({
-          provider: run.source as 'linear' | 'telegram',
+          provider: run.source as 'linear' | 'telegram' | 'slack',
           sessionKey: run.externalSessionId,
           sessionId: result.sessionId,
         });
@@ -178,33 +187,40 @@ export class RunProcessorService {
       await this.runRepository.save(run);
       await this.runCompletionNotifier.notify(runId);
 
-      // Emit Linear response on success
-      await this.emitLinearSafe(
-        linearHandler,
-        () => {
-          const message =
-            linearHandler!.getLastAssistantMessage() ?? 'Completed.';
-          return linearHandler!.emitResponse(message);
-        },
-        'Failed to emit success response to Linear',
-      );
+      if (linearHandler) {
+        await this.emitSafe('Failed to emit success response to Linear', () =>
+          linearHandler.emitResponse(
+            linearHandler.getLastAssistantMessage() ?? 'Completed.',
+          ),
+        );
+      }
 
-      await this.emitTelegramSafe(run, () =>
-        this.telegramService.emitRunResponse(
-          run.triggerName!,
-          run.externalSessionId!,
-          assistantMessageHandler?.getLastAssistantMessage() ?? 'Completed.',
-        ),
-      );
+      if (
+        run.source === 'telegram' &&
+        run.externalSessionId &&
+        run.triggerName
+      ) {
+        await this.emitSafe('Failed to emit Telegram reply', () =>
+          this.telegramService.emitRunResponse(
+            run.triggerName!,
+            run.externalSessionId!,
+            assistantMessageHandler?.getLastAssistantMessage() ?? 'Completed.',
+          ),
+        );
+      }
+
+      if (slackStreamingHandler) {
+        await this.emitSafe('Failed to emit Slack reply', () =>
+          slackStreamingHandler.finalize(),
+        );
+      }
     } catch (error) {
-      await this.handleRunError(
-        run,
-        runId,
-        error,
-        abortController.signal.aborted,
+      await this.handleRunError(run, runId, error, {
+        isTimeout: abortController.signal.aborted,
         timeoutMs,
         linearHandler,
-      );
+        slackStreamingHandler,
+      });
       throw error;
     } finally {
       clearTimeout(timer);
@@ -215,9 +231,12 @@ export class RunProcessorService {
     run: Run,
     runId: string,
     error: unknown,
-    isTimeout: boolean,
-    timeoutMs: number,
-    linearHandler: LinearCallbackHandler | undefined,
+    ctx: {
+      isTimeout: boolean;
+      timeoutMs: number;
+      linearHandler: LinearCallbackHandler | undefined;
+      slackStreamingHandler: SlackStreamingCallbackHandler | undefined;
+    },
   ): Promise<void> {
     // Re-read run from DB to avoid overwriting a terminal state set by abort
     const freshRun = await this.runRepository.findById(runId);
@@ -234,9 +253,9 @@ export class RunProcessorService {
         { runId, status: freshRun.status },
       );
     } else {
-      if (isTimeout) {
+      if (ctx.isTimeout) {
         run.status = 'timed_out';
-        run.errorMessage = `Run timed out after ${timeoutMs}ms`;
+        run.errorMessage = `Run timed out after ${ctx.timeoutMs}ms`;
       } else {
         run.status = 'errored';
         run.errorMessage =
@@ -254,19 +273,28 @@ export class RunProcessorService {
       }
     }
 
-    await this.emitLinearSafe(
-      linearHandler,
-      () => linearHandler!.emitError(run.errorMessage!),
-      'Failed to emit error to Linear',
-    );
+    const { linearHandler, slackStreamingHandler } = ctx;
+    if (linearHandler) {
+      await this.emitSafe('Failed to emit error to Linear', () =>
+        linearHandler.emitError(run.errorMessage!),
+      );
+    }
 
-    await this.emitTelegramSafe(run, () =>
-      this.telegramService.emitRunError(
-        run.triggerName!,
-        run.externalSessionId!,
-        run.errorMessage!,
-      ),
-    );
+    if (run.source === 'telegram' && run.externalSessionId && run.triggerName) {
+      await this.emitSafe('Failed to emit Telegram reply', () =>
+        this.telegramService.emitRunError(
+          run.triggerName!,
+          run.externalSessionId!,
+          run.errorMessage!,
+        ),
+      );
+    }
+
+    if (slackStreamingHandler) {
+      await this.emitSafe('Failed to emit Slack reply', () =>
+        slackStreamingHandler.emitError(run.errorMessage!),
+      );
+    }
   }
 
   private buildSourceHandlers(run: {
@@ -277,10 +305,12 @@ export class RunProcessorService {
     additionalHandlers: RunEventHandler[];
     linearHandler: LinearCallbackHandler | undefined;
     assistantMessageHandler: AssistantMessageCallbackHandler | undefined;
+    slackStreamingHandler: SlackStreamingCallbackHandler | undefined;
   } {
     const additionalHandlers: RunEventHandler[] = [];
     let linearHandler: LinearCallbackHandler | undefined;
     let assistantMessageHandler: AssistantMessageCallbackHandler | undefined;
+    let slackStreamingHandler: SlackStreamingCallbackHandler | undefined;
 
     if (run.source === 'linear' && run.externalSessionId && run.triggerName) {
       linearHandler = this.linearCallbackHandlerFactory.createForRun(
@@ -297,46 +327,33 @@ export class RunProcessorService {
       additionalHandlers.push(assistantMessageHandler);
     }
 
-    return { additionalHandlers, linearHandler, assistantMessageHandler };
+    if (run.source === 'slack' && run.externalSessionId && run.triggerName) {
+      slackStreamingHandler = this.slackStreamingHandlerFactory.createForRun(
+        run.triggerName,
+        run.externalSessionId,
+      );
+      if (slackStreamingHandler) {
+        additionalHandlers.push(slackStreamingHandler);
+      }
+    }
+
+    return {
+      additionalHandlers,
+      linearHandler,
+      assistantMessageHandler,
+      slackStreamingHandler,
+    };
   }
 
-  private async emitLinearSafe(
-    handler: LinearCallbackHandler | undefined,
+  private async emitSafe(
+    label: string,
     action: () => Promise<unknown>,
-    errorMessage: string,
+    context?: Record<string, unknown>,
   ): Promise<void> {
-    if (!handler) return;
     try {
       await action();
     } catch (emitErr) {
-      this.logger.error(errorMessage, { error: emitErr as Error });
-    }
-  }
-
-  private async emitTelegramSafe(
-    run: {
-      source: string;
-      externalSessionId: string | null;
-      triggerName: string | null;
-    },
-    action: () => Promise<unknown>,
-  ): Promise<void> {
-    if (
-      run.source !== 'telegram' ||
-      !run.externalSessionId ||
-      !run.triggerName
-    ) {
-      return;
-    }
-
-    try {
-      await action();
-    } catch (emitErr) {
-      this.logger.error('Failed to emit Telegram reply', {
-        error: emitErr as Error,
-        triggerName: run.triggerName,
-        sessionKey: run.externalSessionId,
-      });
+      this.logger.error(label, { error: emitErr as Error, ...context });
     }
   }
 

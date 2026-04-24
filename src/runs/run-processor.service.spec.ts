@@ -19,6 +19,7 @@ import { RUN_EVENT_HANDLERS } from '../callbacks/constants.js';
 import type { RunEventHandler } from '../callbacks/run-event-handler.interface.js';
 import type { Run } from '../database/runs.schema.js';
 import { TelegramService } from '../telegram/telegram.service.js';
+import { SlackStreamingCallbackHandlerFactory } from '../slack/slack-streaming.callback-handler.js';
 import { AgentProfileService } from '../agents/agent-profile.service.js';
 import { ExternalSessionRepository } from './external-session.repository.js';
 
@@ -183,6 +184,12 @@ describe('RunProcessorService', () => {
           useValue: {
             emitRunResponse: jest.fn().mockResolvedValue(undefined),
             emitRunError: jest.fn().mockResolvedValue(undefined),
+          },
+        },
+        {
+          provide: SlackStreamingCallbackHandlerFactory,
+          useValue: {
+            createForRun: jest.fn().mockReturnValue(undefined),
           },
         },
         {

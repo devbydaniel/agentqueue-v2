@@ -25,6 +25,7 @@ export interface EnqueueRunCommand {
     | 'github'
     | 'flow'
     | 'telegram'
+    | 'slack'
     | 'spawned';
   triggerName?: string;
   agentName?: string;

@@ -18,7 +18,9 @@ export interface TraceableRun {
 
 export function buildSessionId(run: TraceableRun): string | undefined {
   if (
-    (run.source === 'linear' || run.source === 'telegram') &&
+    (run.source === 'linear' ||
+      run.source === 'telegram' ||
+      run.source === 'slack') &&
     run.externalSessionId
   ) {
     return run.externalSessionId;

@@ -36,6 +36,25 @@ export interface TelegramTrigger {
   timeout_ms?: number;
 }
 
+export interface SlackTrigger {
+  name: string;
+  type: 'slack';
+  bot_name: string;
+  bot_token: string;
+  signing_secret: string;
+  cwd: string;
+  /**
+   * At least one of user_id or channel_id is required.
+   * - user_id gates 1:1 assistant-pane conversations (Slack user ID, e.g. "U01234567").
+   * - channel_id gates channel mentions or a specific DM channel (C.../D.../G... prefix).
+   */
+  user_id?: string;
+  channel_id?: string;
+  agent?: string;
+  append_system_prompt?: string;
+  timeout_ms?: number;
+}
+
 export interface WebhookFilter {
   field: string;
   equals?: string;
@@ -58,7 +77,13 @@ export interface GithubTrigger {
 }
 
 export interface TriggersFile {
-  triggers: (CronTrigger | LinearTrigger | GithubTrigger | TelegramTrigger)[];
+  triggers: (
+    | CronTrigger
+    | LinearTrigger
+    | GithubTrigger
+    | TelegramTrigger
+    | SlackTrigger
+  )[];
 }
 
 /**

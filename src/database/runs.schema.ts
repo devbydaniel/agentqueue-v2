@@ -5,6 +5,7 @@ export const runSources = [
   'github',
   'flow',
   'telegram',
+  'slack',
   'spawned',
 ] as const;
 
