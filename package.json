@@ -27,14 +27,14 @@
     "prepare": "husky"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "0.2.114",
+    "@anthropic-ai/claude-agent-sdk": "0.2.119",
     "@arizeai/openinference-instrumentation-claude-agent-sdk": "0.2.3",
     "@arizeai/phoenix-otel": "1.0.0",
-    "@linear/sdk": "82.0.0",
+    "@linear/sdk": "82.1.0",
     "@nestjs/common": "11.1.19",
     "@nestjs/core": "11.1.19",
     "@nestjs/platform-express": "11.1.19",
-    "@nestjs/swagger": "11.3.1",
+    "@nestjs/swagger": "11.4.1",
     "@opentelemetry/api": "1.9.1",
     "@opentelemetry/exporter-trace-otlp-http": "0.215.0",
     "@opentelemetry/sdk-node": "0.215.0",
@@ -47,7 +47,7 @@
     "js-yaml": "4.1.1",
     "node-cron": "4.2.1",
     "pg": "8.20.0",
-    "pg-boss": "12.15.0",
+    "pg-boss": "12.18.1",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2"
   },
@@ -76,7 +76,7 @@
     "husky": "9.1.7",
     "jest": "30.3.0",
     "jscpd": "4.0.9",
-    "markdownlint-cli2": "0.22.0",
+    "markdownlint-cli2": "0.22.1",
     "prettier": "3.8.3",
     "supertest": "7.2.2",
     "testcontainers": "11.14.0",
@@ -84,6 +84,6 @@
     "ts-node": "10.9.2",
     "tsc-files": "1.1.4",
     "typescript": "5.8.3",
-    "typescript-eslint": "8.58.2"
+    "typescript-eslint": "8.59.0"
   }
 }
