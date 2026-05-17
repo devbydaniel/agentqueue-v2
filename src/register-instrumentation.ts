@@ -1,10 +1,16 @@
 /**
- * register-instrumentation.ts — sets up OTel auto-instrumentation for the
- * Claude Agent SDK via import-in-the-middle (IITM).
+ * register-instrumentation.ts — sets up OTel tracing AND Claude SDK
+ * auto-instrumentation via import-in-the-middle (IITM).
  *
  * Loaded via Node's `--import` flag BEFORE any module that imports the SDK,
  * so the IITM hook can intercept the import and replace the module exports
  * with instrumented versions.
+ *
+ * **Order matters here.** The TracerProvider must be initialized *before*
+ * `registerInstrumentations()` is called, because `ClaudeAgentSDKInstrumentation`'s
+ * internal `OITracer` captures a tracer reference in its constructor. If the
+ * provider isn't ready yet, it captures a no-op tracer and silently emits
+ * nothing — even though IITM hook + module patching all "succeeds".
  *
  * ──────────────────────────────────────────────────────────────────────────
  * WORKAROUND: ESM-incompatible `manuallyInstrument()` upstream
@@ -29,8 +35,8 @@
  *   1. `--import @opentelemetry/instrumentation/hook.mjs`
  *      Installs the IITM loader (without this, ESM imports aren't hooked).
  *   2. `--import ./dist/src/register-instrumentation.js`
- *      Runs this file, which calls `registerInstrumentations()` to tell IITM
- *      which modules to wrap.
+ *      Runs this file, which initializes the TracerProvider and then calls
+ *      `registerInstrumentations()` so IITM knows which modules to wrap.
  *
  * Both flags are needed because agentqueue compiles to CJS but the Claude
  * Agent SDK is ESM-only — its `await import()` resolves through Node's ESM
@@ -52,18 +58,44 @@
  * issues / PRs touching `ESM`, `manuallyInstrument`, or `claude-agent-sdk`).
  */
 
+import 'dotenv/config';
+import { register } from '@arizeai/phoenix-otel';
 import { registerInstrumentations } from '@opentelemetry/instrumentation';
 import { ClaudeAgentSDKInstrumentation } from '@arizeai/openinference-instrumentation-claude-agent-sdk';
 import { detectTracingProvider } from './config/detect-tracing-provider.js';
 
 const provider = detectTracingProvider();
-if (provider !== 'none') {
+
+if (provider === 'phoenix') {
+  // Initialize TracerProvider FIRST. register() returns the configured
+  // NodeTracerProvider, which we then pass explicitly to the instrumentation
+  // so it doesn't snapshot the global no-op tracer.
+  const tracerProvider = register({
+    projectName: process.env.PHOENIX_PROJECT_NAME ?? 'agentqueue',
+    url:
+      process.env.PHOENIX_COLLECTOR_ENDPOINT ??
+      'http://localhost:6006/v1/traces',
+  });
+
+  registerInstrumentations({
+    instrumentations: [new ClaudeAgentSDKInstrumentation({ tracerProvider })],
+  });
+
+  // eslint-disable-next-line no-console
+  console.log(
+    '[register-instrumentation] Phoenix tracer + Claude SDK instrumentation registered',
+  );
+} else if (provider === 'langfuse') {
+  // Langfuse setup is async (NodeSDK.start) — it's handled in instrumentation.ts.
+  // We still want the SDK auto-instrumentation, but with the global tracer
+  // that langfuse will install by the time the first query() runs.
   registerInstrumentations({
     instrumentations: [new ClaudeAgentSDKInstrumentation()],
   });
+
   // eslint-disable-next-line no-console
   console.log(
-    `[register-instrumentation] Claude Agent SDK instrumentation registered for provider=${provider}`,
+    '[register-instrumentation] Claude SDK instrumentation registered (langfuse provider set up async in instrumentation.ts)',
   );
 } else {
   // eslint-disable-next-line no-console

@@ -40,21 +40,14 @@ async function initLangfuse(): Promise<void> {
   sdk.start();
 }
 
-async function initPhoenix(): Promise<void> {
-  const { register } = await import('@arizeai/phoenix-otel');
-
-  register({
-    projectName: process.env.PHOENIX_PROJECT_NAME ?? 'agentqueue',
-    url:
-      process.env.PHOENIX_COLLECTOR_ENDPOINT ??
-      'http://localhost:6006/v1/traces',
-  });
-}
-
 /**
- * Claude SDK instrumentation is registered separately via IITM in
- * `register-instrumentation.ts`, loaded by Node's `--import` flag.
- * See that file's header comment for the rationale and exit criteria.
+ * Phoenix is initialized in `register-instrumentation.ts` (before
+ * `registerInstrumentations()`) so the Claude SDK instrumentation captures
+ * a real tracer instead of a no-op. We only handle Langfuse here.
+ *
+ * Claude SDK auto-instrumentation lives in `register-instrumentation.ts`,
+ * loaded by Node's `--import` flag. See that file for the rationale and
+ * exit criteria.
  */
 
 async function initTracing(): Promise<void> {
@@ -63,7 +56,7 @@ async function initTracing(): Promise<void> {
   if (provider === 'none') return;
 
   if (provider === 'langfuse') await initLangfuse();
-  if (provider === 'phoenix') await initPhoenix();
+  // phoenix: already initialized in register-instrumentation.ts
 }
 
 export const tracingReady = initTracing();
