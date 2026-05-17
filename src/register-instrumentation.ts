@@ -67,18 +67,16 @@ import { detectTracingProvider } from './config/detect-tracing-provider.js';
 const provider = detectTracingProvider();
 
 if (provider === 'phoenix') {
-  // Initialize TracerProvider FIRST. register() returns the configured
-  // NodeTracerProvider, which we then pass explicitly to the instrumentation
-  // so it doesn't snapshot the global no-op tracer.
-  const tracerProvider = register({
+  // One-call setup: phoenix-otel's register() initializes the TracerProvider
+  // AND wires instrumentations through it in the correct order. This is the
+  // documented pattern and avoids the no-op-tracer race we hit when handling
+  // each step manually.
+  register({
     projectName: process.env.PHOENIX_PROJECT_NAME ?? 'agentqueue',
     url:
       process.env.PHOENIX_COLLECTOR_ENDPOINT ??
       'http://localhost:6006/v1/traces',
-  });
-
-  registerInstrumentations({
-    instrumentations: [new ClaudeAgentSDKInstrumentation({ tracerProvider })],
+    instrumentations: [new ClaudeAgentSDKInstrumentation()],
   });
 
   // eslint-disable-next-line no-console
@@ -87,7 +85,7 @@ if (provider === 'phoenix') {
   );
 } else if (provider === 'langfuse') {
   // Langfuse setup is async (NodeSDK.start) — it's handled in instrumentation.ts.
-  // We still want the SDK auto-instrumentation, but with the global tracer
+  // We still want SDK auto-instrumentation; it picks up the global tracer
   // that langfuse will install by the time the first query() runs.
   registerInstrumentations({
     instrumentations: [new ClaudeAgentSDKInstrumentation()],
