@@ -99,7 +99,7 @@ describe('SdkSessionFactory', () => {
       cwd: '/home/user/dev/my-repo',
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
-      settingSources: ['project'],
+      settingSources: ['user', 'project'],
     });
   });
 

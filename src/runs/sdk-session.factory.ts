@@ -84,7 +84,10 @@ export class SdkSessionFactory {
       abortController,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
-      settingSources: ['project'],
+      // 'user' loads ~/.claude/settings.json — where agentfiles deploys the
+      // phoenix Stop hook (and any future user-level hooks). 'project' loads
+      // <cwd>/.claude/settings.json (per-agent overrides + CLAUDE.md).
+      settingSources: ['user', 'project'],
     };
 
     this.applyExecutableOverride(sdkOptions);
