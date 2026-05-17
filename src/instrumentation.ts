@@ -7,6 +7,13 @@ import { detectTracingProvider } from './config/detect-tracing-provider.js';
  * Must be imported before any traced code runs (first import in main.ts).
  * Provider is selected via TRACING_PROVIDER env var, with auto-detection
  * fallback from LANGFUSE_SECRET_KEY / PHOENIX_COLLECTOR_ENDPOINT.
+ *
+ * We do NOT register any auto-instrumentations here. The Claude Agent SDK
+ * activity is captured by `TracingEnrichmentHandler` directly from the SDK
+ * message stream (see callbacks/handlers/tracing-enrichment.callback-handler.ts).
+ * This avoids the IITM (import-in-the-middle) version-mismatch trap that
+ * `@arizeai/openinference-instrumentation-claude-agent-sdk` suffers from in
+ * a deep npm dependency graph.
  */
 
 async function initLangfuse(): Promise<void> {
@@ -40,15 +47,19 @@ async function initLangfuse(): Promise<void> {
   sdk.start();
 }
 
-/**
- * Phoenix is initialized in `register-instrumentation.ts` (before
- * `registerInstrumentations()`) so the Claude SDK instrumentation captures
- * a real tracer instead of a no-op. We only handle Langfuse here.
- *
- * Claude SDK auto-instrumentation lives in `register-instrumentation.ts`,
- * loaded by Node's `--import` flag. See that file for the rationale and
- * exit criteria.
- */
+async function initPhoenix(): Promise<void> {
+  const { register } = await import('@arizeai/phoenix-otel');
+
+  register({
+    projectName: process.env.PHOENIX_PROJECT_NAME ?? 'agentqueue',
+    url:
+      process.env.PHOENIX_COLLECTOR_ENDPOINT ??
+      'http://localhost:6006/v1/traces',
+  });
+
+  // eslint-disable-next-line no-console
+  console.log('[instrumentation] Phoenix tracer registered');
+}
 
 async function initTracing(): Promise<void> {
   const provider = detectTracingProvider();
@@ -56,7 +67,7 @@ async function initTracing(): Promise<void> {
   if (provider === 'none') return;
 
   if (provider === 'langfuse') await initLangfuse();
-  // phoenix: already initialized in register-instrumentation.ts
+  if (provider === 'phoenix') await initPhoenix();
 }
 
 export const tracingReady = initTracing();
