@@ -14,4 +14,7 @@ COPY --from=builder --chown=app:app /app/package.json ./
 COPY --from=builder --chown=app:app /app/src/database/migrations ./src/database/migrations
 USER app
 EXPOSE 3000
-CMD ["sh", "-c", "npx dbmate --migrations-dir src/database/migrations --no-dump-schema up && node dist/src/main.js"]
+# `--import ./dist/src/register-instrumentation.js` enables OTel auto-
+# instrumentation for the Claude Agent SDK via IITM. See that file's header
+# for why this is needed instead of in-code `manuallyInstrument()`.
+CMD ["sh", "-c", "npx dbmate --migrations-dir src/database/migrations --no-dump-schema up && node --import @opentelemetry/instrumentation/hook.mjs --import ./dist/src/register-instrumentation.js dist/src/main.js"]

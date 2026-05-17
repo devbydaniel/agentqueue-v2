@@ -9,7 +9,7 @@
     "build": "nest build",
     "start": "nest start",
     "start:dev": "nest start --watch",
-    "start:prod": "node dist/src/main",
+    "start:prod": "node --import @opentelemetry/instrumentation/hook.mjs --import ./dist/src/register-instrumentation.js dist/src/main.js",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
     "format": "prettier --write 'src/**/*.ts'",
@@ -28,7 +28,7 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.2.114",
-    "@arizeai/openinference-instrumentation-claude-agent-sdk": "0.2.3",
+    "@arizeai/openinference-instrumentation-claude-agent-sdk": "0.2.4",
     "@arizeai/phoenix-otel": "1.0.0",
     "@linear/sdk": "82.0.0",
     "@nestjs/common": "11.1.19",

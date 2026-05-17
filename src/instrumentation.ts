@@ -51,14 +51,11 @@ async function initPhoenix(): Promise<void> {
   });
 }
 
-async function instrumentClaudeSDK(): Promise<void> {
-  const { ClaudeAgentSDKInstrumentation } =
-    await import('@arizeai/openinference-instrumentation-claude-agent-sdk');
-  const ClaudeAgentSDK = await import('@anthropic-ai/claude-agent-sdk');
-
-  const instrumentation = new ClaudeAgentSDKInstrumentation();
-  instrumentation.manuallyInstrument(ClaudeAgentSDK);
-}
+/**
+ * Claude SDK instrumentation is registered separately via IITM in
+ * `register-instrumentation.ts`, loaded by Node's `--import` flag.
+ * See that file's header comment for the rationale and exit criteria.
+ */
 
 async function initTracing(): Promise<void> {
   const provider = detectTracingProvider();
@@ -67,8 +64,6 @@ async function initTracing(): Promise<void> {
 
   if (provider === 'langfuse') await initLangfuse();
   if (provider === 'phoenix') await initPhoenix();
-
-  await instrumentClaudeSDK();
 }
 
 export const tracingReady = initTracing();
