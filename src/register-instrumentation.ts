@@ -56,8 +56,18 @@ import { registerInstrumentations } from '@opentelemetry/instrumentation';
 import { ClaudeAgentSDKInstrumentation } from '@arizeai/openinference-instrumentation-claude-agent-sdk';
 import { detectTracingProvider } from './config/detect-tracing-provider.js';
 
-if (detectTracingProvider() !== 'none') {
+const provider = detectTracingProvider();
+if (provider !== 'none') {
   registerInstrumentations({
     instrumentations: [new ClaudeAgentSDKInstrumentation()],
   });
+  // eslint-disable-next-line no-console
+  console.log(
+    `[register-instrumentation] Claude Agent SDK instrumentation registered for provider=${provider}`,
+  );
+} else {
+  // eslint-disable-next-line no-console
+  console.log(
+    '[register-instrumentation] tracing disabled — instrumentation NOT registered',
+  );
 }
