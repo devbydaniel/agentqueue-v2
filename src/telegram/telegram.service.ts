@@ -1,6 +1,8 @@
 import { Injectable, Logger, type OnModuleDestroy } from '@nestjs/common';
 import { TriggerConfigService } from '../config/trigger-config.service.js';
 import { ExternalSessionRepository } from '../runs/external-session.repository.js';
+import { OpenaiTtsService } from './openai-tts.service.js';
+import { TelegramChatSettingsRepository } from './telegram-chat-settings.repository.js';
 
 const TELEGRAM_API_BASE_URL = 'https://api.telegram.org';
 const TELEGRAM_MESSAGE_CHUNK_SIZE = 4000;
@@ -8,12 +10,24 @@ const TELEGRAM_MESSAGE_CHUNK_SIZE = 4000;
 const TYPING_REFRESH_INTERVAL_MS = 4000;
 
 export const NEW_SESSION_BUTTON = '🆕 New Session';
+// The voice toggle button shows the CURRENT state; tapping the shown label flips it.
+export const VOICE_ON_BUTTON = '🔊 Voice: on';
+export const VOICE_OFF_BUTTON = '🔇 Voice: off';
 
-const PERSISTENT_KEYBOARD = {
-  keyboard: [[{ text: NEW_SESSION_BUTTON }]],
-  resize_keyboard: true,
-  is_persistent: true,
-};
+function buildKeyboard(voiceEnabled: boolean): {
+  keyboard: { text: string }[][];
+  resize_keyboard: boolean;
+  is_persistent: boolean;
+} {
+  return {
+    keyboard: [
+      [{ text: NEW_SESSION_BUTTON }],
+      [{ text: voiceEnabled ? VOICE_ON_BUTTON : VOICE_OFF_BUTTON }],
+    ],
+    resize_keyboard: true,
+    is_persistent: true,
+  };
+}
 
 function chunkMessage(text: string): string[] {
   if (text.length <= TELEGRAM_MESSAGE_CHUNK_SIZE) {
@@ -45,6 +59,8 @@ export class TelegramService implements OnModuleDestroy {
   constructor(
     private readonly triggerConfigService: TriggerConfigService,
     private readonly externalSessionRepository: ExternalSessionRepository,
+    private readonly ttsService: OpenaiTtsService,
+    private readonly chatSettingsRepository: TelegramChatSettingsRepository,
   ) {}
 
   onModuleDestroy(): void {
@@ -93,10 +109,12 @@ export class TelegramService implements OnModuleDestroy {
     text: string;
     messageThreadId?: number;
     replyToMessageId?: number;
+    voiceModeEnabled?: boolean;
   }): Promise<void> {
     await this.sendChunkedText(params.botToken, params.chatId, params.text, {
       messageThreadId: params.messageThreadId,
       replyToMessageId: params.replyToMessageId,
+      voiceModeEnabled: params.voiceModeEnabled ?? false,
     });
   }
 
@@ -105,7 +123,7 @@ export class TelegramService implements OnModuleDestroy {
     sessionKey: string,
     message: string,
   ): Promise<void> {
-    await this.emitForRun(triggerName, sessionKey, message);
+    await this.emitForRun(triggerName, sessionKey, message, true);
   }
 
   async emitRunError(
@@ -113,13 +131,15 @@ export class TelegramService implements OnModuleDestroy {
     sessionKey: string,
     message: string,
   ): Promise<void> {
-    await this.emitForRun(triggerName, sessionKey, message);
+    // Errors are always text — never spoken.
+    await this.emitForRun(triggerName, sessionKey, message, false);
   }
 
   private async emitForRun(
     triggerName: string,
     sessionKey: string,
     message: string,
+    allowVoice: boolean,
   ): Promise<void> {
     // Always stop the typing indicator; the response (or error) replaces it.
     this.stopTypingIndicator(sessionKey);
@@ -140,9 +160,94 @@ export class TelegramService implements OnModuleDestroy {
       return;
     }
 
+    const voiceEnabled =
+      await this.chatSettingsRepository.isVoiceEnabled(sessionKey);
+    const messageThreadId = session.messageThreadId ?? undefined;
+
+    if (allowVoice && voiceEnabled) {
+      await this.trySendVoiceNote(
+        trigger.bot_token,
+        session.chatId,
+        message,
+        messageThreadId,
+      );
+    }
+
+    // Always send the text — primary in text mode, the safety net in voice mode.
     await this.sendChunkedText(trigger.bot_token, session.chatId, message, {
-      messageThreadId: session.messageThreadId ?? undefined,
+      messageThreadId,
+      voiceModeEnabled: voiceEnabled,
     });
+  }
+
+  /** Synthesize and send a voice note; on failure log and fall back to text only. */
+  private async trySendVoiceNote(
+    botToken: string,
+    chatId: string,
+    message: string,
+    messageThreadId: number | undefined,
+  ): Promise<void> {
+    if (!this.ttsService.isAvailable()) return;
+    try {
+      const audio = await this.ttsService.synthesize(message);
+      await this.sendVoiceNote({ botToken, chatId, audio, messageThreadId });
+    } catch (error) {
+      this.logger.warn(
+        'Failed to send Telegram voice note; sending text only',
+        {
+          error: error as Error,
+        },
+      );
+    }
+  }
+
+  private async sendVoiceNote(params: {
+    botToken: string;
+    chatId: string;
+    audio: Buffer;
+    messageThreadId?: number;
+  }): Promise<void> {
+    const boundary = `----AgentQueueBoundary${Date.now()}`;
+    const parts: Buffer[] = [
+      Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="chat_id"\r\n\r\n${params.chatId}\r\n`,
+      ),
+    ];
+
+    if (params.messageThreadId !== undefined) {
+      parts.push(
+        Buffer.from(
+          `--${boundary}\r\nContent-Disposition: form-data; name="message_thread_id"\r\n\r\n${params.messageThreadId}\r\n`,
+        ),
+      );
+    }
+
+    parts.push(
+      Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="voice"; filename="voice.ogg"\r\nContent-Type: audio/ogg\r\n\r\n`,
+      ),
+      params.audio,
+      Buffer.from('\r\n'),
+      Buffer.from(`--${boundary}--\r\n`),
+    );
+
+    const response = await fetch(
+      `${TELEGRAM_API_BASE_URL}/bot${params.botToken}/sendVoice`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        },
+        body: Buffer.concat(parts),
+      },
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(
+        `Telegram API sendVoice failed (${response.status}): ${errorText}`,
+      );
+    }
   }
 
   private async sendChatAction(
@@ -180,6 +285,7 @@ export class TelegramService implements OnModuleDestroy {
     options: {
       messageThreadId?: number;
       replyToMessageId?: number;
+      voiceModeEnabled: boolean;
     },
   ): Promise<void> {
     const chunks = chunkMessage(text);
@@ -195,7 +301,9 @@ export class TelegramService implements OnModuleDestroy {
         ...(options.replyToMessageId !== undefined
           ? { reply_parameters: { message_id: options.replyToMessageId } }
           : {}),
-        ...(isLast ? { reply_markup: PERSISTENT_KEYBOARD } : {}),
+        ...(isLast
+          ? { reply_markup: buildKeyboard(options.voiceModeEnabled) }
+          : {}),
       });
     }
   }

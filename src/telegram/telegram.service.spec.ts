@@ -2,11 +2,27 @@
 import { TelegramService } from './telegram.service.js';
 import type { TriggerConfigService } from '../config/trigger-config.service.js';
 import type { ExternalSessionRepository } from '../runs/external-session.repository.js';
+import type { OpenaiTtsService } from './openai-tts.service.js';
+import type { TelegramChatSettingsRepository } from './telegram-chat-settings.repository.js';
+
+const TEXT_KEYBOARD = {
+  keyboard: [[{ text: '🆕 New Session' }], [{ text: '🔇 Voice: off' }]],
+  resize_keyboard: true,
+  is_persistent: true,
+};
+
+const VOICE_KEYBOARD = {
+  keyboard: [[{ text: '🆕 New Session' }], [{ text: '🔊 Voice: on' }]],
+  resize_keyboard: true,
+  is_persistent: true,
+};
 
 describe('TelegramService', () => {
   let service: TelegramService;
   let triggerConfigService: jest.Mocked<TriggerConfigService>;
   let externalSessionRepository: jest.Mocked<ExternalSessionRepository>;
+  let ttsService: jest.Mocked<OpenaiTtsService>;
+  let chatSettingsRepository: jest.Mocked<TelegramChatSettingsRepository>;
   let fetchMock: jest.Mock;
 
   beforeEach(() => {
@@ -35,6 +51,15 @@ describe('TelegramService', () => {
       }),
     } as unknown as jest.Mocked<ExternalSessionRepository>;
 
+    ttsService = {
+      isAvailable: jest.fn().mockReturnValue(true),
+      synthesize: jest.fn().mockResolvedValue(Buffer.from('fake-opus')),
+    } as unknown as jest.Mocked<OpenaiTtsService>;
+
+    chatSettingsRepository = {
+      isVoiceEnabled: jest.fn().mockResolvedValue(false),
+    } as unknown as jest.Mocked<TelegramChatSettingsRepository>;
+
     fetchMock = jest.fn().mockResolvedValue({
       ok: true,
       text: jest.fn().mockResolvedValue('ok'),
@@ -44,6 +69,8 @@ describe('TelegramService', () => {
     service = new TelegramService(
       triggerConfigService,
       externalSessionRepository,
+      ttsService,
+      chatSettingsRepository,
     );
   });
 
@@ -62,11 +89,7 @@ describe('TelegramService', () => {
           chat_id: '123',
           text: 'Completed',
           message_thread_id: 22,
-          reply_markup: {
-            keyboard: [[{ text: '🆕 New Session' }]],
-            resize_keyboard: true,
-            is_persistent: true,
-          },
+          reply_markup: TEXT_KEYBOARD,
         }),
       }),
     );
@@ -96,5 +119,57 @@ describe('TelegramService', () => {
     });
 
     expect(fetchMock.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it('should send a voice note then text when voice mode is enabled', async () => {
+    chatSettingsRepository.isVoiceEnabled.mockResolvedValueOnce(true);
+
+    await service.emitRunResponse(
+      'daniel-assistant',
+      'telegram:main-bot:123:main',
+      'Hello there',
+    );
+
+    expect(ttsService.synthesize).toHaveBeenCalledWith('Hello there');
+    const urls = fetchMock.mock.calls.map((call) => call[0] as string);
+    expect(urls).toEqual([
+      'https://api.telegram.org/botbot-token/sendVoice',
+      'https://api.telegram.org/botbot-token/sendMessage',
+    ]);
+    // The trailing text message carries the "voice on" keyboard label.
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      'https://api.telegram.org/botbot-token/sendMessage',
+      expect.objectContaining({
+        body: expect.stringContaining(JSON.stringify(VOICE_KEYBOARD)),
+      }),
+    );
+  });
+
+  it('should fall back to text only when synthesis fails', async () => {
+    chatSettingsRepository.isVoiceEnabled.mockResolvedValueOnce(true);
+    ttsService.synthesize.mockRejectedValueOnce(new Error('boom'));
+
+    await service.emitRunResponse(
+      'daniel-assistant',
+      'telegram:main-bot:123:main',
+      'Hello there',
+    );
+
+    const urls = fetchMock.mock.calls.map((call) => call[0] as string);
+    expect(urls).toEqual(['https://api.telegram.org/botbot-token/sendMessage']);
+  });
+
+  it('should never speak errors even when voice mode is enabled', async () => {
+    chatSettingsRepository.isVoiceEnabled.mockResolvedValueOnce(true);
+
+    await service.emitRunError(
+      'daniel-assistant',
+      'telegram:main-bot:123:main',
+      'Something broke',
+    );
+
+    expect(ttsService.synthesize).not.toHaveBeenCalled();
+    const urls = fetchMock.mock.calls.map((call) => call[0] as string);
+    expect(urls).toEqual(['https://api.telegram.org/botbot-token/sendMessage']);
   });
 });

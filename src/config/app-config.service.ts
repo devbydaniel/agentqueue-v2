@@ -38,6 +38,21 @@ export class AppConfigService {
     return process.env.MISTRAL_API_KEY;
   }
 
+  // ── OpenAI (Telegram TTS) ────────────────────────────────────────
+
+  /** Required for spoken Telegram replies. If unset, replies stay text-only. */
+  get openaiApiKey(): string | undefined {
+    return process.env.OPENAI_API_KEY;
+  }
+
+  get openaiTtsModel(): string {
+    return process.env.OPENAI_TTS_MODEL ?? 'gpt-4o-mini-tts';
+  }
+
+  get openaiTtsVoice(): string {
+    return process.env.OPENAI_TTS_VOICE ?? 'alloy';
+  }
+
   // ── Hooks ────────────────────────────────────────────────────────
 
   get beforeHookTimeout(): number {

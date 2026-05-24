@@ -48,6 +48,45 @@ describe('AppConfigService', () => {
     });
   });
 
+  describe('openaiApiKey', () => {
+    it('should return undefined when not set', () => {
+      delete process.env.OPENAI_API_KEY;
+      expect(service.openaiApiKey).toBeUndefined();
+    });
+
+    it('should return the key when set', () => {
+      process.env.OPENAI_API_KEY = 'sk-test';
+      expect(service.openaiApiKey).toBe('sk-test');
+      delete process.env.OPENAI_API_KEY;
+    });
+  });
+
+  describe('openaiTtsModel', () => {
+    it('should default to gpt-4o-mini-tts', () => {
+      delete process.env.OPENAI_TTS_MODEL;
+      expect(service.openaiTtsModel).toBe('gpt-4o-mini-tts');
+    });
+
+    it('should read from OPENAI_TTS_MODEL env var', () => {
+      process.env.OPENAI_TTS_MODEL = 'tts-1';
+      expect(service.openaiTtsModel).toBe('tts-1');
+      delete process.env.OPENAI_TTS_MODEL;
+    });
+  });
+
+  describe('openaiTtsVoice', () => {
+    it('should default to alloy', () => {
+      delete process.env.OPENAI_TTS_VOICE;
+      expect(service.openaiTtsVoice).toBe('alloy');
+    });
+
+    it('should read from OPENAI_TTS_VOICE env var', () => {
+      process.env.OPENAI_TTS_VOICE = 'nova';
+      expect(service.openaiTtsVoice).toBe('nova');
+      delete process.env.OPENAI_TTS_VOICE;
+    });
+  });
+
   describe('beforeHookTimeout', () => {
     it('should default to 30000', () => {
       delete process.env.BEFORE_HOOK_TIMEOUT;
