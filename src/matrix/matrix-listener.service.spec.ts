@@ -47,16 +47,19 @@ function invite(roomId: string, inviter: string): SyncResponse {
 
 describe('MatrixListenerService', () => {
   let joinRoom: jest.Mock;
+  let sendNotice: jest.Mock;
   let ingest: { ingest: jest.Mock; resolveTrigger: jest.Mock };
   let listener: MatrixListenerService;
   let handleSync: (response: SyncResponse) => Promise<void>;
 
   beforeEach(() => {
     joinRoom = jest.fn().mockResolvedValue(undefined);
+    sendNotice = jest.fn().mockResolvedValue(undefined);
     const client = { joinRoom };
     const matrixService = {
       getClient: jest.fn().mockReturnValue(client),
       getUserId: jest.fn().mockReturnValue('@assistant:hs'),
+      sendNotice,
     };
     ingest = {
       ingest: jest.fn().mockResolvedValue(undefined),
@@ -155,5 +158,31 @@ describe('MatrixListenerService', () => {
       messages: { eventId: string }[];
     };
     expect(batch.messages.map((m) => m.eventId)).toEqual(['$fresh']);
+  });
+
+  it('tells an allowed user once that it cannot read an encrypted room', async () => {
+    const encrypted = (id: string, sender = '@daniel:hs'): MatrixEvent => ({
+      event_id: id,
+      type: 'm.room.encrypted',
+      sender,
+      origin_server_ts: Date.now(),
+      content: { algorithm: 'm.megolm.v1.aes-sha2', ciphertext: 'x' },
+    });
+    const sync = (events: MatrixEvent[]): SyncResponse => ({
+      next_batch: 's',
+      rooms: { join: { '!enc:hs': { timeline: { events } } } },
+    });
+
+    await handleSync(sync([encrypted('$s', '@stranger:hs')]));
+    expect(sendNotice).not.toHaveBeenCalled();
+
+    await handleSync(sync([encrypted('$1')]));
+    await handleSync(sync([encrypted('$2')]));
+    expect(sendNotice).toHaveBeenCalledTimes(1);
+    expect(sendNotice).toHaveBeenCalledWith(
+      { botName: 'assistant', roomId: '!enc:hs', threadRootId: undefined },
+      expect.stringContaining('encrypted'),
+    );
+    expect(ingest.ingest).not.toHaveBeenCalled();
   });
 });

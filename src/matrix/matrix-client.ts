@@ -10,7 +10,8 @@ const SYNC_FILTER = JSON.stringify({
   account_data: { types: [] },
   room: {
     state: { types: ['m.room.member'], lazy_load_members: true },
-    timeline: { types: ['m.room.message'], limit: 50 },
+    // m.room.encrypted only to tell users the bot can't read encrypted rooms.
+    timeline: { types: ['m.room.message', 'm.room.encrypted'], limit: 50 },
     ephemeral: { types: [] },
     account_data: { types: [] },
   },

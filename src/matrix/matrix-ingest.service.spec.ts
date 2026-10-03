@@ -196,24 +196,6 @@ describe('MatrixIngestService', () => {
     );
   });
 
-  it('!new in a thread resets that thread session', async () => {
-    await ingest([text('!new', { threadRootId: '$root' })], '$root');
-    const key = `matrix:assistant:${ROOM}:$root`;
-    expect(sessions.deleteBySessionKey).toHaveBeenCalledWith(key);
-    expect(runsService.abortSession).toHaveBeenCalledWith(key);
-    expect(runsService.enqueue).not.toHaveBeenCalled();
-  });
-
-  it('!new at the top level only explains that threads are sessions', async () => {
-    await ingest([text('!new')]);
-    expect(sessions.deleteBySessionKey).not.toHaveBeenCalled();
-    expect(matrixService.sendNotice).toHaveBeenCalledWith(
-      expect.objectContaining({ threadRootId: undefined }),
-      expect.stringContaining('own thread'),
-    );
-    expect(runsService.enqueue).not.toHaveBeenCalled();
-  });
-
   it('!voice toggles room voice mode and adds the voice prompt', async () => {
     await ingest([text('!voice')]);
     expect(matrixService.setVoiceEnabled).toHaveBeenCalledWith(

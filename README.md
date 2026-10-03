@@ -364,9 +364,12 @@ one message in place and render as markdown (tables included). Images and
 files are passed as local paths; voice messages are transcribed
 (`MISTRAL_API_KEY`).
 
-Room commands: `!new` inside a thread resets that thread's session; `!voice`,
-`!voice on`, `!voice off` toggle spoken replies for the room
-(`OPENAI_API_KEY`).
+Room commands: `!voice`, `!voice on`, `!voice off` toggle spoken replies for
+the room (`OPENAI_API_KEY`). There is no reset command — a new top-level
+message is a new session.
+
+The bot cannot read end-to-end encrypted rooms. When an allowed user writes in
+one, it posts a one-time notice explaining that (once per room and process).
 
 The `/sync` position is stored in `matrix_sync_state`, so messages sent while
 AgentQueue is down are answered after a restart. The very first sync, and the

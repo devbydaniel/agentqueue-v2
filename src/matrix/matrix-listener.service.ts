@@ -15,6 +15,10 @@ import {
 import { parseInboundMessage } from './matrix-content.js';
 
 const MIN_BACKOFF_MS = 2_000;
+const ENCRYPTED_ROOM_NOTICE =
+  "This room is end-to-end encrypted, so I can't read messages here. " +
+  'Talk to me in an unencrypted room — encryption cannot be turned off on an ' +
+  'existing room, so create a new one.';
 // After joining a room, only messages this recent count as new — enough for
 // the first message typed while the invite was pending, without replaying
 // the history of an existing room.
@@ -34,6 +38,8 @@ export class MatrixListenerService
   private readonly abortController = new AbortController();
   /** Rooms joined by this process, with the join time, until first synced. */
   private readonly freshlyJoined = new Map<string, number>();
+  /** Encrypted rooms already told that the bot can't read them (per process). */
+  private readonly encryptedRoomsWarned = new Set<string>();
 
   constructor(
     private readonly triggerConfigService: TriggerConfigService,
@@ -126,6 +132,7 @@ export class MatrixListenerService
     response: SyncResponse,
   ): Promise<void> {
     await this.joinInvitedRooms(botName, client, response);
+    await this.warnAboutEncryptedRooms(botName, response);
     for (const batch of this.collectBatches(botName, response)) {
       // Ingest downloads/transcribes media; don't hold up the sync loop.
       void this.ingestService.ingest(batch).catch((error: unknown) => {
@@ -134,6 +141,37 @@ export class MatrixListenerService
           roomId: batch.roomId,
         });
       });
+    }
+  }
+
+  /**
+   * The bot has no E2EE support, so in an encrypted room it only receives
+   * ciphertext. Say so once instead of staying silent.
+   */
+  private async warnAboutEncryptedRooms(
+    botName: string,
+    response: SyncResponse,
+  ): Promise<void> {
+    for (const [roomId, room] of Object.entries(response.rooms?.join ?? {})) {
+      if (this.encryptedRoomsWarned.has(roomId)) continue;
+      const fromAllowedUser = (room.timeline?.events ?? []).some(
+        (e) =>
+          e.type === 'm.room.encrypted' &&
+          this.ingestService.resolveTrigger(botName, e.sender, roomId),
+      );
+      if (!fromAllowedUser) continue;
+      this.encryptedRoomsWarned.add(roomId);
+      try {
+        await this.matrixService.sendNotice(
+          { botName, roomId, threadRootId: undefined },
+          ENCRYPTED_ROOM_NOTICE,
+        );
+      } catch (error) {
+        this.logger.error('Failed to send encrypted-room notice', {
+          error: error as Error,
+          roomId,
+        });
+      }
     }
   }
 

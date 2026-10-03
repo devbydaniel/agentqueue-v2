@@ -21,16 +21,13 @@ properly. Keep it reasonably concise — it is often read on a phone.
 
 const MAX_CONTEXT_CHARS = 4000;
 
-type Command =
-  | { kind: 'new' }
-  | { kind: 'voice'; mode: 'on' | 'off' | 'toggle' };
+type VoiceCommand = 'on' | 'off' | 'toggle';
 
-function parseCommand(text: string): Command | undefined {
+function parseVoiceCommand(text: string): VoiceCommand | undefined {
   const normalized = text.trim().toLowerCase();
-  if (normalized === '!new' || normalized === '!reset') return { kind: 'new' };
-  if (normalized === '!voice') return { kind: 'voice', mode: 'toggle' };
-  if (normalized === '!voice on') return { kind: 'voice', mode: 'on' };
-  if (normalized === '!voice off') return { kind: 'voice', mode: 'off' };
+  if (normalized === '!voice') return 'toggle';
+  if (normalized === '!voice on') return 'on';
+  if (normalized === '!voice off') return 'off';
   return undefined;
 }
 
@@ -89,11 +86,11 @@ export class MatrixIngestService {
 
     const command =
       batch.messages.length === 1 && batch.messages[0].kind === 'text'
-        ? parseCommand(batch.messages[0].text ?? '')
+        ? parseVoiceCommand(batch.messages[0].text ?? '')
         : undefined;
     if (command) {
       // Commands are answered where they were sent, without opening a thread.
-      await this.runCommand(command, {
+      await this.runVoiceCommand(command, {
         botName: batch.botName,
         roomId: batch.roomId,
         threadRootId: batch.threadRootId,
@@ -174,21 +171,15 @@ export class MatrixIngestService {
     }
   }
 
-  private async runCommand(
-    command: Command,
+  private async runVoiceCommand(
+    command: VoiceCommand,
     target: MatrixTarget,
   ): Promise<void> {
-    if (command.kind === 'new') {
-      await this.resetThread(target);
-      return;
-    }
-
     const current = await this.matrixService.isVoiceEnabled(
       target.botName,
       target.roomId,
     );
-    const enabled =
-      command.mode === 'toggle' ? !current : command.mode === 'on';
+    const enabled = command === 'toggle' ? !current : command === 'on';
     try {
       await this.matrixService.setVoiceEnabled(
         target.botName,
@@ -207,27 +198,6 @@ export class MatrixIngestService {
       enabled
         ? 'Voice mode ON for this room — replies come as voice and text.'
         : 'Voice mode OFF for this room — replies are text only.',
-    );
-  }
-
-  private async resetThread(target: MatrixTarget): Promise<void> {
-    if (!target.threadRootId) {
-      await this.notice(
-        target,
-        'Every message here already starts a new session in its own thread.',
-      );
-      return;
-    }
-    const sessionKey = buildSessionKey(
-      target.botName,
-      target.roomId,
-      target.threadRootId,
-    );
-    await this.externalSessionRepository.deleteBySessionKey(sessionKey);
-    this.runsService.abortSession(sessionKey);
-    await this.notice(
-      target,
-      'Session reset — the next message in this thread starts fresh.',
     );
   }
 
