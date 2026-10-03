@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { BOSS } from '../queue/queue.tokens.js';
 import type { Boss } from '../queue/queue.tokens.js';
+import type { SendOptions } from 'pg-boss';
 import { RunProcessorService } from './run-processor.service.js';
 import { RunRepository } from './run.repository.js';
 import type { CreateRunCommand, ListRunsFilters } from './run.repository.js';
@@ -101,7 +102,11 @@ export class RunsService {
 
     let jobId: string | null;
     try {
-      jobId = await this.boss.send(RUNS_QUEUE_NAME, { runId: run.id });
+      jobId = await this.boss.send(
+        RUNS_QUEUE_NAME,
+        { runId: run.id },
+        this.buildJobOptions(command),
+      );
     } catch (error) {
       run.status = 'errored';
       run.errorMessage =
@@ -121,6 +126,17 @@ export class RunsService {
     });
 
     return { runId: run.id, status: 'waiting' };
+  }
+
+  /**
+   * Runs sharing an external session resume the same SDK session, so they are
+   * grouped and the worker runs at most one per group at a time — otherwise a
+   * follow-up message sent mid-run forks the conversation.
+   */
+  private buildJobOptions(command: EnqueueRunCommand): SendOptions {
+    return command.externalSessionId
+      ? { group: { id: command.externalSessionId } }
+      : {};
   }
 
   async getRun(id: string): Promise<Run> {

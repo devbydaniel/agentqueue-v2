@@ -58,7 +58,7 @@ describe('RunQueueWorkerService', () => {
 
     expect(mockBoss.work).toHaveBeenCalledWith(
       RUNS_QUEUE_NAME,
-      { localConcurrency: 3 },
+      { localConcurrency: 3, localGroupConcurrency: 1 },
       expect.any(Function),
     );
   });

@@ -31,6 +31,11 @@ export class RunQueueWorkerService
       RUNS_QUEUE_NAME,
       {
         localConcurrency: this.appConfigService.queueConcurrency,
+        // One run per external session at a time (see RunsService.enqueue).
+        // The in-memory variant is deliberate: pg-boss's DB-tracked
+        // groupConcurrency races when several local workers fetch at once and
+        // let grouped jobs run in parallel. agentqueue runs as a single pod.
+        localGroupConcurrency: 1,
       },
       async (jobs) => {
         // pg-boss delivers an array; we process each independently

@@ -125,9 +125,11 @@ describe('RunsService', () => {
         appendSystemPrompt: undefined,
       });
 
-      expect(mockBoss.send).toHaveBeenCalledWith('runs', {
-        runId: 'run-abc',
-      });
+      expect(mockBoss.send).toHaveBeenCalledWith(
+        'runs',
+        { runId: 'run-abc' },
+        {},
+      );
 
       expect(runRepository.markWaitingQueueJob).toHaveBeenCalledWith(
         'run-abc',
@@ -154,6 +156,21 @@ describe('RunsService', () => {
           externalSessionId: 'session-key-1',
           appendSystemPrompt: 'append',
         }),
+      );
+    });
+
+    it('should group jobs by external session so a session runs serially', async () => {
+      await service.enqueue({
+        source: 'telegram',
+        cwd: tmpDir,
+        prompt: 'follow-up',
+        externalSessionId: 'telegram:daniel:42:main',
+      });
+
+      expect(mockBoss.send).toHaveBeenCalledWith(
+        'runs',
+        { runId: 'run-abc' },
+        { group: { id: 'telegram:daniel:42:main' } },
       );
     });
 
