@@ -20,7 +20,8 @@ export function buildSessionId(run: TraceableRun): string | undefined {
   if (
     (run.source === 'linear' ||
       run.source === 'telegram' ||
-      run.source === 'slack') &&
+      run.source === 'slack' ||
+      run.source === 'matrix') &&
     run.externalSessionId
   ) {
     return run.externalSessionId;

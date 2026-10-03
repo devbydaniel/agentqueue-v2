@@ -55,6 +55,22 @@ export interface SlackTrigger {
   timeout_ms?: number;
 }
 
+export interface MatrixTrigger {
+  name: string;
+  type: 'matrix';
+  bot_name: string;
+  /** Client-server API base URL, e.g. the in-cluster `http://synapse.matrix.svc:8008`. */
+  homeserver_url: string;
+  access_token: string;
+  /** Full Matrix ID allowed to talk to the bot, e.g. `@daniel:example.org`. */
+  user_id: string;
+  cwd: string;
+  room_id?: string;
+  agent?: string;
+  append_system_prompt?: string;
+  timeout_ms?: number;
+}
+
 export interface WebhookFilter {
   field: string;
   equals?: string;
@@ -83,6 +99,7 @@ export interface TriggersFile {
     | GithubTrigger
     | TelegramTrigger
     | SlackTrigger
+    | MatrixTrigger
   )[];
 }
 

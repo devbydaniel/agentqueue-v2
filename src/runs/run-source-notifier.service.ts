@@ -3,17 +3,20 @@ import type { Run } from '../database/runs.schema.js';
 import type { AssistantMessageCallbackHandler } from '../callbacks/handlers/assistant-message.callback-handler.js';
 import type { LinearCallbackHandler } from '../callbacks/handlers/linear.callback-handler.js';
 import type { SlackStreamingCallbackHandler } from '../slack/slack-streaming.callback-handler.js';
+import type { MatrixStreamingCallbackHandler } from '../matrix/matrix-streaming.callback-handler.js';
 import { TelegramService } from '../telegram/telegram.service.js';
 
 export interface SuccessNotificationContext {
   linearHandler: LinearCallbackHandler | undefined;
   assistantMessageHandler: AssistantMessageCallbackHandler | undefined;
   slackStreamingHandler: SlackStreamingCallbackHandler | undefined;
+  matrixStreamingHandler: MatrixStreamingCallbackHandler | undefined;
 }
 
 export interface ErrorNotificationContext {
   linearHandler: LinearCallbackHandler | undefined;
   slackStreamingHandler: SlackStreamingCallbackHandler | undefined;
+  matrixStreamingHandler: MatrixStreamingCallbackHandler | undefined;
 }
 
 @Injectable()
@@ -26,8 +29,12 @@ export class RunSourceNotifier {
     run: Run,
     ctx: SuccessNotificationContext,
   ): Promise<void> {
-    const { linearHandler, assistantMessageHandler, slackStreamingHandler } =
-      ctx;
+    const {
+      linearHandler,
+      assistantMessageHandler,
+      slackStreamingHandler,
+      matrixStreamingHandler,
+    } = ctx;
 
     if (linearHandler) {
       await this.emitSafe('Failed to emit success response to Linear', () =>
@@ -52,10 +59,17 @@ export class RunSourceNotifier {
         slackStreamingHandler.finalize(),
       );
     }
+
+    if (matrixStreamingHandler) {
+      await this.emitSafe('Failed to emit Matrix reply', () =>
+        matrixStreamingHandler.finalize(),
+      );
+    }
   }
 
   async notifyError(run: Run, ctx: ErrorNotificationContext): Promise<void> {
-    const { linearHandler, slackStreamingHandler } = ctx;
+    const { linearHandler, slackStreamingHandler, matrixStreamingHandler } =
+      ctx;
 
     if (linearHandler) {
       await this.emitSafe('Failed to emit error to Linear', () =>
@@ -76,6 +90,12 @@ export class RunSourceNotifier {
     if (slackStreamingHandler) {
       await this.emitSafe('Failed to emit Slack reply', () =>
         slackStreamingHandler.emitError(run.errorMessage!),
+      );
+    }
+
+    if (matrixStreamingHandler) {
+      await this.emitSafe('Failed to emit Matrix reply', () =>
+        matrixStreamingHandler.emitError(run.errorMessage!),
       );
     }
   }

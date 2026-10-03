@@ -16,7 +16,7 @@ import { TelegramChatSettingsRepository } from './telegram-chat-settings.reposit
 import { OpenaiTtsService } from './openai-tts.service.js';
 import { ensureDirectoryExists } from '../common/utils/cwd-path.js';
 
-const VOICE_SYSTEM_PROMPT = `
+export const VOICE_SYSTEM_PROMPT = `
 The user has voice mode ON — your reply will be read aloud as a voice message.
 Write for the ear, not the eye:
 

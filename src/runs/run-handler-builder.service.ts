@@ -13,15 +13,23 @@ import {
   SlackStreamingCallbackHandler,
   SlackStreamingCallbackHandlerFactory,
 } from '../slack/slack-streaming.callback-handler.js';
+import {
+  MatrixStreamingCallbackHandler,
+  MatrixStreamingCallbackHandlerFactory,
+} from '../matrix/matrix-streaming.callback-handler.js';
 import { TracingEnrichmentHandlerFactory } from '../callbacks/handlers/tracing-enrichment.callback-handler.js';
 import { RunEventCallbackHandler } from '../callbacks/handlers/run-event.callback-handler.js';
 import { RunEventRepository } from './run-event.repository.js';
 
-export interface RunHandlerBundle {
-  additionalHandlers: RunEventHandler[];
+interface SourceHandlers {
   linearHandler: LinearCallbackHandler | undefined;
   assistantMessageHandler: AssistantMessageCallbackHandler | undefined;
   slackStreamingHandler: SlackStreamingCallbackHandler | undefined;
+  matrixStreamingHandler: MatrixStreamingCallbackHandler | undefined;
+}
+
+export interface RunHandlerBundle extends SourceHandlers {
+  additionalHandlers: RunEventHandler[];
   traceContext: TraceContext;
 }
 
@@ -37,55 +45,64 @@ export class RunHandlerBuilder {
   constructor(
     private readonly linearFactory: LinearCallbackHandlerFactory,
     private readonly slackStreamingFactory: SlackStreamingCallbackHandlerFactory,
+    private readonly matrixStreamingFactory: MatrixStreamingCallbackHandlerFactory,
     private readonly tracingFactory: TracingEnrichmentHandlerFactory,
     private readonly runEventRepository: RunEventRepository,
   ) {}
 
   buildForRun(run: BuildableRun): RunHandlerBundle {
-    const additionalHandlers: RunEventHandler[] = [];
-    let linearHandler: LinearCallbackHandler | undefined;
-    let assistantMessageHandler: AssistantMessageCallbackHandler | undefined;
-    let slackStreamingHandler: SlackStreamingCallbackHandler | undefined;
-
-    if (run.source === 'linear' && run.externalSessionId && run.triggerName) {
-      linearHandler = this.linearFactory.createForRun(
-        run.triggerName,
-        run.externalSessionId,
-      );
-      if (linearHandler) {
-        additionalHandlers.push(linearHandler);
-      }
-    }
-
-    if (run.source === 'telegram' && run.externalSessionId && run.triggerName) {
-      assistantMessageHandler = new AssistantMessageCallbackHandler();
-      additionalHandlers.push(assistantMessageHandler);
-    }
-
-    if (run.source === 'slack' && run.externalSessionId && run.triggerName) {
-      slackStreamingHandler = this.slackStreamingFactory.createForRun(
-        run.triggerName,
-        run.externalSessionId,
-      );
-      if (slackStreamingHandler) {
-        additionalHandlers.push(slackStreamingHandler);
-      }
-    }
-
+    const sourceHandlers = this.buildSourceHandlers(run);
     const { handler: tracingHandler, traceContext } =
       this.tracingFactory.createForRun(run);
-    additionalHandlers.push(tracingHandler);
-    additionalHandlers.push(
+    const additionalHandlers: RunEventHandler[] = [
+      ...Object.values(sourceHandlers).filter(
+        (h): h is RunEventHandler => h !== undefined,
+      ),
+      tracingHandler,
       new RunEventCallbackHandler(run.id, this.runEventRepository),
-    );
+    ];
 
-    return {
-      additionalHandlers,
-      linearHandler,
-      assistantMessageHandler,
-      slackStreamingHandler,
-      traceContext,
+    return { additionalHandlers, ...sourceHandlers, traceContext };
+  }
+
+  /** Handlers that deliver a run's output back to the channel it came from. */
+  private buildSourceHandlers(run: BuildableRun): SourceHandlers {
+    const handlers: SourceHandlers = {
+      linearHandler: undefined,
+      assistantMessageHandler: undefined,
+      slackStreamingHandler: undefined,
+      matrixStreamingHandler: undefined,
     };
+    const { externalSessionId, triggerName } = run;
+    if (!externalSessionId || !triggerName) return handlers;
+
+    switch (run.source) {
+      case 'linear':
+        handlers.linearHandler = this.linearFactory.createForRun(
+          triggerName,
+          externalSessionId,
+        );
+        break;
+      case 'telegram':
+        handlers.assistantMessageHandler =
+          new AssistantMessageCallbackHandler();
+        break;
+      case 'slack':
+        handlers.slackStreamingHandler =
+          this.slackStreamingFactory.createForRun(
+            triggerName,
+            externalSessionId,
+          );
+        break;
+      case 'matrix':
+        handlers.matrixStreamingHandler =
+          this.matrixStreamingFactory.createForRun(
+            triggerName,
+            externalSessionId,
+          );
+        break;
+    }
+    return handlers;
   }
 
   wrapWithTraceContext<T>(

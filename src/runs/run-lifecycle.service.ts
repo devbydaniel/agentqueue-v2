@@ -2,7 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import type { Run } from '../database/runs.schema.js';
 import { AppConfigService } from '../config/app-config.service.js';
 import { RunRepository } from './run.repository.js';
-import { ExternalSessionRepository } from './external-session.repository.js';
+import {
+  ExternalSessionRepository,
+  type ExternalSessionProvider,
+} from './external-session.repository.js';
 import { RunCompletionNotifier } from './run-completion.notifier.js';
 
 export interface TerminalErrorContext {
@@ -70,7 +73,7 @@ export class RunLifecycleService {
   ): Promise<void> {
     if (run.externalSessionId && sessionId) {
       await this.externalSessionRepository.upsertSession({
-        provider: run.source as 'linear' | 'telegram' | 'slack',
+        provider: run.source as ExternalSessionProvider,
         sessionKey: run.externalSessionId,
         sessionId,
       });

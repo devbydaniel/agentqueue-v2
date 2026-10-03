@@ -4,7 +4,11 @@ import { PG_POOL } from '../database/database.tokens.js';
 import { mapRow } from '../database/query-helpers.js';
 import type { ExternalSessionRow } from '../database/external-sessions.schema.js';
 
-export type ExternalSessionProvider = 'linear' | 'telegram' | 'slack';
+export type ExternalSessionProvider =
+  | 'linear'
+  | 'telegram'
+  | 'slack'
+  | 'matrix';
 
 export interface UpsertExternalSessionParams {
   provider: ExternalSessionProvider;

@@ -337,6 +337,40 @@ curl -X POST "https://api.telegram.org/bot$TELEGRAM_MAIN_BOT_TOKEN/setWebhook" \
   }'
 ```
 
+#### Matrix Triggers
+
+Matrix triggers run a `/sync` long-poll loop per `bot_name` against a
+homeserver, as a plain (unencrypted) bot account. The bot auto-joins rooms it
+is invited to by an allowed `user_id`; messages from anyone else are ignored.
+
+```yaml
+triggers:
+  - name: matrix-daniel
+    type: matrix
+    bot_name: assistant
+    homeserver_url: http://synapse.matrix.svc.cluster.local:8008
+    access_token: ${MATRIX_ASSISTANT_TOKEN}
+    user_id: "@daniel:matrix.example.org"
+    cwd: ~/dev/assistant
+    # room_id: "!abc:matrix.example.org"   # optional: only this room
+```
+
+Sessions: each room's main timeline is one persistent session, and each thread
+is its own session. The first message in a thread gets the thread's root
+message as context, and an explicitly quoted message is always included — so
+replying to a message a cron run posted gives the agent that message. Replies
+stream in by editing one message in place and render as markdown (tables
+included). Images and files are passed as local paths; voice messages are
+transcribed (`MISTRAL_API_KEY`).
+
+Room commands: `!new` starts a fresh session (in the main timeline or the
+thread it is sent in); `!voice`, `!voice on`, `!voice off` toggle spoken
+replies for the room (`OPENAI_API_KEY`).
+
+The `/sync` position is stored in `matrix_sync_state`, so messages sent while
+AgentQueue is down are answered after a restart. The very first sync, and the
+history of a newly joined room, are not replayed.
+
 #### Linear Triggers
 
 Receive webhooks from Linear's Agent Interaction API:
@@ -436,6 +470,7 @@ src/
 ├── config/                           # Env + trigger config
 ├── database/                         # Row types, raw pg wiring, SQL migrations
 ├── flows/                            # Multi-step flow orchestration
+├── matrix/                           # Matrix client, /sync listener, ingest, streaming replies
 ├── queue/                            # pg-boss integration
 ├── runs/                             # Run API, persistence, processor, queue worker
 │   ├── runs.controller.ts

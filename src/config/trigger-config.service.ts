@@ -7,6 +7,7 @@ import type {
   CronTrigger,
   GithubTrigger,
   LinearTrigger,
+  MatrixTrigger,
   SlackTrigger,
   TelegramTrigger,
   TriggersFile,
@@ -19,6 +20,7 @@ import {
 import { parseGithubTriggers } from './trigger-parsers/github.parser.js';
 import { parseTelegramTriggers } from './trigger-parsers/telegram.parser.js';
 import { parseSlackTriggers } from './trigger-parsers/slack.parser.js';
+import { parseMatrixTriggers } from './trigger-parsers/matrix.parser.js';
 
 interface LoadedTriggers {
   cron: CronTrigger[];
@@ -26,6 +28,7 @@ interface LoadedTriggers {
   github: GithubTrigger[];
   telegram: TelegramTrigger[];
   slack: SlackTrigger[];
+  matrix: MatrixTrigger[];
 }
 
 const EMPTY_TRIGGERS: LoadedTriggers = {
@@ -34,6 +37,7 @@ const EMPTY_TRIGGERS: LoadedTriggers = {
   github: [],
   telegram: [],
   slack: [],
+  matrix: [],
 };
 
 @Injectable()
@@ -45,6 +49,7 @@ export class TriggerConfigService implements OnModuleInit {
   private githubTriggers: GithubTrigger[] = [];
   private telegramTriggers: TelegramTrigger[] = [];
   private slackTriggers: SlackTrigger[] = [];
+  private matrixTriggers: MatrixTrigger[] = [];
 
   onModuleInit(): void {
     const result = this.loadTriggers();
@@ -53,6 +58,7 @@ export class TriggerConfigService implements OnModuleInit {
     this.githubTriggers = result.github;
     this.telegramTriggers = result.telegram;
     this.slackTriggers = result.slack;
+    this.matrixTriggers = result.matrix;
   }
 
   getCronTriggers(): CronTrigger[] {
@@ -123,6 +129,18 @@ export class TriggerConfigService implements OnModuleInit {
     return this.slackTriggers.filter((t) => t.bot_name === botName);
   }
 
+  getMatrixTriggers(): MatrixTrigger[] {
+    return this.matrixTriggers;
+  }
+
+  getMatrixTrigger(name: string): MatrixTrigger | undefined {
+    return this.matrixTriggers.find((t) => t.name === name);
+  }
+
+  getMatrixTriggersForBot(botName: string): MatrixTrigger[] {
+    return this.matrixTriggers.filter((t) => t.bot_name === botName);
+  }
+
   getConfigPath(): string {
     return path.join(os.homedir(), '.agentqueue', 'triggers.yaml');
   }
@@ -151,6 +169,7 @@ export class TriggerConfigService implements OnModuleInit {
         github: parseGithubTriggers(raw, this.logger),
         telegram: parseTelegramTriggers(raw, this.logger),
         slack: parseSlackTriggers(raw, this.logger),
+        matrix: parseMatrixTriggers(raw, this.logger),
       };
 
       for (const type of Object.keys(result) as (keyof LoadedTriggers)[]) {

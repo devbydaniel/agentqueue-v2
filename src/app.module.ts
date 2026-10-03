@@ -11,6 +11,7 @@ import { WebhooksModule } from './webhooks/webhooks.module.js';
 import { FlowsModule } from './flows/flows.module.js';
 import { TelegramPollerModule } from './telegram/telegram-poller.module.js';
 import { SlackListenerModule } from './slack/slack-listener.module.js';
+import { MatrixListenerModule } from './matrix/matrix-listener.module.js';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { SlackListenerModule } from './slack/slack-listener.module.js';
     FlowsModule,
     TelegramPollerModule,
     SlackListenerModule,
+    MatrixListenerModule,
   ],
 })
 export class AppModule {}
