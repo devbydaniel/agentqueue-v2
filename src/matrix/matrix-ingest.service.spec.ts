@@ -11,7 +11,7 @@ import type { MatrixMediaService } from './matrix-media.service.js';
 import type { VoxtralTranscriptionService } from '../telegram/voxtral-transcription.service.js';
 
 const ROOM = '!room:hs';
-const MAIN_KEY = `matrix:assistant:${ROOM}:main`;
+const TOP_LEVEL_KEY = `matrix:assistant:${ROOM}:$e1`;
 
 function text(
   body: string,
@@ -105,18 +105,22 @@ describe('MatrixIngestService', () => {
     expect(runsService.enqueue).not.toHaveBeenCalled();
   });
 
-  it('enqueues a run on the room main session', async () => {
+  it('starts a new thread session rooted at a top-level message', async () => {
     await ingest([text('hello')]);
     expect(sessions.upsertSession).toHaveBeenCalledWith(
-      expect.objectContaining({ provider: 'matrix', sessionKey: MAIN_KEY }),
+      expect.objectContaining({
+        provider: 'matrix',
+        sessionKey: TOP_LEVEL_KEY,
+      }),
     );
-    expect(matrixService.startTyping).toHaveBeenCalledWith(MAIN_KEY);
+    expect(matrixService.startTyping).toHaveBeenCalledWith(TOP_LEVEL_KEY);
+    expect(getEvent).not.toHaveBeenCalled();
     expect(runsService.enqueue).toHaveBeenCalledWith(
       expect.objectContaining({
         source: 'matrix',
         triggerName: 'matrix-daniel',
         prompt: 'hello',
-        externalSessionId: MAIN_KEY,
+        externalSessionId: TOP_LEVEL_KEY,
         appendSystemPrompt: expect.stringContaining('Matrix') as unknown,
       }),
     );
@@ -192,10 +196,21 @@ describe('MatrixIngestService', () => {
     );
   });
 
-  it('!new resets the session it is sent in', async () => {
+  it('!new in a thread resets that thread session', async () => {
+    await ingest([text('!new', { threadRootId: '$root' })], '$root');
+    const key = `matrix:assistant:${ROOM}:$root`;
+    expect(sessions.deleteBySessionKey).toHaveBeenCalledWith(key);
+    expect(runsService.abortSession).toHaveBeenCalledWith(key);
+    expect(runsService.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('!new at the top level only explains that threads are sessions', async () => {
     await ingest([text('!new')]);
-    expect(sessions.deleteBySessionKey).toHaveBeenCalledWith(MAIN_KEY);
-    expect(runsService.abortSession).toHaveBeenCalledWith(MAIN_KEY);
+    expect(sessions.deleteBySessionKey).not.toHaveBeenCalled();
+    expect(matrixService.sendNotice).toHaveBeenCalledWith(
+      expect.objectContaining({ threadRootId: undefined }),
+      expect.stringContaining('own thread'),
+    );
     expect(runsService.enqueue).not.toHaveBeenCalled();
   });
 

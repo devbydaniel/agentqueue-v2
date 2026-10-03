@@ -355,17 +355,18 @@ triggers:
     # room_id: "!abc:matrix.example.org"   # optional: only this room
 ```
 
-Sessions: each room's main timeline is one persistent session, and each thread
-is its own session. The first message in a thread gets the thread's root
-message as context, and an explicitly quoted message is always included — so
-replying to a message a cron run posted gives the agent that message. Replies
-stream in by editing one message in place and render as markdown (tables
-included). Images and files are passed as local paths; voice messages are
-transcribed (`MISTRAL_API_KEY`).
+Sessions: one per thread. A message sent at the top level of a room starts a
+new session; the bot replies in a thread under it, and follow-ups go in that
+thread. A message sent into an existing thread (e.g. one a cron run posted)
+starts a session there with the thread's root message as context, and an
+explicitly quoted message is always included. Replies stream in by editing
+one message in place and render as markdown (tables included). Images and
+files are passed as local paths; voice messages are transcribed
+(`MISTRAL_API_KEY`).
 
-Room commands: `!new` starts a fresh session (in the main timeline or the
-thread it is sent in); `!voice`, `!voice on`, `!voice off` toggle spoken
-replies for the room (`OPENAI_API_KEY`).
+Room commands: `!new` inside a thread resets that thread's session; `!voice`,
+`!voice on`, `!voice off` toggle spoken replies for the room
+(`OPENAI_API_KEY`).
 
 The `/sync` position is stored in `matrix_sync_state`, so messages sent while
 AgentQueue is down are answered after a restart. The very first sync, and the

@@ -37,15 +37,16 @@ function parseCommand(text: string): Command | undefined {
 export interface MatrixIngestBatch {
   botName: string;
   roomId: string;
-  /** Undefined for the room's main timeline. */
+  /** Undefined for messages sent at the top level of the room. */
   threadRootId: string | undefined;
   /** Consecutive messages for one session, oldest first. */
   messages: InboundMessage[];
 }
 
 /**
- * Turns inbound Matrix messages into agent runs. One session per room main
- * timeline plus one per thread; `!new` resets the session it is sent in.
+ * Turns inbound Matrix messages into agent runs, one session per thread. A
+ * message at the top level of a room starts a new thread (and session) rooted
+ * at itself; the reply and all follow-ups live in that thread.
  */
 @Injectable()
 export class MatrixIngestService {
@@ -86,6 +87,24 @@ export class MatrixIngestService {
       return;
     }
 
+    const command =
+      batch.messages.length === 1 && batch.messages[0].kind === 'text'
+        ? parseCommand(batch.messages[0].text ?? '')
+        : undefined;
+    if (command) {
+      // Commands are answered where they were sent, without opening a thread.
+      await this.runCommand(command, {
+        botName: batch.botName,
+        roomId: batch.roomId,
+        threadRootId: batch.threadRootId,
+      });
+      return;
+    }
+
+    // A top-level message opens its own thread: one session per thread.
+    if (!batch.threadRootId) {
+      batch = { ...batch, threadRootId: batch.messages[0].eventId };
+    }
     const target: MatrixTarget = {
       botName: batch.botName,
       roomId: batch.roomId,
@@ -96,15 +115,6 @@ export class MatrixIngestService {
       batch.roomId,
       batch.threadRootId,
     );
-
-    const command =
-      batch.messages.length === 1 && batch.messages[0].kind === 'text'
-        ? parseCommand(batch.messages[0].text ?? '')
-        : undefined;
-    if (command) {
-      await this.runCommand(command, target, sessionKey);
-      return;
-    }
 
     const prompt = await this.composePrompt(batch, target, sessionKey);
     if (!prompt) return;
@@ -120,6 +130,17 @@ export class MatrixIngestService {
     });
     this.matrixService.startTyping(sessionKey);
 
+    await this.enqueueRun(trigger, batch, target, sessionKey, prompt, cwd);
+  }
+
+  private async enqueueRun(
+    trigger: MatrixTrigger,
+    batch: MatrixIngestBatch,
+    target: MatrixTarget,
+    sessionKey: string,
+    prompt: string,
+    cwd: string,
+  ): Promise<void> {
     const voiceEnabled = await this.matrixService.isVoiceEnabled(
       batch.botName,
       batch.roomId,
@@ -156,12 +177,9 @@ export class MatrixIngestService {
   private async runCommand(
     command: Command,
     target: MatrixTarget,
-    sessionKey: string,
   ): Promise<void> {
     if (command.kind === 'new') {
-      await this.externalSessionRepository.deleteBySessionKey(sessionKey);
-      this.runsService.abortSession(sessionKey);
-      await this.notice(target, 'New session — the next message starts fresh.');
+      await this.resetThread(target);
       return;
     }
 
@@ -189,6 +207,27 @@ export class MatrixIngestService {
       enabled
         ? 'Voice mode ON for this room — replies come as voice and text.'
         : 'Voice mode OFF for this room — replies are text only.',
+    );
+  }
+
+  private async resetThread(target: MatrixTarget): Promise<void> {
+    if (!target.threadRootId) {
+      await this.notice(
+        target,
+        'Every message here already starts a new session in its own thread.',
+      );
+      return;
+    }
+    const sessionKey = buildSessionKey(
+      target.botName,
+      target.roomId,
+      target.threadRootId,
+    );
+    await this.externalSessionRepository.deleteBySessionKey(sessionKey);
+    this.runsService.abortSession(sessionKey);
+    await this.notice(
+      target,
+      'Session reset — the next message in this thread starts fresh.',
     );
   }
 
