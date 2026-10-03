@@ -310,8 +310,9 @@ inline shell expression. It does **not** apply to Linear or Telegram triggers.
 #### Telegram Triggers
 
 Telegram triggers route inbound bot messages by `bot_name` and sender `user_id`.
-Each accepted chat keeps a persistent agent session. Send `/reset` to clear the
-session manually; sessions also reset automatically after 1 hour of inactivity.
+Each accepted chat (and each topic in a threaded chat) keeps a persistent agent
+session that never expires. Send `/reset` or press the "new session" button to
+start a fresh one.
 
 ```yaml
 triggers:

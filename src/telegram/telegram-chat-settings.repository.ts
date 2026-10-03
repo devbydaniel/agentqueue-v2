@@ -7,7 +7,7 @@ import type { TelegramChatSettingsRow } from '../database/telegram-chat-settings
 /**
  * Per-chat Telegram preferences keyed by the same `session_key` the ingest path
  * builds (`telegram:botName:chatId:threadId`). Stored separately from
- * `external_sessions` so the voice-mode toggle survives `/reset` and idle expiry.
+ * `external_sessions` so the voice-mode toggle survives `/reset`.
  */
 @Injectable()
 export class TelegramChatSettingsRepository {

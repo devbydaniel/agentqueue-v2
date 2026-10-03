@@ -16,8 +16,6 @@ import { TelegramChatSettingsRepository } from './telegram-chat-settings.reposit
 import { OpenaiTtsService } from './openai-tts.service.js';
 import { ensureDirectoryExists } from '../common/utils/cwd-path.js';
 
-const TELEGRAM_SESSION_IDLE_MS = 60 * 60 * 1000;
-
 const VOICE_SYSTEM_PROMPT = `
 The user has voice mode ON — your reply will be read aloud as a voice message.
 Write for the ear, not the eye:
@@ -133,9 +131,6 @@ export class TelegramIngestService {
       return { accepted: true, handled: true };
     }
 
-    const now = new Date();
-    await this.expireStaleSession(sessionKey, now);
-
     await this.externalSessionRepository.upsertSession({
       provider: 'telegram',
       sessionKey,
@@ -143,7 +138,7 @@ export class TelegramIngestService {
       botName: params.botName,
       chatId: params.chatId,
       messageThreadId: params.messageThreadId,
-      lastActivityAt: now,
+      lastActivityAt: new Date(),
     });
 
     this.telegramService.startTypingIndicator({
@@ -231,30 +226,6 @@ export class TelegramIngestService {
           sessionKey,
         });
       });
-  }
-
-  private async expireStaleSession(
-    sessionKey: string,
-    now: Date,
-  ): Promise<void> {
-    const existingSession =
-      await this.externalSessionRepository.findBySessionKey(sessionKey);
-    const isExpired =
-      existingSession?.lastActivityAt &&
-      now.getTime() - existingSession.lastActivityAt.getTime() >
-        TELEGRAM_SESSION_IDLE_MS;
-
-    if (!isExpired) return;
-
-    await this.externalSessionRepository.deleteBySessionKey(sessionKey);
-    try {
-      this.runsService.abortSession(sessionKey);
-    } catch (error) {
-      this.logger.error('Failed to abort expired Telegram session', {
-        error: error as Error,
-        sessionKey,
-      });
-    }
   }
 
   private buildAppendSystemPrompt(
