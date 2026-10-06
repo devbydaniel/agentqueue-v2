@@ -24,7 +24,6 @@ export interface Run {
   id: string;
   source: (typeof runSources)[number];
   triggerName: string | null;
-  agentName: string | null;
   parentRunId: string | null;
   cwd: string;
   prompt: string;
@@ -45,7 +44,6 @@ export interface Run {
 export interface NewRun {
   source: Run['source'];
   triggerName?: string | null;
-  agentName?: string | null;
   parentRunId?: string | null;
   cwd: string;
   prompt: string;

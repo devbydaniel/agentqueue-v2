@@ -6,11 +6,8 @@ import type {
 import { RUN_EVENT_HANDLERS } from '../callbacks/constants.js';
 import type { RunEventHandler } from '../callbacks/run-event-handler.interface.js';
 import type { TraceContext } from '../callbacks/build-trace-context.js';
-import { AgentProfileService } from '../agents/agent-profile.service.js';
-import type { AgentProfile } from '../agents/agent-profile.interface.js';
 import { ActiveSessionTrackerService } from './active-session-tracker.service.js';
 import { SdkSessionFactory } from './sdk-session.factory.js';
-import type { Run } from '../database/runs.schema.js';
 import { RunLifecycleService } from './run-lifecycle.service.js';
 import { RunHandlerBuilder } from './run-handler-builder.service.js';
 import { RunSourceNotifier } from './run-source-notifier.service.js';
@@ -18,8 +15,6 @@ import { RunSourceNotifier } from './run-source-notifier.service.js';
 export interface RunSessionParams {
   cwd: string;
   prompt: string;
-  /** Resolved agent profile (enables model/tool/subagent overrides) */
-  profile?: AgentProfile;
   additionalHandlers?: RunEventHandler[];
   /** Session ID to resume a previous SDK session */
   resumeSessionId?: string;
@@ -47,7 +42,6 @@ export class RunProcessorService {
   constructor(
     private readonly sdkSessionFactory: SdkSessionFactory,
     private readonly activeSessionTracker: ActiveSessionTrackerService,
-    private readonly agentProfileService: AgentProfileService,
     private readonly lifecycle: RunLifecycleService,
     private readonly handlerBuilder: RunHandlerBuilder,
     private readonly sourceNotifier: RunSourceNotifier,
@@ -79,10 +73,6 @@ export class RunProcessorService {
     const run = await this.lifecycle.loadForProcessing(runId);
     if (!run) return;
 
-    const profile = this.resolveAgentProfile(run, runId);
-    // Agent profile repo overrides the run's cwd (already expanded by AgentProfileService)
-    const effectiveCwd = profile?.repo ?? run.cwd;
-
     await this.lifecycle.markRunning(run);
 
     const bundle = this.handlerBuilder.buildForRun(run);
@@ -95,9 +85,8 @@ export class RunProcessorService {
 
     try {
       const result = await this.runSession({
-        cwd: effectiveCwd,
+        cwd: run.cwd,
         prompt: run.prompt,
-        profile,
         resumeSessionId,
         externalSessionId: run.externalSessionId ?? undefined,
         runId,
@@ -119,21 +108,6 @@ export class RunProcessorService {
     } finally {
       clearTimeout(timer);
     }
-  }
-
-  private resolveAgentProfile(
-    run: Run,
-    runId: string,
-  ): AgentProfile | undefined {
-    if (!run.agentName) return undefined;
-    const profile = this.agentProfileService.getProfile(run.agentName);
-    if (!profile) {
-      this.logger.warn(
-        `Agent profile "${run.agentName}" not found — running without profile overrides`,
-        { runId },
-      );
-    }
-    return profile;
   }
 
   private async runSession(
@@ -188,7 +162,6 @@ export class RunProcessorService {
     return this.sdkSessionFactory.create({
       cwd: params.cwd,
       prompt: params.prompt,
-      profile: params.profile,
       runId: params.runId,
       additionalSystemPrompts:
         systemPrompts.length > 0 ? systemPrompts : undefined,

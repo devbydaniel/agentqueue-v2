@@ -3,7 +3,6 @@ export interface CronTrigger {
   schedule: string;
   cwd: string;
   prompt: string;
-  agent?: string;
   before?: string;
   append_system_prompt?: string;
   timeout_ms?: number;
@@ -18,7 +17,6 @@ export interface LinearTrigger {
   cwd: string;
   signing_secret: string;
   api_key: string;
-  agent?: string;
   append_system_prompt?: string;
   timeout_ms?: number;
 }
@@ -31,7 +29,6 @@ export interface TelegramTrigger {
   user_id: string;
   cwd: string;
   chat_id?: string;
-  agent?: string;
   append_system_prompt?: string;
   timeout_ms?: number;
 }
@@ -50,7 +47,6 @@ export interface SlackTrigger {
    */
   user_id?: string;
   channel_id?: string;
-  agent?: string;
   append_system_prompt?: string;
   timeout_ms?: number;
 }
@@ -66,7 +62,6 @@ export interface MatrixTrigger {
   user_id: string;
   cwd: string;
   room_id?: string;
-  agent?: string;
   append_system_prompt?: string;
   timeout_ms?: number;
 }
@@ -87,7 +82,6 @@ export interface GithubTrigger {
   prompt: string;
   filters?: WebhookFilter[];
   before?: string;
-  agent?: string;
   append_system_prompt?: string;
   timeout_ms?: number;
 }

@@ -25,7 +25,6 @@ const mapEntry = (entry: Record<string, unknown>): CronTrigger => ({
   schedule: entry['schedule'] as string,
   cwd: normalizeCwd(entry['cwd'] as string, 'cron trigger cwd'),
   prompt: entry['prompt'] as string,
-  ...(entry['agent'] ? { agent: entry['agent'] as string } : {}),
   ...(entry['before'] ? { before: entry['before'] as string } : {}),
   ...(entry['append_system_prompt']
     ? { append_system_prompt: entry['append_system_prompt'] as string }

@@ -169,7 +169,6 @@ export class SlackIngestService {
       await this.runsService.enqueue({
         source: 'slack',
         triggerName: trigger.name,
-        agentName: trigger.agent,
         cwd,
         prompt: params.text,
         externalSessionId: sessionKey,

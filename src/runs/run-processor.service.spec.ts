@@ -17,7 +17,6 @@ import { RunEventRepository } from './run-event.repository.js';
 import { RUN_EVENT_HANDLERS } from '../callbacks/constants.js';
 import type { RunEventHandler } from '../callbacks/run-event-handler.interface.js';
 import type { Run } from '../database/runs.schema.js';
-import { AgentProfileService } from '../agents/agent-profile.service.js';
 import { RunLifecycleService } from './run-lifecycle.service.js';
 import { RunHandlerBuilder } from './run-handler-builder.service.js';
 import { RunSourceNotifier } from './run-source-notifier.service.js';
@@ -185,10 +184,6 @@ describe('RunProcessorService', () => {
             append: mockRunEventAppend,
             findByRunId: jest.fn().mockResolvedValue([]),
           },
-        },
-        {
-          provide: AgentProfileService,
-          useValue: { getProfile: jest.fn().mockReturnValue(undefined) },
         },
         {
           provide: LinearCallbackHandlerFactory,
@@ -505,7 +500,6 @@ describe('RunProcessorService', () => {
         id: 'run-123',
         source: 'manual',
         triggerName: null,
-        agentName: null,
         parentRunId: null,
         cwd: '/home/user/dev/my-repo',
         prompt: 'do something',

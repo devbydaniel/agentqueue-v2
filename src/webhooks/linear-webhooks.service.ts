@@ -245,7 +245,6 @@ export class LinearWebhooksService {
       .enqueue({
         source: 'linear',
         triggerName: key,
-        agentName: trigger.agent,
         cwd,
         prompt,
         externalSessionId: payload.agentSessionId,

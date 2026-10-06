@@ -23,7 +23,6 @@ export interface ListRunsFilters {
 export interface CreateRunCommand {
   source: (typeof runSources)[number];
   triggerName?: string;
-  agentName?: string;
   parentRunId?: string;
   cwd: string;
   prompt: string;
@@ -35,8 +34,7 @@ export interface CreateRunCommand {
 function mapRunRow(row: Record<string, unknown>): Run {
   const mapped = mapRow<Record<string, unknown>>(row);
   return {
-    ...(mapped as Omit<Run, 'externalSessionId' | 'agentName'>),
-    agentName: (row['agent_name'] as string | null) ?? null,
+    ...(mapped as Omit<Run, 'externalSessionId'>),
     externalSessionId: (row['external_session_id'] as string | null) ?? null,
   };
 }
@@ -51,7 +49,6 @@ export class RunRepository {
     const newRun: NewRun = {
       source: command.source,
       triggerName: command.triggerName,
-      agentName: command.agentName,
       parentRunId: command.parentRunId,
       cwd: command.cwd,
       prompt: command.prompt,
@@ -64,7 +61,6 @@ export class RunRepository {
       `INSERT INTO runs (
         source,
         trigger_name,
-        agent_name,
         parent_run_id,
         cwd,
         prompt,
@@ -72,12 +68,11 @@ export class RunRepository {
         external_session_id,
         append_system_prompt,
         timeout_ms
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
       RETURNING *`,
       [
         newRun.source,
         newRun.triggerName ?? null,
-        newRun.agentName ?? null,
         newRun.parentRunId ?? null,
         newRun.cwd,
         newRun.prompt,

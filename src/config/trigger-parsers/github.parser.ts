@@ -76,7 +76,6 @@ const mapEntry = (entry: Record<string, unknown>): GithubTrigger => ({
   events: entry['events'] as string[],
   cwd: normalizeCwd(entry['cwd'] as string, 'github trigger cwd'),
   prompt: entry['prompt'] as string,
-  ...(entry['agent'] ? { agent: entry['agent'] as string } : {}),
   ...(entry['filters'] ? { filters: entry['filters'] as WebhookFilter[] } : {}),
   ...(entry['before'] ? { before: entry['before'] as string } : {}),
   ...(entry['append_system_prompt']
