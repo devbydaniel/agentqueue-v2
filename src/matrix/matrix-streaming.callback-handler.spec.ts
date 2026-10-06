@@ -1,15 +1,12 @@
-import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { MatrixStreamingCallbackHandler } from './matrix-streaming.callback-handler.js';
 import type { MatrixService } from './matrix.service.js';
 import { MAX_MESSAGE_CHARS } from './matrix-content.js';
-
-function assistantMessage(text: string, parent: string | null = null) {
-  return {
-    type: 'assistant',
-    message: { content: [{ type: 'text', text }] },
-    parent_tool_use_id: parent,
-  } as unknown as SDKMessage;
-}
+import {
+  assistantText,
+  assistantToolCall,
+  messageUpdate,
+  toolResult,
+} from '../callbacks/handlers/__tests__/pi-event.fixtures.js';
 
 describe('MatrixStreamingCallbackHandler', () => {
   let sendMessage: jest.Mock;
@@ -49,14 +46,16 @@ describe('MatrixStreamingCallbackHandler', () => {
     jest.useRealTimers();
   });
 
-  it('ignores subagent output', async () => {
-    handler.onMessage(assistantMessage('inner', 'tool-1'));
+  it('ignores non-assistant events, streaming partials, and text-less turns', async () => {
+    handler.onEvent(toolResult('tc-1', 'output'));
+    handler.onEvent(messageUpdate());
+    handler.onEvent(assistantToolCall('bash', { command: 'ls' }));
     await jest.advanceTimersByTimeAsync(1500);
     expect(sendMessage).not.toHaveBeenCalled();
   });
 
   it('posts into the thread first, then edits in place', async () => {
-    handler.onMessage(assistantMessage('first'));
+    handler.onEvent(assistantText('first'));
     await jest.advanceTimersByTimeAsync(1001);
     expect(sendMessage).toHaveBeenCalledTimes(1);
     const [roomId, posted] = sendMessage.mock.calls[0] as [
@@ -70,7 +69,7 @@ describe('MatrixStreamingCallbackHandler', () => {
       event_id: '$root',
     });
 
-    handler.onMessage(assistantMessage('second'));
+    handler.onEvent(assistantText('second'));
     await handler.finalize();
     const edit = sendMessage.mock.calls[1][1] as Record<string, unknown>;
     expect(edit['m.relates_to']).toEqual({
@@ -95,7 +94,7 @@ describe('MatrixStreamingCallbackHandler', () => {
   it('continues oversized output in a new message', async () => {
     const line = 'y'.repeat(1000);
     const long = Array.from({ length: 20 }, () => line).join('\n');
-    handler.onMessage(assistantMessage(long));
+    handler.onEvent(assistantText(long));
     await handler.finalize();
     const bodies = sendMessage.mock.calls.map(
       (call) => (call[1] as Record<string, unknown>)['body'] as string,
@@ -106,7 +105,7 @@ describe('MatrixStreamingCallbackHandler', () => {
   });
 
   it('appends errors to the streamed message', async () => {
-    handler.onMessage(assistantMessage('partial'));
+    handler.onEvent(assistantText('partial'));
     await jest.advanceTimersByTimeAsync(1001);
     await handler.emitError('boom');
     const edit = sendMessage.mock.calls[1][1] as Record<string, unknown>;
@@ -117,8 +116,8 @@ describe('MatrixStreamingCallbackHandler', () => {
 
   it('speaks the last assistant message when voice mode is on', async () => {
     matrixService.isVoiceEnabled.mockResolvedValue(true);
-    handler.onMessage(assistantMessage('thinking out loud'));
-    handler.onMessage(assistantMessage('the answer'));
+    handler.onEvent(assistantText('thinking out loud'));
+    handler.onEvent(assistantText('the answer'));
     await handler.finalize();
     expect(matrixService.sendVoiceNote).toHaveBeenCalledWith(
       target,

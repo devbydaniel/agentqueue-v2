@@ -1,13 +1,20 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type {
-  SDKMessage,
-  SDKResultMessage,
-} from '@anthropic-ai/claude-agent-sdk';
+  AgentSession,
+  AgentSessionEvent,
+} from '@earendil-works/pi-coding-agent' with { 'resolution-mode': 'import' };
 import { RUN_EVENT_HANDLERS } from '../callbacks/constants.js';
-import type { RunEventHandler } from '../callbacks/run-event-handler.interface.js';
+import type {
+  RunEventHandler,
+  SessionStartInfo,
+} from '../callbacks/run-event-handler.interface.js';
+import {
+  assistantMessageOf,
+  type AssistantMessage,
+} from '../callbacks/pi-messages.js';
 import type { TraceContext } from '../callbacks/build-trace-context.js';
 import { ActiveSessionTrackerService } from './active-session-tracker.service.js';
-import { SdkSessionFactory } from './sdk-session.factory.js';
+import { PiSessionFactory } from './pi-session.factory.js';
 import { RunLifecycleService } from './run-lifecycle.service.js';
 import { RunHandlerBuilder } from './run-handler-builder.service.js';
 import { RunSourceNotifier } from './run-source-notifier.service.js';
@@ -16,7 +23,7 @@ export interface RunSessionParams {
   cwd: string;
   prompt: string;
   additionalHandlers?: RunEventHandler[];
-  /** Session ID to resume a previous SDK session */
+  /** pi session ID to resume */
   resumeSessionId?: string;
   /** Optional external ID to track the session for later cancellation (e.g. Linear agentSessionId) */
   externalSessionId?: string;
@@ -31,8 +38,7 @@ export interface RunSessionParams {
 }
 
 export interface RunSessionResult {
-  success: boolean;
-  sessionId?: string;
+  sessionId: string;
 }
 
 @Injectable()
@@ -40,7 +46,7 @@ export class RunProcessorService {
   private readonly logger = new Logger(RunProcessorService.name);
 
   constructor(
-    private readonly sdkSessionFactory: SdkSessionFactory,
+    private readonly piSessionFactory: PiSessionFactory,
     private readonly activeSessionTracker: ActiveSessionTrackerService,
     private readonly lifecycle: RunLifecycleService,
     private readonly handlerBuilder: RunHandlerBuilder,
@@ -116,9 +122,18 @@ export class RunProcessorService {
     this.logger.log('Running session', { cwd: params.cwd });
 
     const abortController = params.abortController ?? new AbortController();
-    const handle = await this.createSdkHandle(params, abortController);
-
+    const session = await this.createPiSession(params);
     const trackKey = this.trackSession(params, abortController);
+    const abortSession = () => {
+      session.abort().catch((error: unknown) => {
+        this.logger.error('Failed to abort pi session', {
+          error: error as Error,
+        });
+      });
+    };
+    abortController.signal.addEventListener('abort', abortSession, {
+      once: true,
+    });
 
     const handlers = [
       ...this.globalHandlers,
@@ -126,46 +141,46 @@ export class RunProcessorService {
     ];
 
     try {
-      const lastResult = await this.consumeSession(
-        handle.messages,
+      // pi's abort() only cancels an active turn, so an abort that landed
+      // while the session was being created must stop the prompt here.
+      this.throwIfAborted(abortController.signal);
+      const lastAssistant = await this.consumeSession(
+        session,
+        params.prompt,
         handlers,
         params.traceContext,
       );
 
-      if (lastResult?.is_error) {
+      this.throwIfAborted(abortController.signal);
+      // Provider failures (overload, auth, context overflow) don't throw:
+      // pi ends the run with an assistant message whose stopReason is error.
+      if (lastAssistant?.stopReason === 'error') {
         throw new Error(
-          lastResult.subtype === 'error_max_turns'
-            ? 'Agent run exceeded maximum turns'
-            : `Agent run failed: ${lastResult.subtype}`,
+          `Agent run failed: ${lastAssistant.errorMessage ?? 'unknown error'}`,
         );
       }
 
-      return {
-        success: !lastResult?.is_error,
-        sessionId: handle.sessionId,
-      };
+      return { sessionId: session.sessionId };
     } finally {
+      abortController.signal.removeEventListener('abort', abortSession);
       if (trackKey !== undefined) {
         this.activeSessionTracker.untrack(trackKey, params.runId);
       }
+      await this.piSessionFactory.close(session);
     }
   }
 
-  private createSdkHandle(
-    params: RunSessionParams,
-    abortController: AbortController,
-  ): ReturnType<SdkSessionFactory['create']> {
-    const systemPrompts: string[] = [];
-    if (params.appendSystemPrompt) {
-      systemPrompts.push(params.appendSystemPrompt);
-    }
-    return this.sdkSessionFactory.create({
+  private throwIfAborted(signal: AbortSignal): void {
+    if (signal.aborted) throw new Error('Agent run aborted');
+  }
+
+  private createPiSession(params: RunSessionParams): Promise<AgentSession> {
+    return this.piSessionFactory.create({
       cwd: params.cwd,
-      prompt: params.prompt,
       runId: params.runId,
-      additionalSystemPrompts:
-        systemPrompts.length > 0 ? systemPrompts : undefined,
-      abortController,
+      additionalSystemPrompts: params.appendSystemPrompt
+        ? [params.appendSystemPrompt]
+        : undefined,
       resumeSessionId: params.resumeSessionId,
     });
   }
@@ -180,25 +195,40 @@ export class RunProcessorService {
     return trackKey;
   }
 
+  /**
+   * Prompt the session and fan its events out to the handlers. Returns the
+   * last completed assistant message, which carries the run's stop reason.
+   */
   private async consumeSession(
-    messages: AsyncIterable<SDKMessage>,
+    session: AgentSession,
+    prompt: string,
     handlers: RunEventHandler[],
     traceContext: TraceContext | undefined,
-  ): Promise<SDKResultMessage | undefined> {
-    let lastResult: SDKResultMessage | undefined;
+  ): Promise<AssistantMessage | undefined> {
+    let lastAssistant: AssistantMessage | undefined;
+    // pi listeners are synchronous; chain dispatches so async handlers see
+    // events one at a time and in emission order.
+    let dispatchChain = Promise.resolve();
 
     const executeSession = async (): Promise<void> => {
+      const unsubscribe = session.subscribe((event) => {
+        lastAssistant = assistantMessageOf(event) ?? lastAssistant;
+        dispatchChain = dispatchChain.then(() =>
+          this.dispatchToHandlers(handlers, event),
+        );
+      });
       try {
-        for await (const message of messages) {
-          await this.dispatchToHandlers(handlers, message);
-          if (message.type === 'result') {
-            lastResult = message;
-          }
-        }
+        await this.startHandlers(handlers, this.sessionStartInfo(session));
+        await session.prompt(prompt);
+        // Extensions can start follow-up turns after prompt() settles (e.g. a
+        // subagent reporting back); wait until pi stops continuing on its own.
+        await session.waitForIdle();
       } finally {
+        unsubscribe();
+        await dispatchChain;
         // Always call onComplete — handlers use this for cleanup (e.g.
-        // closing tracing spans, flushing Linear activities).
-        await this.completeHandlers(handlers, lastResult);
+        // flushing Linear activities).
+        await this.completeHandlers(handlers);
       }
     };
 
@@ -210,27 +240,49 @@ export class RunProcessorService {
     } else {
       await executeSession();
     }
-    return lastResult;
+    return lastAssistant;
+  }
+
+  private sessionStartInfo(session: AgentSession): SessionStartInfo {
+    const model = session.model;
+    return {
+      sessionId: session.sessionId,
+      model: model ? `${model.provider}/${model.id}` : undefined,
+      tools: session.getActiveToolNames(),
+    };
+  }
+
+  private async startHandlers(
+    handlers: RunEventHandler[],
+    info: SessionStartInfo,
+  ): Promise<void> {
+    for (const handler of handlers) {
+      if (!handler.onStart) continue;
+      try {
+        await handler.onStart(info);
+      } catch (error) {
+        this.logger.error(`Handler "${handler.name}" onStart failed`, {
+          error: error as Error,
+        });
+      }
+    }
   }
 
   /**
-   * Dispatch a single SDK message to all handlers sequentially.
+   * Dispatch a single pi event to all handlers sequentially.
    * Errors in one handler don't prevent others from being called.
    */
   private async dispatchToHandlers(
     handlers: RunEventHandler[],
-    message: SDKMessage,
+    event: AgentSessionEvent,
   ): Promise<void> {
     for (const handler of handlers) {
       try {
-        const result = handler.onMessage(message);
-        if (result instanceof Promise) {
-          await result;
-        }
+        await handler.onEvent(event);
       } catch (error) {
         this.logger.error(`Handler "${handler.name}" threw`, {
           error: error as Error,
-          messageType: message.type,
+          eventType: event.type,
         });
       }
     }
@@ -240,14 +292,11 @@ export class RunProcessorService {
    * Call onComplete on all handlers that implement it.
    * Called in a finally block so it runs on both success and error paths.
    */
-  private async completeHandlers(
-    handlers: RunEventHandler[],
-    result: SDKResultMessage | undefined,
-  ): Promise<void> {
+  private async completeHandlers(handlers: RunEventHandler[]): Promise<void> {
     for (const handler of handlers) {
       if (handler.onComplete) {
         try {
-          await handler.onComplete(result);
+          await handler.onComplete();
         } catch (error) {
           this.logger.error(`Handler "${handler.name}" onComplete failed`, {
             error: error as Error,

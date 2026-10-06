@@ -1,26 +1,27 @@
 /**
- * SDK message types that are too noisy to persist in run_events.
- * Used by RunEventCallbackHandler to decide what NOT to store.
+ * pi session event types that are too noisy or redundant to persist in
+ * run_events. Used by RunEventCallbackHandler to decide what NOT to store.
  *
- * An exclusion set is safer than an inclusion set: new SDK message types
- * are persisted by default rather than silently dropped.
+ * Completed messages are persisted from `message_end`, so the streaming,
+ * per-turn, and tool-execution events that restate them are skipped.
+ *
+ * An exclusion set is safer than an inclusion set: new pi event types are
+ * persisted by default rather than silently dropped.
  */
-export const SKIPPED_MESSAGE_TYPES = new Set([
-  'stream_event',
-  'tool_progress',
-  'auth_status',
-  'rate_limit_event',
-  'prompt_suggestion',
-  'tool_use_summary',
-]);
-
-/**
- * System subtypes worth persisting. Everything else (hooks, tasks,
- * session state, local commands, etc.) is internal plumbing.
- */
-export const PERSISTED_SYSTEM_SUBTYPES = new Set([
-  'init',
-  'status',
-  'api_retry',
-  'compact_boundary',
+export const SKIPPED_EVENT_TYPES = new Set([
+  'agent_start',
+  'agent_end',
+  'agent_settled',
+  'turn_start',
+  'turn_end',
+  'message_start',
+  'message_update',
+  'tool_execution_start',
+  'tool_execution_update',
+  'tool_execution_end',
+  'bash_execution_update',
+  'queue_update',
+  'entry_appended',
+  'session_info_changed',
+  'thinking_level_changed',
 ]);

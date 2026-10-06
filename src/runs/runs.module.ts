@@ -7,7 +7,7 @@ import { RunsController } from './runs.controller.js';
 import { RunsService } from './runs.service.js';
 import { RunProcessorService } from './run-processor.service.js';
 import { RunQueueWorkerService } from './run-queue-worker.service.js';
-import { SdkSessionFactory } from './sdk-session.factory.js';
+import { PiSessionFactory } from './pi-session.factory.js';
 import { ActiveSessionTrackerService } from './active-session-tracker.service.js';
 import { RunRepository } from './run.repository.js';
 import { RunCompletionNotifier } from './run-completion.notifier.js';
@@ -24,7 +24,7 @@ import { RunSourceNotifier } from './run-source-notifier.service.js';
     RunsService,
     RunProcessorService,
     RunQueueWorkerService,
-    SdkSessionFactory,
+    PiSessionFactory,
     ActiveSessionTrackerService,
     RunRepository,
     RunCompletionNotifier,
