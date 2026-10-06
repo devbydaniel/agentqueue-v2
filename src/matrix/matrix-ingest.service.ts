@@ -146,7 +146,6 @@ export class MatrixIngestService {
       await this.runsService.enqueue({
         source: 'matrix',
         triggerName: trigger.name,
-        agentName: trigger.agent,
         cwd,
         prompt,
         externalSessionId: sessionKey,

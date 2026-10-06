@@ -57,7 +57,6 @@ const mapEntry = (entry: Record<string, unknown>): SlackTrigger => {
     cwd: normalizeCwd(entry['cwd'] as string, 'slack trigger cwd'),
     ...(userId ? { user_id: userId } : {}),
     ...(channelId ? { channel_id: channelId } : {}),
-    ...(entry['agent'] ? { agent: entry['agent'] as string } : {}),
     ...(entry['append_system_prompt']
       ? { append_system_prompt: entry['append_system_prompt'] as string }
       : {}),

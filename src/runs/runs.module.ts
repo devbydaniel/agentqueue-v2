@@ -1,5 +1,4 @@
 import { Module } from '@nestjs/common';
-import { AgentsModule } from '../agents/agents.module.js';
 import { CallbacksModule } from '../callbacks/callbacks.module.js';
 import { TelegramModule } from '../telegram/telegram.module.js';
 import { SlackModule } from '../slack/slack.module.js';
@@ -19,13 +18,7 @@ import { RunHandlerBuilder } from './run-handler-builder.service.js';
 import { RunSourceNotifier } from './run-source-notifier.service.js';
 
 @Module({
-  imports: [
-    CallbacksModule,
-    TelegramModule,
-    SlackModule,
-    MatrixModule,
-    AgentsModule,
-  ],
+  imports: [CallbacksModule, TelegramModule, SlackModule, MatrixModule],
   controllers: [RunsController],
   providers: [
     RunsService,

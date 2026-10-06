@@ -50,7 +50,6 @@ const mapEntry = (entry: Record<string, unknown>): LinearTrigger => ({
   cwd: normalizeCwd(entry['cwd'] as string, 'linear trigger cwd'),
   signing_secret: interpolateEnvVars(entry['signing_secret'] as string),
   api_key: interpolateEnvVars(entry['api_key'] as string),
-  ...(entry['agent'] ? { agent: entry['agent'] as string } : {}),
   ...(entry['append_system_prompt']
     ? { append_system_prompt: entry['append_system_prompt'] as string }
     : {}),

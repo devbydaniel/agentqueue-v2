@@ -267,7 +267,6 @@ export class TelegramIngestService {
       .enqueue({
         source: 'telegram',
         triggerName: trigger.name,
-        agentName: trigger.agent,
         cwd,
         prompt: params.text,
         externalSessionId: sessionKey,

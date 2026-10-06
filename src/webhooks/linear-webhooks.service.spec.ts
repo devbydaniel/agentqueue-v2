@@ -52,7 +52,6 @@ describe('LinearWebhooksService', () => {
       cwd: tmpDir,
       signing_secret: 'secret',
       api_key: 'api-key',
-      agent: 'claude',
       ...overrides,
     };
   }
@@ -188,7 +187,6 @@ describe('LinearWebhooksService', () => {
         expect.objectContaining({
           source: 'linear',
           triggerName: 'coding-agent',
-          agentName: 'claude',
           cwd: tmpDir,
           prompt: 'Fix the bug',
           externalSessionId: 'session-1',

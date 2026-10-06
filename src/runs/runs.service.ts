@@ -30,7 +30,6 @@ export interface EnqueueRunCommand {
     | 'matrix'
     | 'spawned';
   triggerName?: string;
-  agentName?: string;
   parentRunId?: string;
   cwd: string;
   prompt: string;
@@ -90,7 +89,6 @@ export class RunsService {
     const createCommand: CreateRunCommand = {
       source: command.source,
       triggerName: command.triggerName,
-      agentName: command.agentName,
       parentRunId: command.parentRunId,
       cwd,
       prompt: command.prompt,

@@ -1,7 +1,6 @@
 /* eslint-disable sonarjs/publicly-writable-directories */
 import { Test } from '@nestjs/testing';
 import { SdkSessionFactory } from './sdk-session.factory.js';
-import type { AgentProfile } from '../agents/agent-profile.interface.js';
 
 // Mock query generator
 const mockMessages = [
@@ -103,34 +102,10 @@ describe('SdkSessionFactory', () => {
     });
   });
 
-  it('should pass model from profile', async () => {
-    const profile: AgentProfile = {
-      name: 'reviewer',
-      model: 'claude-opus-4-6',
-    };
-
-    const handle = await factory.create({
-      cwd: '/tmp/test',
-      prompt: 'Review',
-      profile,
-    });
-
-    const iterator = handle.messages[Symbol.asyncIterator]();
-    await iterator.next();
-
-    expect(capturedOptions!['model']).toBe('claude-opus-4-6');
-  });
-
-  it('should build combined system prompt from profile + additional prompts', async () => {
-    const profile: AgentProfile = {
-      name: 'agent',
-      append_prompt: 'You are running inside AgentQueue.',
-    };
-
+  it('should build combined system prompt from additional prompts', async () => {
     const handle = await factory.create({
       cwd: '/tmp/test',
       prompt: 'Do stuff',
-      profile,
       additionalSystemPrompts: ['Be concise.', 'Always explain reasoning.'],
     });
 
@@ -140,8 +115,7 @@ describe('SdkSessionFactory', () => {
     expect(capturedOptions!['systemPrompt']).toEqual({
       type: 'preset',
       preset: 'claude_code',
-      append:
-        'You are running inside AgentQueue.\n\nBe concise.\n\nAlways explain reasoning.',
+      append: 'Be concise.\n\nAlways explain reasoning.',
     });
   });
 
@@ -155,128 +129,6 @@ describe('SdkSessionFactory', () => {
     await iterator.next();
 
     expect(capturedOptions!['systemPrompt']).toBeUndefined();
-  });
-
-  it('should pass maxTurns from profile', async () => {
-    const profile: AgentProfile = {
-      name: 'agent',
-      max_turns: 30,
-    };
-
-    const handle = await factory.create({
-      cwd: '/tmp/test',
-      prompt: 'Go',
-      profile,
-    });
-
-    const iterator = handle.messages[Symbol.asyncIterator]();
-    await iterator.next();
-
-    expect(capturedOptions!['maxTurns']).toBe(30);
-  });
-
-  it('should pass allowedTools from profile', async () => {
-    const profile: AgentProfile = {
-      name: 'agent',
-      tools: ['Read', 'Grep', 'Bash'],
-    };
-
-    const handle = await factory.create({
-      cwd: '/tmp/test',
-      prompt: 'Go',
-      profile,
-    });
-
-    const iterator = handle.messages[Symbol.asyncIterator]();
-    await iterator.next();
-
-    expect(capturedOptions!['allowedTools']).toEqual(['Read', 'Grep', 'Bash']);
-  });
-
-  it('should map subagents to SDK agents format', async () => {
-    const profile: AgentProfile = {
-      name: 'agent',
-      subagents: {
-        researcher: {
-          description: 'Research topics',
-          prompt: 'You are a researcher.',
-          model: 'haiku',
-          tools: ['WebSearch'],
-          max_turns: 10,
-        },
-      },
-    };
-
-    const handle = await factory.create({
-      cwd: '/tmp/test',
-      prompt: 'Go',
-      profile,
-    });
-
-    const iterator = handle.messages[Symbol.asyncIterator]();
-    await iterator.next();
-
-    expect(capturedOptions!['agents']).toEqual({
-      researcher: {
-        description: 'Research topics',
-        prompt: 'You are a researcher.',
-        model: 'haiku',
-        tools: ['WebSearch'],
-        maxTurns: 10,
-      },
-    });
-  });
-
-  it('should map mcp_servers to SDK mcpServers format', async () => {
-    const profile: AgentProfile = {
-      name: 'agent',
-      mcp_servers: {
-        postgres: {
-          type: 'stdio',
-          command: 'node',
-          args: ['./server.js'],
-          env: { PG_HOST: 'localhost' },
-        },
-        remote: {
-          type: 'sse',
-          url: 'https://mcp.example.com',
-          headers: { Authorization: 'Bearer token' },
-        },
-        api: {
-          type: 'http',
-          url: 'https://api.example.com/mcp',
-        },
-      },
-    };
-
-    const handle = await factory.create({
-      cwd: '/tmp/test',
-      prompt: 'Go',
-      profile,
-    });
-
-    const iterator = handle.messages[Symbol.asyncIterator]();
-    await iterator.next();
-
-    const mcpServers = capturedOptions!['mcpServers'] as Record<
-      string,
-      unknown
-    >;
-    expect(mcpServers['postgres']).toEqual({
-      type: 'stdio',
-      command: 'node',
-      args: ['./server.js'],
-      env: { PG_HOST: 'localhost' },
-    });
-    expect(mcpServers['remote']).toEqual({
-      type: 'sse',
-      url: 'https://mcp.example.com',
-      headers: { Authorization: 'Bearer token' },
-    });
-    expect(mcpServers['api']).toEqual({
-      type: 'http',
-      url: 'https://api.example.com/mcp',
-    });
   });
 
   it('should capture session ID from first system init message', async () => {
@@ -348,7 +200,7 @@ describe('SdkSessionFactory', () => {
     expect(capturedOptions!['resume']).toBe('prev-session-456');
   });
 
-  it('should work without a profile (minimal options)', async () => {
+  it('should use the default model with minimal options', async () => {
     const handle = await factory.create({
       cwd: '/tmp/test',
       prompt: 'Hello',
@@ -358,10 +210,6 @@ describe('SdkSessionFactory', () => {
     await iterator.next();
 
     expect(capturedOptions!['model']).toBe('opus');
-    expect(capturedOptions!['agents']).toBeUndefined();
-    expect(capturedOptions!['mcpServers']).toBeUndefined();
-    expect(capturedOptions!['allowedTools']).toBeUndefined();
-    expect(capturedOptions!['maxTurns']).toBeUndefined();
   });
 
   it('should inject runId into env and system prompt when provided', async () => {

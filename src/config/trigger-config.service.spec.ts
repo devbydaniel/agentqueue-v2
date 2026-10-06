@@ -159,7 +159,6 @@ describe('TriggerConfigService', () => {
           schedule: '0 8 * * *',
           cwd: '/tmp/assistant',
           prompt: 'Run task',
-          agent: 'reviewer',
           before: '/path/to/script.sh',
         },
       ],
@@ -167,7 +166,6 @@ describe('TriggerConfigService', () => {
 
     service = createService();
     const trigger = service.getCronTriggers()[0];
-    expect(trigger.agent).toBe('reviewer');
     expect(trigger.before).toBe('/path/to/script.sh');
   });
 
@@ -641,7 +639,6 @@ describe('TriggerConfigService', () => {
             cwd: '/tmp/my-repo',
             signing_secret: 'secret',
             api_key: 'key',
-            agent: 'opus-coder',
           },
           {
             name: 'coding-agent',
@@ -650,7 +647,6 @@ describe('TriggerConfigService', () => {
             cwd: '/tmp/my-repo',
             signing_secret: 'secret',
             api_key: 'key',
-            agent: 'opus-reviewer',
           },
         ],
       });
@@ -774,7 +770,7 @@ describe('TriggerConfigService', () => {
             cwd: '/tmp/my-repo',
             signing_secret: 'secret',
             api_key: 'key',
-            agent: 'opus-coder',
+            append_system_prompt: 'coder',
           },
           {
             name: 'coding-agent',
@@ -783,7 +779,7 @@ describe('TriggerConfigService', () => {
             cwd: '/tmp/my-repo',
             signing_secret: 'secret',
             api_key: 'key',
-            agent: 'opus-reviewer',
+            append_system_prompt: 'reviewer',
           },
         ],
       });
@@ -792,11 +788,11 @@ describe('TriggerConfigService', () => {
 
       const assigned = service.getLinearTriggerByKey('coding-agent:assigned');
       expect(assigned).toBeDefined();
-      expect(assigned!.agent).toBe('opus-coder');
+      expect(assigned!.append_system_prompt).toBe('coder');
 
       const mentioned = service.getLinearTriggerByKey('coding-agent:mentioned');
       expect(mentioned).toBeDefined();
-      expect(mentioned!.agent).toBe('opus-reviewer');
+      expect(mentioned!.append_system_prompt).toBe('reviewer');
     });
 
     it('should fall back to name lookup for plain key', () => {

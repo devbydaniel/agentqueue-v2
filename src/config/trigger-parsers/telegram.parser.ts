@@ -35,7 +35,6 @@ const mapEntry = (entry: Record<string, unknown>): TelegramTrigger => ({
   entry['chat_id']
     ? { chat_id: String(entry['chat_id']) }
     : {}),
-  ...(entry['agent'] ? { agent: entry['agent'] as string } : {}),
   ...(entry['append_system_prompt']
     ? { append_system_prompt: entry['append_system_prompt'] as string }
     : {}),
