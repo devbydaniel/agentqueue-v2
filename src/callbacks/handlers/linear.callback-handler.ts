@@ -1,8 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common';
-import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent' with {
+  'resolution-mode': 'import',
+};
 import { LinearClient } from '@linear/sdk';
 import type { RunEventHandler } from '../run-event-handler.interface.js';
-import { extractAssistantText } from '../extract-assistant-text.js';
+import {
+  assistantMessageOf,
+  extractAssistantText,
+  toolCallsOf,
+  type AssistantMessage,
+} from '../pi-messages.js';
 import { TriggerConfigService } from '../../config/trigger-config.service.js';
 
 const MAX_BODY_LENGTH = 10_000;
@@ -34,11 +41,11 @@ export class LinearCallbackHandler implements RunEventHandler {
     return this.lastAssistantMessage;
   }
 
-  async onMessage(message: SDKMessage): Promise<void> {
-    if (message.type !== 'assistant') return;
-
-    // Ignore subagent messages to avoid noise in Linear
-    if (message.parent_tool_use_id) return;
+  async onEvent(event: AgentSessionEvent): Promise<void> {
+    // Subagents run as separate pi processes, so only the parent's own
+    // messages reach this stream.
+    const message = assistantMessageOf(event);
+    if (!message) return;
 
     const activities = this.mapAssistantToActivities(message);
     for (const activity of activities) {
@@ -89,13 +96,12 @@ export class LinearCallbackHandler implements RunEventHandler {
   }
 
   private mapAssistantToActivities(
-    message: SDKMessage & { type: 'assistant' },
+    message: AssistantMessage,
   ): Array<{ content: Record<string, unknown>; ephemeral: boolean }> {
     const activities: Array<{
       content: Record<string, unknown>;
       ephemeral: boolean;
     }> = [];
-    const content = message.message.content;
 
     // Extract text blocks → thought activity
     const text = extractAssistantText(message) ?? '';
@@ -108,18 +114,16 @@ export class LinearCallbackHandler implements RunEventHandler {
       });
     }
 
-    // Extract tool_use blocks → action activities (ephemeral)
-    for (const block of content) {
-      if (block.type === 'tool_use') {
-        activities.push({
-          content: {
-            type: 'action',
-            action: block.name,
-            parameter: truncate(JSON.stringify(block.input)),
-          },
-          ephemeral: true,
-        });
-      }
+    // Tool calls → action activities (ephemeral)
+    for (const call of toolCallsOf(message)) {
+      activities.push({
+        content: {
+          type: 'action',
+          action: call.name,
+          parameter: truncate(JSON.stringify(call.arguments)),
+        },
+        ephemeral: true,
+      });
     }
 
     return activities;

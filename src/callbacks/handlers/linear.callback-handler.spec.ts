@@ -1,12 +1,13 @@
 import { LinearCallbackHandler } from './linear.callback-handler.js';
 import {
-  assistantText,
-  assistantToolUse,
+  agentSettled,
   assistantMixed,
-  resultSuccess,
-  systemInit,
-  userToolResult,
-} from './__tests__/sdk-message.fixtures.js';
+  assistantText,
+  assistantToolCall,
+  autoRetryStart,
+  messageUpdate,
+  toolResult,
+} from './__tests__/pi-event.fixtures.js';
 
 const mockCreateAgentActivity = jest.fn().mockResolvedValue({});
 
@@ -29,7 +30,7 @@ describe('LinearCallbackHandler', () => {
   });
 
   it('should emit a thought activity for assistant text', async () => {
-    await handler.onMessage(assistantText('Working on the issue…'));
+    await handler.onEvent(assistantText('Working on the issue…'));
 
     expect(mockCreateAgentActivity).toHaveBeenCalledWith({
       agentSessionId: sessionId,
@@ -38,27 +39,23 @@ describe('LinearCallbackHandler', () => {
     });
   });
 
-  it('should emit an ephemeral action activity for tool_use', async () => {
-    await handler.onMessage(
-      assistantToolUse('Read', { file_path: '/src/index.ts' }),
-    );
+  it('should emit an ephemeral action activity for a tool call', async () => {
+    await handler.onEvent(assistantToolCall('read', { path: '/src/index.ts' }));
 
     expect(mockCreateAgentActivity).toHaveBeenCalledWith({
       agentSessionId: sessionId,
       content: {
         type: 'action',
-        action: 'Read',
-        parameter: '{"file_path":"/src/index.ts"}',
+        action: 'read',
+        parameter: '{"path":"/src/index.ts"}',
       },
       ephemeral: true,
     });
   });
 
   it('should emit both thought and action for mixed assistant messages', async () => {
-    await handler.onMessage(
-      assistantMixed('Let me read that file.', 'Read', {
-        file_path: '/test.ts',
-      }),
+    await handler.onEvent(
+      assistantMixed('Let me read that file.', 'read', { path: '/test.ts' }),
     );
 
     expect(mockCreateAgentActivity).toHaveBeenCalledTimes(2);
@@ -71,33 +68,34 @@ describe('LinearCallbackHandler', () => {
       agentSessionId: sessionId,
       content: {
         type: 'action',
-        action: 'Read',
-        parameter: '{"file_path":"/test.ts"}',
+        action: 'read',
+        parameter: '{"path":"/test.ts"}',
       },
       ephemeral: true,
     });
   });
 
   it('should capture lastAssistantMessage from text blocks', async () => {
-    await handler.onMessage(assistantText('Final answer here'));
+    await handler.onEvent(assistantText('Final answer here'));
 
     expect(handler.getLastAssistantMessage()).toBe('Final answer here');
   });
 
-  it('should ignore subagent messages (parent_tool_use_id set)', async () => {
-    await handler.onMessage(
-      assistantText('subagent response', {
-        parent_tool_use_id: 'tu-parent',
-      }),
-    );
+  it('should truncate long text bodies', async () => {
+    await handler.onEvent(assistantText('x'.repeat(10_001)));
 
-    expect(mockCreateAgentActivity).not.toHaveBeenCalled();
+    expect(mockCreateAgentActivity).toHaveBeenCalledWith({
+      agentSessionId: sessionId,
+      content: { type: 'thought', body: 'x'.repeat(10_000) + '…' },
+      ephemeral: false,
+    });
   });
 
-  it('should not emit on non-assistant messages', async () => {
-    await handler.onMessage(systemInit());
-    await handler.onMessage(userToolResult('tu-1', 'result'));
-    await handler.onMessage(resultSuccess());
+  it('should not emit on non-assistant or non-message_end events', async () => {
+    await handler.onEvent(toolResult('tc-1', 'result'));
+    await handler.onEvent(messageUpdate());
+    await handler.onEvent(autoRetryStart());
+    await handler.onEvent(agentSettled());
 
     expect(mockCreateAgentActivity).not.toHaveBeenCalled();
   });
@@ -116,8 +114,31 @@ describe('LinearCallbackHandler', () => {
     mockCreateAgentActivity.mockRejectedValueOnce(new Error('API error'));
 
     await expect(
-      handler.onMessage(assistantText('test')),
+      handler.onEvent(assistantText('test')),
     ).resolves.toBeUndefined();
+  });
+
+  it('should flush pending activities on onComplete()', async () => {
+    let resolvePost: () => void;
+    mockCreateAgentActivity.mockReturnValueOnce(
+      new Promise<void>((r) => {
+        resolvePost = r;
+      }),
+    );
+
+    const eventPromise = handler.onEvent(assistantText('Thinking…'));
+    let completed = false;
+    const completePromise = handler.onComplete().then(() => {
+      completed = true;
+    });
+
+    await Promise.resolve();
+    expect(completed).toBe(false);
+
+    resolvePost!();
+    await eventPromise;
+    await completePromise;
+    expect(completed).toBe(true);
   });
 
   describe('flush / emitResponse ordering', () => {
@@ -138,7 +159,7 @@ describe('LinearCallbackHandler', () => {
       };
       mockCreateAgentActivity.mockImplementation(mockImpl);
 
-      const eventPromise = handler.onMessage(assistantText('Thinking…'));
+      const eventPromise = handler.onEvent(assistantText('Thinking…'));
       const responsePromise = handler.emitResponse('Done!');
 
       expect(callOrder).toEqual([]);
@@ -155,7 +176,7 @@ describe('LinearCallbackHandler', () => {
         .mockRejectedValueOnce(new Error('API error'))
         .mockResolvedValueOnce({});
 
-      await handler.onMessage(assistantText('test'));
+      await handler.onEvent(assistantText('test'));
 
       await expect(handler.emitResponse('Done!')).resolves.toBeUndefined();
     });

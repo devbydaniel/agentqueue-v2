@@ -1,7 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
-import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent' with {
+  'resolution-mode': 'import',
+};
 import type { RunEventHandler } from '../callbacks/run-event-handler.interface.js';
-import { extractAssistantText } from '../callbacks/extract-assistant-text.js';
+import {
+  assistantMessageOf,
+  extractAssistantText,
+} from '../callbacks/pi-messages.js';
 import { TriggerConfigService } from '../config/trigger-config.service.js';
 import { MatrixService, type MatrixTarget } from './matrix.service.js';
 import {
@@ -38,8 +43,9 @@ export class MatrixStreamingCallbackHandler implements RunEventHandler {
     private readonly sessionKey: string,
   ) {}
 
-  onMessage(message: SDKMessage): void {
-    if (message.type !== 'assistant' || message.parent_tool_use_id) return;
+  onEvent(event: AgentSessionEvent): void {
+    const message = assistantMessageOf(event);
+    if (!message) return;
     const text = extractAssistantText(message);
     if (!text) return;
     this.lastAssistantText = text;

@@ -1,18 +1,20 @@
+import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent' with {
+  'resolution-mode': 'import',
+};
 import { RunEventCallbackHandler } from './run-event.callback-handler.js';
 import type { RunEventRepository } from '../../runs/run-event.repository.js';
+import type { AgentMessage } from '../pi-messages.js';
+import { SKIPPED_EVENT_TYPES } from '../callback.constants.js';
 import {
   assistantText,
-  assistantToolUse,
-  resultSuccess,
-  resultError,
-  systemInit,
-  systemApiRetry,
-  systemCompactBoundary,
-  systemStatus,
-  streamEvent,
-  toolProgress,
-  userToolResult,
-} from './__tests__/sdk-message.fixtures.js';
+  assistantToolCall,
+  autoRetryStart,
+  compactionStart,
+  messageEnd,
+  messageUpdate,
+  sessionStart,
+  toolResult,
+} from './__tests__/pi-event.fixtures.js';
 
 describe('RunEventCallbackHandler', () => {
   let handler: RunEventCallbackHandler;
@@ -31,122 +33,104 @@ describe('RunEventCallbackHandler', () => {
     expect(handler.name).toBe('run-event');
   });
 
-  // ── Persisted message types ──────────────────────────────────────
+  // ── Session start ────────────────────────────────────────────────
 
-  it('should persist assistant messages', () => {
-    handler.onMessage(assistantText('Hello'));
-    expect(mockRepo.append).toHaveBeenCalledWith(
-      'run-123',
-      'assistant',
-      expect.objectContaining({ message: expect.any(Object) }),
-    );
+  it('should persist session_start from onStart', () => {
+    handler.onStart(sessionStart());
+    expect(mockRepo.append).toHaveBeenCalledWith('run-123', 'session_start', {
+      sessionId: 'test-session-id',
+      model: 'anthropic/claude-opus-5-5',
+      tools: ['read', 'bash', 'edit', 'write'],
+    });
   });
 
-  it('should persist user messages', () => {
-    handler.onMessage(userToolResult('tu-1', 'result text'));
-    expect(mockRepo.append).toHaveBeenCalledWith(
-      'run-123',
-      'user',
-      expect.objectContaining({ message: expect.any(Object) }),
-    );
-  });
+  // ── Completed messages ───────────────────────────────────────────
 
-  it('should persist result messages', () => {
-    handler.onMessage(resultSuccess());
+  it('should persist assistant messages as message:assistant', () => {
+    handler.onEvent(assistantText('Hello'));
     expect(mockRepo.append).toHaveBeenCalledWith(
       'run-123',
-      'result',
-      expect.objectContaining({ subtype: 'success' }),
-    );
-  });
-
-  it('should persist error result messages', () => {
-    handler.onMessage(resultError(['Test error']));
-    expect(mockRepo.append).toHaveBeenCalledWith(
-      'run-123',
-      'result',
+      'message:assistant',
       expect.objectContaining({
-        subtype: 'error_during_execution',
-        errors: ['Test error'],
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Hello' }],
       }),
     );
   });
 
-  // ── Persisted system subtypes ────────────────────────────────────
-
-  it('should persist system:init messages', () => {
-    handler.onMessage(systemInit());
+  it('should persist tool results as message:toolResult', () => {
+    handler.onEvent(toolResult('tc-1', 'result text'));
     expect(mockRepo.append).toHaveBeenCalledWith(
       'run-123',
-      'system:init',
-      expect.objectContaining({ subtype: 'init', model: expect.any(String) }),
+      'message:toolResult',
+      expect.objectContaining({ role: 'toolResult', toolCallId: 'tc-1' }),
     );
   });
 
-  it('should persist system:api_retry messages', () => {
-    handler.onMessage(systemApiRetry());
-    expect(mockRepo.append).toHaveBeenCalledWith(
-      'run-123',
-      'system:api_retry',
-      expect.objectContaining({ subtype: 'api_retry', attempt: 1 }),
-    );
-  });
-
-  it('should persist system:compact_boundary messages', () => {
-    handler.onMessage(systemCompactBoundary());
-    expect(mockRepo.append).toHaveBeenCalledWith(
-      'run-123',
-      'system:compact_boundary',
-      expect.objectContaining({ subtype: 'compact_boundary' }),
-    );
-  });
-
-  it('should persist system:status messages', () => {
-    handler.onMessage(systemStatus('compacting'));
-    expect(mockRepo.append).toHaveBeenCalledWith(
-      'run-123',
-      'system:status',
-      expect.objectContaining({ subtype: 'status', status: 'compacting' }),
-    );
-  });
-
-  // ── Skipped message types ────────────────────────────────────────
-
-  it('should NOT persist stream_event messages', () => {
-    handler.onMessage(streamEvent());
-    expect(mockRepo.append).not.toHaveBeenCalled();
-  });
-
-  it('should NOT persist tool_progress messages', () => {
-    handler.onMessage(toolProgress());
-    expect(mockRepo.append).not.toHaveBeenCalled();
-  });
-
-  // ── Skipped system subtypes ──────────────────────────────────────
-
-  it('should NOT persist hook system messages', () => {
-    handler.onMessage({
-      type: 'system',
-      subtype: 'hook_started',
-      hook_id: 'h-1',
-      hook_name: 'pre-commit',
-      hook_event: 'Bash',
-      uuid: '00000000-0000-0000-0000-000000000000',
-      session_id: 'test',
-    } as never);
-    expect(mockRepo.append).not.toHaveBeenCalled();
-  });
-
-  // ── Payload extraction ───────────────────────────────────────────
-
-  it('should strip type, uuid, and session_id from payload', () => {
-    handler.onMessage(assistantToolUse('Read', { path: '/test.ts' }));
+  it('should use the message itself as the payload', () => {
+    handler.onEvent(assistantToolCall('read', { path: '/test.ts' }));
 
     const payload = mockRepo.append.mock.calls[0][2] as Record<string, unknown>;
     expect(payload).not.toHaveProperty('type');
-    expect(payload).not.toHaveProperty('uuid');
-    expect(payload).not.toHaveProperty('session_id');
-    expect(payload).toHaveProperty('message');
+    expect(payload).not.toHaveProperty('message');
+    expect(payload).toHaveProperty('stopReason', 'toolUse');
+  });
+
+  it('should NOT persist system-role messages', () => {
+    handler.onEvent(
+      messageEnd({
+        role: 'system',
+        content: 'prompt',
+        timestamp: 0,
+      } as AgentMessage),
+    );
+    expect(mockRepo.append).not.toHaveBeenCalled();
+  });
+
+  // ── Other pi events ──────────────────────────────────────────────
+
+  it('should persist auto_retry_start with type stripped from the payload', () => {
+    handler.onEvent(autoRetryStart());
+    expect(mockRepo.append).toHaveBeenCalledWith(
+      'run-123',
+      'auto_retry_start',
+      {
+        attempt: 1,
+        maxAttempts: 3,
+        delayMs: 1000,
+        errorMessage: 'overloaded',
+      },
+    );
+  });
+
+  it('should persist compaction_start with type stripped from the payload', () => {
+    handler.onEvent(compactionStart());
+    expect(mockRepo.append).toHaveBeenCalledWith(
+      'run-123',
+      'compaction_start',
+      { reason: 'threshold' },
+    );
+  });
+
+  it('should persist a null payload for events with no fields besides type', () => {
+    handler.onEvent({ type: 'summarization_retry_finished' });
+    expect(mockRepo.append).toHaveBeenCalledWith(
+      'run-123',
+      'summarization_retry_finished',
+      null,
+    );
+  });
+
+  // ── Skipped event types ──────────────────────────────────────────
+
+  it('should NOT persist streaming message_update partials', () => {
+    handler.onEvent(messageUpdate());
+    expect(mockRepo.append).not.toHaveBeenCalled();
+  });
+
+  it.each([...SKIPPED_EVENT_TYPES])('should NOT persist %s events', (type) => {
+    handler.onEvent({ type } as AgentSessionEvent);
+    expect(mockRepo.append).not.toHaveBeenCalled();
   });
 
   // ── Error resilience ─────────────────────────────────────────────
@@ -155,7 +139,7 @@ describe('RunEventCallbackHandler', () => {
     mockRepo.append.mockRejectedValueOnce(new Error('DB down'));
 
     expect(() => {
-      handler.onMessage(assistantText('Hello'));
+      handler.onEvent(assistantText('Hello'));
     }).not.toThrow();
 
     // Give the promise rejection a tick to be caught
@@ -164,11 +148,11 @@ describe('RunEventCallbackHandler', () => {
 
   it('should use the correct runId for all events', () => {
     const handler2 = new RunEventCallbackHandler('run-456', mockRepo);
-    handler2.onMessage(resultSuccess());
+    handler2.onEvent(assistantText('Hello'));
 
     expect(mockRepo.append).toHaveBeenCalledWith(
       'run-456',
-      'result',
+      'message:assistant',
       expect.any(Object),
     );
   });

@@ -1,11 +1,11 @@
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 COPY . .
 RUN npm run build
 
-FROM node:20-alpine AS runner
+FROM node:22-alpine AS runner
 RUN addgroup -g 1001 -S app && adduser -S app -u 1001
 WORKDIR /app
 COPY --from=builder --chown=app:app /app/dist ./dist

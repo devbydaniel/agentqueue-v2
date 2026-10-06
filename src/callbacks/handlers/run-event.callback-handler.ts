@@ -1,17 +1,28 @@
 import { Logger } from '@nestjs/common';
-import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { RunEventHandler } from '../run-event-handler.interface.js';
+import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent' with {
+  'resolution-mode': 'import',
+};
+import type {
+  RunEventHandler,
+  SessionStartInfo,
+} from '../run-event-handler.interface.js';
 import type { RunEventRepository } from '../../runs/run-event.repository.js';
-import {
-  SKIPPED_MESSAGE_TYPES,
-  PERSISTED_SYSTEM_SUBTYPES,
-} from '../callback.constants.js';
+import { SKIPPED_EVENT_TYPES } from '../callback.constants.js';
 
 /**
- * Callback handler that writes filtered SDK messages to the run_events table.
+ * Callback handler that writes filtered pi session events to the run_events
+ * table.
+ *
+ * Event types stored:
+ * - `session_start` — session id, model, tools
+ * - `message:<role>` — each completed message (`message:assistant`,
+ *   `message:toolResult`, `message:user`, …) except the system prompt,
+ *   payload is the message
+ * - everything not in SKIPPED_EVENT_TYPES under its pi event type
+ *   (compaction, retries)
  *
  * Instantiated per-run (not via DI) because it needs the runId of the
- * currently-running run. Created by RunProcessorService and passed as
+ * currently-running run. Created by RunHandlerBuilder and passed as
  * an additional handler.
  */
 export class RunEventCallbackHandler implements RunEventHandler {
@@ -23,24 +34,31 @@ export class RunEventCallbackHandler implements RunEventHandler {
     private readonly runEventRepository: RunEventRepository,
   ) {}
 
-  onMessage(message: SDKMessage): void {
-    if (SKIPPED_MESSAGE_TYPES.has(message.type)) return;
+  onStart(info: SessionStartInfo): void {
+    this.persist('session_start', { ...info });
+  }
 
-    // For system messages, only persist meaningful subtypes
-    if (message.type === 'system') {
-      if (
-        !('subtype' in message) ||
-        !PERSISTED_SYSTEM_SUBTYPES.has(message.subtype)
-      ) {
-        return;
-      }
+  onEvent(event: AgentSessionEvent): void {
+    if (event.type === 'message_end') {
+      // The system message restates the full system prompt on every run.
+      if (event.message.role === 'system') return;
+      this.persist(`message:${event.message.role}`, { ...event.message });
+      return;
     }
+    if (SKIPPED_EVENT_TYPES.has(event.type)) return;
 
-    const eventType = this.resolveEventType(message);
-    const payload = this.extractPayload(message);
+    const { type, ...rest } = event;
+    this.persist(type, Object.keys(rest).length > 0 ? rest : null);
+  }
 
-    // Fire-and-forget write — don't block the session on DB writes.
-    // Errors are logged but swallowed so a DB hiccup doesn't crash the run.
+  /**
+   * Fire-and-forget write — don't block the session on DB writes.
+   * Errors are logged but swallowed so a DB hiccup doesn't crash the run.
+   */
+  private persist(
+    eventType: string,
+    payload: Record<string, unknown> | null,
+  ): void {
     this.runEventRepository
       .append(this.runId, eventType, payload)
       .catch((err) => {
@@ -50,24 +68,5 @@ export class RunEventCallbackHandler implements RunEventHandler {
           error: err as Error,
         });
       });
-  }
-
-  /**
-   * For system messages, store `system:<subtype>` for queryability.
-   * For everything else, store the message type directly.
-   */
-  private resolveEventType(message: SDKMessage): string {
-    if (message.type === 'system' && 'subtype' in message) {
-      return `system:${message.subtype}`;
-    }
-    return message.type;
-  }
-
-  private extractPayload(message: SDKMessage): Record<string, unknown> | null {
-    const raw = message as Record<string, unknown>;
-    // Strip fields that are either stored in their own column or add noise
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { type, uuid, session_id, ...rest } = raw;
-    return Object.keys(rest).length > 0 ? rest : null;
   }
 }

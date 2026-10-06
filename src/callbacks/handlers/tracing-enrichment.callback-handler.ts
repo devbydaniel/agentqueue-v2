@@ -1,11 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { trace, context, type Span } from '@opentelemetry/api';
-import type {
-  SDKMessage,
-  SDKResultMessage,
-} from '@anthropic-ai/claude-agent-sdk';
+import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent' with {
+  'resolution-mode': 'import',
+};
 import { AppConfigService } from '../../config/app-config.service.js';
-import type { RunEventHandler } from '../run-event-handler.interface.js';
+import type {
+  RunEventHandler,
+  SessionStartInfo,
+} from '../run-event-handler.interface.js';
 import {
   buildTraceContext,
   type TraceContext,
@@ -15,19 +17,14 @@ import {
 const TRACER_NAME = 'agentqueue';
 
 /**
- * Enriches the parent run span with `run.*` attributes (cost, model, tags,
- * source, session linkage, etc.) and records compaction / api-retry events.
+ * Enriches the parent run span with `run.*` attributes (model, tags, source,
+ * session linkage, etc.) and records compaction / api-retry events.
  *
- * The fine-grained AGENT / LLM / TOOL spans for each Claude Agent SDK
- * session are NOT emitted here. They come from the phoenix Stop hook
- * (`~/.local/share/agentfiles/hooks/phoenix/scripts/phoenix_hook.py`),
- * which Claude Code fires at the end of every turn with the transcript
- * path on stdin. Same script, same span shape on laptop and in the pod —
- * one source of truth.
- *
- * The SDK is configured with `settingSources: ['user', 'project']` (see
- * sdk-session.factory.ts) so the agentfiles-deployed Stop hook in
- * `~/.claude/settings.json` actually fires.
+ * The fine-grained AGENT / LLM / TOOL spans (including cost) for each pi
+ * session are NOT emitted here. They come from the agentfiles-deployed
+ * phoenix pi extension (`~/.pi/agent/extensions/phoenix`), which exports
+ * every settled run — same extension, same span shape on laptop and in the
+ * pod.
  */
 export class TracingEnrichmentHandler implements RunEventHandler {
   readonly name = 'tracing-enrichment';
@@ -38,105 +35,78 @@ export class TracingEnrichmentHandler implements RunEventHandler {
     private readonly enabled: boolean,
   ) {}
 
-  onMessage(message: SDKMessage): void {
+  onStart(info: SessionStartInfo): void {
+    if (!this.enabled) return;
+
+    const span = this.getActiveSpan();
+    if (!span) return;
+
+    span.setAttribute('run.id', this.traceContext.metadata['runId'] ?? '');
+    span.setAttribute('run.source', this.traceContext.metadata['source'] ?? '');
+    span.setAttribute(
+      'run.repo_name',
+      this.traceContext.metadata['repoName'] ?? '',
+    );
+    span.setAttribute('run.trace_name', this.traceContext.traceName);
+    span.setAttribute('run.tags', this.traceContext.tags);
+
+    if (this.traceContext.sessionId) {
+      span.setAttribute('run.session_id', this.traceContext.sessionId);
+    }
+    if (this.traceContext.metadata['triggerName']) {
+      span.setAttribute(
+        'run.trigger_name',
+        this.traceContext.metadata['triggerName'],
+      );
+    }
+    if (this.traceContext.metadata['externalSessionId']) {
+      span.setAttribute(
+        'run.external_session_id',
+        this.traceContext.metadata['externalSessionId'],
+      );
+    }
+    if (this.traceContext.metadata['parentRunId']) {
+      span.setAttribute(
+        'run.parent_run_id',
+        this.traceContext.metadata['parentRunId'],
+      );
+    }
+
+    span.setAttribute('run.pi_session_id', info.sessionId);
+    if (info.model) span.setAttribute('run.model', info.model);
+    span.setAttribute('run.tool_count', info.tools.length);
+
+    this.logger.debug('Tracing attributes enriched');
+  }
+
+  onEvent(event: AgentSessionEvent): void {
     if (!this.enabled) return;
 
     try {
-      this.handleMessage(message);
+      this.handleEvent(event);
     } catch (error) {
       this.logger.error('Failed to enrich tracing span', {
         error: error as Error,
-        messageType: message.type,
+        eventType: event.type,
       });
     }
   }
 
-  onComplete(result: SDKResultMessage | undefined): void {
-    if (!this.enabled) return;
-
-    const span = this.getActiveSpan();
-    if (!span) return;
-
-    if (result) {
-      span.setAttribute('run.subtype', result.subtype);
-      span.setAttribute('run.num_turns', result.num_turns);
-      span.setAttribute('run.cost_usd', result.total_cost_usd);
-      span.setAttribute('run.duration_ms', result.duration_ms);
-      span.setAttribute('run.is_error', result.is_error);
-    } else {
-      span.setAttribute('run.aborted', true);
-    }
-  }
-
-  private handleMessage(message: SDKMessage): void {
-    if (message.type === 'system') {
-      this.handleSystemMessage(message);
-    }
-  }
-
-  private handleSystemMessage(message: SDKMessage & { type: 'system' }): void {
-    if (!('subtype' in message)) return;
-
-    const span = this.getActiveSpan();
-    if (!span) return;
-
-    // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- only tracing relevant subtypes
-    switch (message.subtype) {
-      case 'init':
-        span.setAttribute('run.id', this.traceContext.metadata['runId'] ?? '');
-        span.setAttribute(
-          'run.source',
-          this.traceContext.metadata['source'] ?? '',
-        );
-        span.setAttribute(
-          'run.repo_name',
-          this.traceContext.metadata['repoName'] ?? '',
-        );
-        span.setAttribute('run.trace_name', this.traceContext.traceName);
-        span.setAttribute('run.tags', this.traceContext.tags);
-
-        if (this.traceContext.sessionId) {
-          span.setAttribute('run.session_id', this.traceContext.sessionId);
-        }
-        if (this.traceContext.metadata['triggerName']) {
-          span.setAttribute(
-            'run.trigger_name',
-            this.traceContext.metadata['triggerName'],
-          );
-        }
-        if (this.traceContext.metadata['externalSessionId']) {
-          span.setAttribute(
-            'run.external_session_id',
-            this.traceContext.metadata['externalSessionId'],
-          );
-        }
-        if (this.traceContext.metadata['parentRunId']) {
-          span.setAttribute(
-            'run.parent_run_id',
-            this.traceContext.metadata['parentRunId'],
-          );
-        }
-
-        span.setAttribute('run.model', message.model);
-        span.setAttribute('run.tool_count', message.tools.length);
-        span.setAttribute('run.mcp_server_count', message.mcp_servers.length);
-
-        this.logger.debug('Tracing attributes enriched');
-        break;
-
-      case 'compact_boundary':
-        span.addEvent('compaction', {
-          trigger: message.compact_metadata.trigger,
-          pre_tokens: message.compact_metadata.pre_tokens,
+  private handleEvent(event: AgentSessionEvent): void {
+    // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- only tracing relevant types
+    switch (event.type) {
+      case 'compaction_start':
+        this.getActiveSpan()?.addEvent('compaction', {
+          trigger: event.reason,
         });
         break;
 
-      case 'api_retry':
-        span.addEvent('api-retry', {
-          attempt: message.attempt,
-          max_retries: message.max_retries,
-          retry_delay_ms: message.retry_delay_ms,
-          error: message.error,
+      case 'auto_retry_start':
+        this.getActiveSpan()?.addEvent('api-retry', {
+          attempt: event.attempt,
+          max_retries: event.maxAttempts,
+          retry_delay_ms: event.delayMs,
+          error: event.errorMessage,
         });
         break;
 

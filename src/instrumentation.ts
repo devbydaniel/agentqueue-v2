@@ -8,12 +8,10 @@ import { detectTracingProvider } from './config/detect-tracing-provider.js';
  * Provider is selected via TRACING_PROVIDER env var, with auto-detection
  * fallback from LANGFUSE_SECRET_KEY / PHOENIX_COLLECTOR_ENDPOINT.
  *
- * We do NOT register any auto-instrumentations here. The Claude Agent SDK
- * activity is captured by `TracingEnrichmentHandler` directly from the SDK
- * message stream (see callbacks/handlers/tracing-enrichment.callback-handler.ts).
- * This avoids the IITM (import-in-the-middle) version-mismatch trap that
- * `@arizeai/openinference-instrumentation-claude-agent-sdk` suffers from in
- * a deep npm dependency graph.
+ * We do NOT register any auto-instrumentations here. Run-level attributes
+ * are added by `TracingEnrichmentHandler` from the pi session event stream
+ * (see callbacks/handlers/tracing-enrichment.callback-handler.ts); the
+ * AGENT / LLM / TOOL spans come from the phoenix pi extension.
  */
 
 async function initLangfuse(): Promise<void> {

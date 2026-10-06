@@ -1,7 +1,17 @@
 import { Injectable, Logger } from '@nestjs/common';
-import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { RunEventHandler } from '../run-event-handler.interface.js';
-import { extractAssistantText } from '../extract-assistant-text.js';
+import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent' with {
+  'resolution-mode': 'import',
+};
+import type {
+  RunEventHandler,
+  SessionStartInfo,
+} from '../run-event-handler.interface.js';
+import {
+  assistantMessageOf,
+  extractAssistantText,
+  toolCallsOf,
+  type AssistantMessage,
+} from '../pi-messages.js';
 
 const MAX_LOG_LENGTH = 500;
 
@@ -15,67 +25,46 @@ export class LoggerCallbackHandler implements RunEventHandler {
   readonly name = 'logger';
   private readonly logger = new Logger(LoggerCallbackHandler.name);
 
-  onMessage(message: SDKMessage): void {
+  onStart(info: SessionStartInfo): void {
+    this.logger.log('Session started', {
+      sessionId: info.sessionId,
+      model: info.model,
+      toolCount: info.tools.length,
+    });
+  }
+
+  onEvent(event: AgentSessionEvent): void {
+    const assistant = assistantMessageOf(event);
+    if (assistant) {
+      this.handleAssistantMessage(assistant);
+      return;
+    }
+
     // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- only logging relevant types
-    switch (message.type) {
-      case 'system':
-        this.handleSystemMessage(message);
-        break;
-
-      case 'assistant':
-        this.handleAssistantMessage(message);
-        break;
-
-      case 'result':
-        this.logger.log('Run completed', {
-          subtype: message.subtype,
-          durationMs: message.duration_ms,
-          costUsd: message.total_cost_usd,
-          numTurns: message.num_turns,
-          isError: message.is_error,
-        });
-        break;
-
-      // All other types: skip silently
-      default:
-        break;
-    }
-  }
-
-  private handleSystemMessage(message: SDKMessage & { type: 'system' }): void {
-    if (!('subtype' in message)) return;
-
-    // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- only logging relevant subtypes
-    switch (message.subtype) {
-      case 'init':
-        this.logger.log('Session started', {
-          model: message.model,
-          toolCount: message.tools.length,
-          mcpServerCount: message.mcp_servers.length,
-          agents: message.agents,
-        });
-        break;
-
-      case 'api_retry':
+    switch (event.type) {
+      case 'auto_retry_start':
         this.logger.warn('API retry', {
-          attempt: message.attempt,
-          maxRetries: message.max_retries,
-          retryDelayMs: message.retry_delay_ms,
-          error: message.error,
+          attempt: event.attempt,
+          maxAttempts: event.maxAttempts,
+          delayMs: event.delayMs,
+          error: event.errorMessage,
         });
         break;
 
-      case 'status':
-        if (message.status === 'compacting') {
-          this.logger.log('Context compacting');
-        }
+      case 'compaction_start':
+        this.logger.log('Context compacting', { reason: event.reason });
         break;
 
-      case 'compact_boundary':
-        this.logger.log('Compaction boundary', {
-          trigger: message.compact_metadata.trigger,
-          preTokens: message.compact_metadata.pre_tokens,
+      case 'compaction_end':
+        this.logger.log('Compaction finished', {
+          reason: event.reason,
+          aborted: event.aborted,
+          error: event.errorMessage,
         });
+        break;
+
+      case 'agent_settled':
+        this.logger.log('Run settled');
         break;
 
       default:
@@ -83,22 +72,22 @@ export class LoggerCallbackHandler implements RunEventHandler {
     }
   }
 
-  private handleAssistantMessage(
-    message: SDKMessage & { type: 'assistant' },
-  ): void {
-    const content = message.message.content;
+  private handleAssistantMessage(message: AssistantMessage): void {
     const text = extractAssistantText(message);
-
     if (text) {
       this.logger.log('Assistant message', { text: truncate(text) });
     }
 
-    for (const block of content) {
-      if (block.type === 'tool_use') {
-        this.logger.log(`Tool call: ${block.name}`, {
-          args: truncate(JSON.stringify(block.input)),
-        });
-      }
+    for (const call of toolCallsOf(message)) {
+      this.logger.log(`Tool call: ${call.name}`, {
+        args: truncate(JSON.stringify(call.arguments)),
+      });
+    }
+
+    if (message.stopReason === 'error') {
+      this.logger.error('Assistant turn failed', {
+        error: message.errorMessage,
+      });
     }
   }
 }

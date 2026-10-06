@@ -1,6 +1,6 @@
 # AgentQueue v2
 
-Centralized agent orchestrator for AI agent workloads. Receives triggers (cron schedules, Linear webhooks, GitHub webhooks, Telegram webhooks), resolves a working directory, and runs a [Claude Agent SDK](https://docs.claude.com/en/api/agent-sdk/overview) session against it.
+Centralized agent orchestrator for AI agent workloads. Receives triggers (cron schedules, Linear webhooks, GitHub webhooks, Telegram webhooks), resolves a working directory, and runs a [pi](https://github.com/earendil-works/pi) SDK session against it.
 
 ## Architecture
 
@@ -20,7 +20,7 @@ NestJS modular backend backed by Postgres (via raw `pg`) and pg-boss for job que
                      └──────────┬──────────┘
                                 │
                      ┌──────────▼──────────┐
-                     │ SDK session factory │
+                     │ pi session factory  │
                      │ + agent session     │
                      └──────────┬──────────┘
                                 │
@@ -34,8 +34,19 @@ NestJS modular backend backed by Postgres (via raw `pg`) and pg-boss for job que
 
 ## Requirements
 
-- Node.js >= 20
-- Claude Agent SDK (installed as an npm dependency; see `@anthropic-ai/claude-agent-sdk` in `package.json`)
+- Node.js >= 22.19 (required by pi)
+- pi SDK (installed as an npm dependency, pinned; see `@earendil-works/pi-coding-agent` in `package.json`)
+
+## Agent engine
+
+Each run is a pi session created in-process (`src/runs/pi-session.factory.ts`) in the run's `cwd`. The factory only adds the AgentQueue run-ID prompt and env var and any per-run `append_system_prompt`; everything else comes from pi's own configuration:
+
+- **Model, thinking level, project trust** — `~/.pi/agent/settings.json` (`defaultProvider`, `defaultModel`, `defaultThinkingLevel`, `defaultProjectTrust`). Unattended runs need `"defaultProjectTrust": "always"`, otherwise pi silently skips project skills under `.agents/skills`.
+- **Credentials** — provider env vars (e.g. `ANTHROPIC_API_KEY`) or `~/.pi/agent/auth.json`.
+- **Extensions** — user extensions in `~/.pi/agent/extensions/` load for every run (e.g. phoenix tracing, subagents).
+- **Sessions** — stored as JSONL under `~/.pi/agent/sessions/`. Chat and Linear sources resume by pi session ID; an ID that no longer resolves starts a fresh session.
+
+A run fails when the prompt throws, when it is aborted (timeout or `POST /runs/:id/abort`), or when its final assistant message ends with `stopReason: "error"` (provider errors don't throw).
 
 ## Quick Start
 
@@ -179,7 +190,7 @@ curl -s http://localhost:3000/runs/abc-123 \
 
 ### GET /runs/:id/events
 
-Get the filtered event log for a run (agent lifecycle events, tool calls, etc.):
+Get the filtered event log for a run. Event types are `session_start` (session ID, model, tools), `message:<role>` for every completed message (`message:assistant`, `message:toolResult`, `message:user`, …), and pi's compaction and retry events under their own names. Streaming partials and per-turn duplicates are not stored.
 
 ```bash
 curl -s 'http://localhost:3000/runs/abc-123/events?limit=50' \
@@ -483,7 +494,7 @@ src/
 │   ├── run-processor.service.ts
 │   ├── run-queue-worker.service.ts
 │   ├── active-session-tracker.service.ts
-│   ├── sdk-session.factory.ts
+│   ├── pi-session.factory.ts
 │   ├── external-session.repository.ts
 │   └── dto/
 ├── telegram/                         # Telegram API client + response delivery

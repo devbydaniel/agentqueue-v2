@@ -4,11 +4,11 @@ import {
   TracingEnrichmentHandlerFactory,
 } from './tracing-enrichment.callback-handler.js';
 import {
-  systemInit,
-  systemApiRetry,
-  systemCompactBoundary,
-  resultSuccess,
-} from './__tests__/sdk-message.fixtures.js';
+  assistantText,
+  autoRetryStart,
+  compactionStart,
+  sessionStart,
+} from './__tests__/pi-event.fixtures.js';
 import type { TraceContext } from '../build-trace-context.js';
 
 const mockSetAttribute = jest.fn();
@@ -55,12 +55,14 @@ describe('TracingEnrichmentHandler', () => {
 
   it('should not enrich when disabled', () => {
     const disabled = new TracingEnrichmentHandler(defaultContext, false);
-    disabled.onMessage(systemInit());
+    disabled.onStart(sessionStart());
+    disabled.onEvent(compactionStart());
     expect(mockSetAttribute).not.toHaveBeenCalled();
+    expect(mockAddEvent).not.toHaveBeenCalled();
   });
 
-  it('should set run attributes on system init', () => {
-    handler.onMessage(systemInit({ model: 'claude-opus-4-20250514' }));
+  it('should set run attributes on start', () => {
+    handler.onStart(sessionStart());
 
     expect(mockSetAttribute).toHaveBeenCalledWith('run.id', 'run-123');
     expect(mockSetAttribute).toHaveBeenCalledWith('run.source', 'test');
@@ -69,10 +71,32 @@ describe('TracingEnrichmentHandler', () => {
     expect(mockSetAttribute).toHaveBeenCalledWith('run.tags', ['source:test']);
     expect(mockSetAttribute).toHaveBeenCalledWith(
       'run.model',
-      'claude-opus-4-20250514',
+      'anthropic/claude-opus-5-5',
     );
-    expect(mockSetAttribute).toHaveBeenCalledWith('run.tool_count', 3);
-    expect(mockSetAttribute).toHaveBeenCalledWith('run.mcp_server_count', 0);
+    expect(mockSetAttribute).toHaveBeenCalledWith('run.tool_count', 4);
+    expect(mockSetAttribute).toHaveBeenCalledWith(
+      'run.pi_session_id',
+      'test-session-id',
+    );
+  });
+
+  it('should not set run.model when no model resolved', () => {
+    handler.onStart(sessionStart({ model: undefined }));
+
+    expect(mockSetAttribute).not.toHaveBeenCalledWith(
+      'run.model',
+      expect.anything(),
+    );
+  });
+
+  it('should not set optional attributes when absent from context', () => {
+    handler.onStart(sessionStart());
+
+    const keys = mockSetAttribute.mock.calls.map(([key]) => key as string);
+    expect(keys).not.toContain('run.session_id');
+    expect(keys).not.toContain('run.trigger_name');
+    expect(keys).not.toContain('run.external_session_id');
+    expect(keys).not.toContain('run.parent_run_id');
   });
 
   it('should set session_id when present in context', () => {
@@ -81,7 +105,7 @@ describe('TracingEnrichmentHandler', () => {
       sessionId: 'linear-session-1',
     };
     const h = new TracingEnrichmentHandler(ctxWithSession, true);
-    h.onMessage(systemInit());
+    h.onStart(sessionStart());
 
     expect(mockSetAttribute).toHaveBeenCalledWith(
       'run.session_id',
@@ -95,7 +119,7 @@ describe('TracingEnrichmentHandler', () => {
       metadata: { ...defaultContext.metadata, triggerName: 'my-trigger' },
     };
     const h = new TracingEnrichmentHandler(ctxWithTrigger, true);
-    h.onMessage(systemInit());
+    h.onStart(sessionStart());
 
     expect(mockSetAttribute).toHaveBeenCalledWith(
       'run.trigger_name',
@@ -103,49 +127,60 @@ describe('TracingEnrichmentHandler', () => {
     );
   });
 
-  it('should add compaction event', () => {
-    handler.onMessage(systemInit());
-    handler.onMessage(systemCompactBoundary());
+  it('should set external_session_id and parent_run_id when present', () => {
+    const ctx: TraceContext = {
+      ...defaultContext,
+      metadata: {
+        ...defaultContext.metadata,
+        externalSessionId: 'ext-1',
+        parentRunId: 'run-parent',
+      },
+    };
+    const h = new TracingEnrichmentHandler(ctx, true);
+    h.onStart(sessionStart());
 
-    expect(mockAddEvent).toHaveBeenCalledWith('compaction', {
-      trigger: 'auto',
-      pre_tokens: 50000,
-    });
-  });
-
-  it('should add api-retry event', () => {
-    handler.onMessage(systemInit());
-    handler.onMessage(systemApiRetry());
-
-    expect(mockAddEvent).toHaveBeenCalledWith(
-      'api-retry',
-      expect.objectContaining({
-        attempt: 1,
-        max_retries: 3,
-      }),
+    expect(mockSetAttribute).toHaveBeenCalledWith(
+      'run.external_session_id',
+      'ext-1',
+    );
+    expect(mockSetAttribute).toHaveBeenCalledWith(
+      'run.parent_run_id',
+      'run-parent',
     );
   });
 
-  describe('onComplete', () => {
-    it('should set result attributes when result is provided', () => {
-      handler.onComplete(resultSuccess());
+  it('should add compaction event on compaction_start', () => {
+    handler.onEvent(compactionStart());
 
-      expect(mockSetAttribute).toHaveBeenCalledWith('run.subtype', 'success');
-      expect(mockSetAttribute).toHaveBeenCalledWith('run.cost_usd', 0.05);
+    expect(mockAddEvent).toHaveBeenCalledWith('compaction', {
+      trigger: 'threshold',
+    });
+  });
+
+  it('should add api-retry event on auto_retry_start', () => {
+    handler.onEvent(autoRetryStart());
+
+    expect(mockAddEvent).toHaveBeenCalledWith('api-retry', {
+      attempt: 1,
+      max_retries: 3,
+      retry_delay_ms: 1000,
+      error: 'overloaded',
+    });
+  });
+
+  it('should ignore other events', () => {
+    handler.onEvent(assistantText('Hello'));
+
+    expect(mockAddEvent).not.toHaveBeenCalled();
+    expect(mockSetAttribute).not.toHaveBeenCalled();
+  });
+
+  it('should swallow span errors in onEvent', () => {
+    mockAddEvent.mockImplementationOnce(() => {
+      throw new Error('span closed');
     });
 
-    it('should set aborted attribute when result is undefined', () => {
-      handler.onComplete(undefined);
-
-      expect(mockSetAttribute).toHaveBeenCalledWith('run.aborted', true);
-    });
-
-    it('should not set attributes when disabled', () => {
-      const disabled = new TracingEnrichmentHandler(defaultContext, false);
-      disabled.onComplete(resultSuccess());
-
-      expect(mockSetAttribute).not.toHaveBeenCalled();
-    });
+    expect(() => handler.onEvent(compactionStart())).not.toThrow();
   });
 });
 
@@ -187,7 +222,7 @@ describe('TracingEnrichmentHandlerFactory', () => {
     });
 
     // Should not throw — just noop
-    handler.onMessage(systemInit());
+    handler.onStart(sessionStart());
     expect(mockSetAttribute).not.toHaveBeenCalled();
   });
 
