@@ -14,9 +14,10 @@ import { MatrixMediaService } from './matrix-media.service.js';
 import { buildSessionKey, type InboundMessage } from './matrix-content.js';
 
 const MATRIX_SYSTEM_PROMPT = `
-You are responding via Matrix (Element). Your reply is rendered as markdown:
-headings, bold/italic, lists, code blocks, links and tables all display
-properly. Keep it reasonably concise — it is often read on a phone.
+You are responding via Matrix (Element X). Your reply is rendered as markdown,
+but the mobile client does not display headings or tables. Use bold labels,
+bullet lists, code blocks and links instead. Keep it reasonably concise — it is
+often read on a phone.
 `.trim();
 
 const MAX_CONTEXT_CHARS = 4000;
