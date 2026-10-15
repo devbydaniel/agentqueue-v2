@@ -119,6 +119,15 @@ export class MatrixClient {
     );
   }
 
+  /** Redact (delete) an event, e.g. a status message that is no longer needed. */
+  async redactEvent(roomId: string, eventId: string): Promise<void> {
+    await this.request(
+      'PUT',
+      `/_matrix/client/v3/rooms/${enc(roomId)}/redact/${enc(eventId)}/${randomUUID()}`,
+      {},
+    );
+  }
+
   async setTyping(
     roomId: string,
     userId: string,

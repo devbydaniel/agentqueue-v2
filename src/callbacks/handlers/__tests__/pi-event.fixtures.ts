@@ -154,3 +154,12 @@ export function messageUpdate(): AgentSessionEvent {
 export function agentSettled(): AgentSessionEvent {
   return { type: 'agent_settled' };
 }
+
+/** A tool starting to run. */
+export function toolExecutionStart(
+  toolName: string,
+  args: Record<string, unknown>,
+  toolCallId = 'tc-1',
+): AgentSessionEvent {
+  return { type: 'tool_execution_start', toolCallId, toolName, args };
+}

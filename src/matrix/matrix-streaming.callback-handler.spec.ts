@@ -5,12 +5,14 @@ import {
   assistantText,
   assistantToolCall,
   messageUpdate,
+  toolExecutionStart,
   toolResult,
   userText,
 } from '../callbacks/handlers/__tests__/pi-event.fixtures.js';
 
 describe('MatrixStreamingCallbackHandler', () => {
   let sendMessage: jest.Mock;
+  let redactEvent: jest.Mock;
   let matrixService: {
     getClient: jest.Mock;
     stopTyping: jest.Mock;
@@ -30,8 +32,9 @@ describe('MatrixStreamingCallbackHandler', () => {
     sendMessage = jest
       .fn()
       .mockImplementation(() => Promise.resolve(`$m${++n}`));
+    redactEvent = jest.fn().mockResolvedValue(undefined);
     matrixService = {
-      getClient: jest.fn().mockReturnValue({ sendMessage }),
+      getClient: jest.fn().mockReturnValue({ sendMessage, redactEvent }),
       stopTyping: jest.fn(),
       isVoiceEnabled: jest.fn().mockResolvedValue(false),
       sendVoiceNote: jest.fn().mockResolvedValue(undefined),
@@ -112,6 +115,72 @@ describe('MatrixStreamingCallbackHandler', () => {
       (call) => (call[1] as Record<string, unknown>)['body'] as string,
     );
     expect(bodies).toEqual(['done']);
+  });
+
+  const bodyOf = (call: unknown[]): string => {
+    const content = call[1] as Record<string, unknown>;
+    const inner = (content['m.new_content'] ?? content) as Record<
+      string,
+      unknown
+    >;
+    return inner['body'] as string;
+  };
+
+  it('shows the running tool before any text, then replaces it with the reply', async () => {
+    handler.onEvent(toolExecutionStart('bash', { command: 'ls' }));
+    await jest.advanceTimersByTimeAsync(1001);
+    expect(sendMessage.mock.calls.map(bodyOf)).toEqual(['🔧 bash `ls`']);
+
+    handler.onEvent(assistantText('done'));
+    await handler.finalize();
+    expect(sendMessage.mock.calls.map(bodyOf)).toEqual([
+      '🔧 bash `ls`',
+      'done',
+    ]);
+    expect(redactEvent).not.toHaveBeenCalled();
+  });
+
+  it('shows the status below the text and drops it from the final reply', async () => {
+    handler.onEvent(assistantText('looking'));
+    handler.onEvent(toolExecutionStart('read', { path: 'a.md' }));
+    await jest.advanceTimersByTimeAsync(1001);
+    handler.onEvent(toolExecutionStart('read', { path: 'b.md' }, 'tc-2'));
+    await jest.advanceTimersByTimeAsync(1001);
+    await handler.finalize();
+    expect(sendMessage.mock.calls.map(bodyOf)).toEqual([
+      'looking\n\n🔧 read `a.md`',
+      'looking\n\n🔧 read `b.md`',
+      'looking',
+    ]);
+  });
+
+  it('redacts a status-only message when a message is steered in', async () => {
+    handler.onEvent(toolExecutionStart('bash', { command: 'sleep 5' }));
+    await jest.advanceTimersByTimeAsync(1001);
+    handler.onEvent(userText('actually, stop'));
+    handler.onEvent(assistantText('stopped'));
+    await handler.finalize();
+    expect(redactEvent).toHaveBeenCalledWith('!r:hs', '$m1');
+    expect(sendMessage.mock.calls.map(bodyOf)).toEqual([
+      '🔧 bash `sleep 5`',
+      'stopped',
+    ]);
+    expect(
+      (sendMessage.mock.calls[1][1] as Record<string, unknown>)['m.relates_to'],
+    ).toMatchObject({ rel_type: 'm.thread' });
+  });
+
+  it('redacts a trailing status-only message after a steer', async () => {
+    handler.onEvent(assistantText('first'));
+    handler.onEvent(userText('more'));
+    handler.onEvent(toolExecutionStart('bash', { command: 'ls' }));
+    await jest.advanceTimersByTimeAsync(1001);
+    await handler.finalize();
+    expect(sendMessage.mock.calls.map(bodyOf)).toEqual([
+      'first',
+      '🔧 bash `ls`',
+    ]);
+    expect(redactEvent).toHaveBeenCalledWith('!r:hs', '$m2');
   });
 
   it('sends a fallback when the run produced no text', async () => {
