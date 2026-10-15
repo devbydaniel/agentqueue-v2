@@ -70,6 +70,15 @@ export class RunsService {
     return this.runProcessorService.abortSession(externalSessionId);
   }
 
+  /**
+   * Deliver a message into the run currently working on `externalSessionId`,
+   * after its current tool calls. Returns false if no run is accepting input
+   * there — enqueue a new run instead.
+   */
+  steerSession(externalSessionId: string, text: string): Promise<boolean> {
+    return this.runProcessorService.steerSession(externalSessionId, text);
+  }
+
   async findTriggerNameByExternalSessionId(
     externalSessionId: string,
   ): Promise<string | null> {

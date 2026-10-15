@@ -22,6 +22,9 @@ often read on a phone.
 
 const MAX_CONTEXT_CHARS = 4000;
 
+/** Reaction marking a message that was steered into the running reply. */
+export const STEERED_REACTION = '👀';
+
 type VoiceCommand = 'on' | 'off' | 'toggle';
 
 function parseVoiceCommand(text: string): VoiceCommand | undefined {
@@ -44,7 +47,8 @@ export interface MatrixIngestBatch {
 /**
  * Turns inbound Matrix messages into agent runs, one session per thread. A
  * message at the top level of a room starts a new thread (and session) rooted
- * at itself; the reply and all follow-ups live in that thread.
+ * at itself; the reply and all follow-ups live in that thread. A message sent
+ * while the thread's run is working is steered into that run instead.
  */
 @Injectable()
 export class MatrixIngestService {
@@ -126,6 +130,17 @@ export class MatrixIngestService {
       chatId: batch.roomId,
       lastActivityAt: new Date(),
     });
+
+    if (await this.runsService.steerSession(sessionKey, prompt)) {
+      await this.matrixService.react(
+        batch.botName,
+        batch.roomId,
+        batch.messages[batch.messages.length - 1].eventId,
+        STEERED_REACTION,
+      );
+      return;
+    }
+
     this.matrixService.startTyping(sessionKey);
 
     await this.enqueueRun(trigger, batch, target, sessionKey, prompt, cwd);

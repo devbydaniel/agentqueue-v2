@@ -42,6 +42,11 @@ function createFakeSession(events: AgentSessionEvent[] = []) {
       return Promise.resolve();
     }),
     waitForIdle: jest.fn(() => Promise.resolve()),
+    steer: jest.fn(() => Promise.resolve('queued')),
+    clearQueue: jest.fn(() => ({
+      steering: [] as string[],
+      followUp: [] as string[],
+    })),
     abort: jest.fn(() => Promise.resolve()),
     emit,
   };
@@ -460,6 +465,53 @@ describe('RunProcessorService session handling', () => {
 
       expect(track).not.toHaveBeenCalled();
       expect(untrack).not.toHaveBeenCalled();
+    });
+  });
+  describe('steering', () => {
+    it('steers a message into the running session by externalSessionId', async () => {
+      promptUntilAborted(session);
+      const run = runSession({ externalSessionId: 'matrix:a', runId: 'run-1' });
+      await new Promise((resolve) => setImmediate(resolve));
+
+      await expect(service.steerSession('matrix:a', 'also X')).resolves.toBe(
+        true,
+      );
+      expect(session.steer).toHaveBeenCalledWith('also X');
+
+      service.abortByRunId('run-1');
+      await run.catch(() => undefined);
+    });
+
+    it('runs another turn for a steer that arrived after the last turn', async () => {
+      session.clearQueue.mockReturnValueOnce({
+        steering: ['late steer'],
+        followUp: [],
+      });
+
+      await runSession({ externalSessionId: 'matrix:a' });
+
+      expect(session.prompt).toHaveBeenCalledTimes(2);
+      expect(session.prompt).toHaveBeenLastCalledWith('late steer', {
+        expandPromptTemplates: false,
+      });
+    });
+
+    it('stops accepting steers once the run is over', async () => {
+      await runSession({ externalSessionId: 'matrix:a' });
+
+      await expect(service.steerSession('matrix:a', 'hi')).resolves.toBe(false);
+      expect(session.steer).not.toHaveBeenCalled();
+    });
+
+    it('does not offer runs without an externalSessionId for steering', async () => {
+      promptUntilAborted(session);
+      const run = runSession({ runId: 'run-1' });
+      await new Promise((resolve) => setImmediate(resolve));
+
+      await expect(service.steerSession('run-1', 'hi')).resolves.toBe(false);
+
+      service.abortByRunId('run-1');
+      await run.catch(() => undefined);
     });
   });
 });

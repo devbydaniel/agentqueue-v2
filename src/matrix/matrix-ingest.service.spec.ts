@@ -28,7 +28,11 @@ function text(
 
 describe('MatrixIngestService', () => {
   let cwd: string;
-  let runsService: { enqueue: jest.Mock; abortSession: jest.Mock };
+  let runsService: {
+    enqueue: jest.Mock;
+    abortSession: jest.Mock;
+    steerSession: jest.Mock;
+  };
   let sessions: {
     upsertSession: jest.Mock;
     deleteBySessionKey: jest.Mock;
@@ -57,6 +61,7 @@ describe('MatrixIngestService', () => {
     runsService = {
       enqueue: jest.fn().mockResolvedValue({ runId: 'r1' }),
       abortSession: jest.fn(),
+      steerSession: jest.fn().mockResolvedValue(false),
     };
     sessions = {
       upsertSession: jest.fn().mockResolvedValue(undefined),
@@ -72,6 +77,7 @@ describe('MatrixIngestService', () => {
       isVoiceEnabled: jest.fn().mockResolvedValue(false),
       setVoiceEnabled: jest.fn().mockResolvedValue(undefined),
       sendNotice: jest.fn().mockResolvedValue(undefined),
+      react: jest.fn().mockResolvedValue(undefined),
     };
     mediaService = { download: jest.fn().mockResolvedValue('/media/a.png') };
     transcription = {
@@ -124,6 +130,43 @@ describe('MatrixIngestService', () => {
         appendSystemPrompt: expect.stringContaining('Matrix') as unknown,
       }),
     );
+  });
+
+  it('steers a message into the running thread session instead of enqueueing', async () => {
+    runsService.steerSession.mockResolvedValue(true);
+    sessions.findBySessionKey.mockResolvedValue({ sessionKey: 'x' });
+
+    await ingest(
+      [
+        text('first', { eventId: '$a', threadRootId: '$root' }),
+        text('second', { eventId: '$b', threadRootId: '$root' }),
+      ],
+      '$root',
+    );
+
+    expect(runsService.steerSession).toHaveBeenCalledWith(
+      `matrix:assistant:${ROOM}:$root`,
+      'first\n\nsecond',
+    );
+    expect(matrixService.react).toHaveBeenCalledWith(
+      'assistant',
+      ROOM,
+      '$b',
+      '👀',
+    );
+    expect(runsService.enqueue).not.toHaveBeenCalled();
+    expect(matrixService.startTyping).not.toHaveBeenCalled();
+  });
+
+  it('enqueues a new run when no run accepts the message', async () => {
+    await ingest([text('hello')]);
+
+    expect(runsService.steerSession).toHaveBeenCalledWith(
+      TOP_LEVEL_KEY,
+      'hello',
+    );
+    expect(matrixService.react).not.toHaveBeenCalled();
+    expect(runsService.enqueue).toHaveBeenCalled();
   });
 
   it('keys thread messages by thread root', async () => {

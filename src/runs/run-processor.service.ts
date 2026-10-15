@@ -18,6 +18,7 @@ import { PiSessionFactory } from './pi-session.factory.js';
 import { RunLifecycleService } from './run-lifecycle.service.js';
 import { RunHandlerBuilder } from './run-handler-builder.service.js';
 import { RunSourceNotifier } from './run-source-notifier.service.js';
+import { SteerableSession } from './steerable-session.js';
 
 export interface RunSessionParams {
   cwd: string;
@@ -61,6 +62,14 @@ export class RunProcessorService {
    */
   abortSession(externalSessionId: string): boolean {
     return this.activeSessionTracker.abort(externalSessionId);
+  }
+
+  /**
+   * Deliver a message into the run currently working on `externalSessionId`.
+   * Returns false if no run is accepting input there.
+   */
+  steerSession(externalSessionId: string, text: string): Promise<boolean> {
+    return this.activeSessionTracker.steer(externalSessionId, text);
   }
 
   /**
@@ -124,6 +133,13 @@ export class RunProcessorService {
     const abortController = params.abortController ?? new AbortController();
     const session = await this.createPiSession(params);
     const trackKey = this.trackSession(params, abortController);
+    const steerable = new SteerableSession(session);
+    if (params.externalSessionId) {
+      this.activeSessionTracker.trackSteerable(
+        params.externalSessionId,
+        steerable,
+      );
+    }
     const abortSession = () => {
       session.abort().catch((error: unknown) => {
         this.logger.error('Failed to abort pi session', {
@@ -146,9 +162,11 @@ export class RunProcessorService {
       this.throwIfAborted(abortController.signal);
       const lastAssistant = await this.consumeSession(
         session,
+        steerable,
         params.prompt,
         handlers,
         params.traceContext,
+        abortController.signal,
       );
 
       this.throwIfAborted(abortController.signal);
@@ -162,6 +180,13 @@ export class RunProcessorService {
 
       return { sessionId: session.sessionId };
     } finally {
+      steerable.close();
+      if (params.externalSessionId) {
+        this.activeSessionTracker.untrackSteerable(
+          params.externalSessionId,
+          steerable,
+        );
+      }
       abortController.signal.removeEventListener('abort', abortSession);
       if (trackKey !== undefined) {
         this.activeSessionTracker.untrack(trackKey, params.runId);
@@ -201,9 +226,11 @@ export class RunProcessorService {
    */
   private async consumeSession(
     session: AgentSession,
+    steerable: SteerableSession,
     prompt: string,
     handlers: RunEventHandler[],
     traceContext: TraceContext | undefined,
+    signal: AbortSignal,
   ): Promise<AssistantMessage | undefined> {
     let lastAssistant: AssistantMessage | undefined;
     // pi listeners are synchronous; chain dispatches so async handlers see
@@ -221,8 +248,9 @@ export class RunProcessorService {
         await this.startHandlers(handlers, this.sessionStartInfo(session));
         await session.prompt(prompt);
         // Extensions can start follow-up turns after prompt() settles (e.g. a
-        // subagent reporting back); wait until pi stops continuing on its own.
-        await session.waitForIdle();
+        // subagent reporting back), and steers can land after pi's last queue
+        // check; wait until pi is idle with nothing left to deliver.
+        await steerable.settle(signal);
       } finally {
         unsubscribe();
         await dispatchChain;

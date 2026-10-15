@@ -1,4 +1,11 @@
 import { ActiveSessionTrackerService } from './active-session-tracker.service.js';
+import type { SteerableSession } from './steerable-session.js';
+
+function fakeSteerable(accepts = true) {
+  return {
+    steer: jest.fn().mockResolvedValue(accepts),
+  } as unknown as SteerableSession & { steer: jest.Mock };
+}
 
 describe('ActiveSessionTrackerService', () => {
   let tracker: ActiveSessionTrackerService;
@@ -110,6 +117,36 @@ describe('ActiveSessionTrackerService', () => {
     it('should return 0 when no sessions are tracked', () => {
       const count = tracker.abortAll();
       expect(count).toBe(0);
+    });
+  });
+  describe('steering', () => {
+    it('delivers to the session tracked under the key', async () => {
+      const session = fakeSteerable();
+      tracker.trackSteerable('matrix:a', session);
+
+      await expect(tracker.steer('matrix:a', 'hi')).resolves.toBe(true);
+      expect(session.steer).toHaveBeenCalledWith('hi');
+    });
+
+    it('returns false when no session is tracked or it refuses', async () => {
+      await expect(tracker.steer('matrix:a', 'hi')).resolves.toBe(false);
+
+      tracker.trackSteerable('matrix:a', fakeSteerable(false));
+      await expect(tracker.steer('matrix:a', 'hi')).resolves.toBe(false);
+    });
+
+    it('keeps a newer session when an older one untracks', async () => {
+      const older = fakeSteerable();
+      const newer = fakeSteerable();
+      tracker.trackSteerable('matrix:a', older);
+      tracker.trackSteerable('matrix:a', newer);
+      tracker.untrackSteerable('matrix:a', older);
+
+      await tracker.steer('matrix:a', 'hi');
+      expect(newer.steer).toHaveBeenCalled();
+
+      tracker.untrackSteerable('matrix:a', newer);
+      await expect(tracker.steer('matrix:a', 'hi')).resolves.toBe(false);
     });
   });
 });
