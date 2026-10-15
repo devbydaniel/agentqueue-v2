@@ -63,6 +63,15 @@ export function assistantText(
   return messageEnd(assistantMessage([{ type: 'text', text }], overrides));
 }
 
+/** `message_end` for a user message, e.g. one steered into a running turn. */
+export function userText(text: string): AgentSessionEvent {
+  return messageEnd({
+    role: 'user',
+    content: [{ type: 'text', text }],
+    timestamp: 0,
+  } as AgentMessage);
+}
+
 /** `message_end` for an assistant message with one tool call. */
 export function assistantToolCall(
   name: string,

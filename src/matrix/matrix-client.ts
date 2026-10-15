@@ -106,6 +106,19 @@ export class MatrixClient {
     return body.event_id;
   }
 
+  /** React to an event with `key` (an emoji), as an `m.annotation`. */
+  async sendReaction(
+    roomId: string,
+    eventId: string,
+    key: string,
+  ): Promise<void> {
+    await this.request(
+      'PUT',
+      `/_matrix/client/v3/rooms/${enc(roomId)}/send/m.reaction/${randomUUID()}`,
+      { 'm.relates_to': { rel_type: 'm.annotation', event_id: eventId, key } },
+    );
+  }
+
   async setTyping(
     roomId: string,
     userId: string,

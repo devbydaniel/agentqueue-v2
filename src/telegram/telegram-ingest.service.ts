@@ -55,6 +55,9 @@ export interface IngestMessageResult {
   handled: boolean;
 }
 
+/** Reaction marking a message that was steered into the running reply. */
+export const STEERED_REACTION = '👀';
+
 function isResetCommand(text: string): boolean {
   const trimmed = text.trim();
   if (trimmed === '/reset') return true;
@@ -140,6 +143,19 @@ export class TelegramIngestService {
       messageThreadId: params.messageThreadId,
       lastActivityAt: new Date(),
     });
+
+    // A message sent while the chat's run is working joins that run.
+    if (await this.runsService.steerSession(sessionKey, params.text)) {
+      if (params.replyToMessageId !== undefined) {
+        await this.telegramService.setReaction({
+          botToken: trigger.bot_token,
+          chatId: params.chatId,
+          messageId: params.replyToMessageId,
+          emoji: STEERED_REACTION,
+        });
+      }
+      return { accepted: true, handled: true };
+    }
 
     this.telegramService.startTypingIndicator({
       sessionKey,

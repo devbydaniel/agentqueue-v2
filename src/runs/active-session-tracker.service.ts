@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import type { SteerableSession } from './steerable-session.js';
 
 /**
  * Tracks in-flight AbortControllers by external key (e.g. Linear
@@ -14,6 +15,32 @@ import { Injectable, Logger } from '@nestjs/common';
 export class ActiveSessionTrackerService {
   private readonly logger = new Logger(ActiveSessionTrackerService.name);
   private readonly activeControllers = new Map<string, AbortController>();
+  private readonly steerableSessions = new Map<string, SteerableSession>();
+
+  /** Make a running session reachable for steering by its external session ID. */
+  trackSteerable(externalSessionId: string, session: SteerableSession): void {
+    this.steerableSessions.set(externalSessionId, session);
+  }
+
+  /** Forget a steerable session, unless a newer one took its key meanwhile. */
+  untrackSteerable(externalSessionId: string, session: SteerableSession): void {
+    if (this.steerableSessions.get(externalSessionId) === session) {
+      this.steerableSessions.delete(externalSessionId);
+    }
+  }
+
+  /**
+   * Deliver `text` to the session running under `externalSessionId`.
+   * Returns false when no session is running there or it no longer accepts
+   * input; the caller should then start a new run.
+   */
+  async steer(externalSessionId: string, text: string): Promise<boolean> {
+    const session = this.steerableSessions.get(externalSessionId);
+    if (!session) return false;
+    const steered = await session.steer(text);
+    if (steered) this.logger.log(`Steered session: ${externalSessionId}`);
+    return steered;
+  }
 
   /**
    * Track an AbortController under one or more keys.

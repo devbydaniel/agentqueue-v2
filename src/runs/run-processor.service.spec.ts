@@ -45,6 +45,11 @@ function createFakeSession(events: AgentSessionEvent[]) {
       return Promise.resolve();
     }),
     waitForIdle: jest.fn(() => Promise.resolve()),
+    steer: jest.fn(() => Promise.resolve('queued')),
+    clearQueue: jest.fn(() => ({
+      steering: [] as string[],
+      followUp: [] as string[],
+    })),
     abort: jest.fn(() => Promise.resolve()),
   };
 }

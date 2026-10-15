@@ -118,6 +118,38 @@ export class TelegramService implements OnModuleDestroy {
     });
   }
 
+  /** React to a message (e.g. to acknowledge it). Logs and gives up on failure. */
+  async setReaction(params: {
+    botToken: string;
+    chatId: string;
+    messageId: number;
+    emoji: string;
+  }): Promise<void> {
+    try {
+      const response = await fetch(
+        `${TELEGRAM_API_BASE_URL}/bot${params.botToken}/setMessageReaction`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: params.chatId,
+            message_id: params.messageId,
+            reaction: [{ type: 'emoji', emoji: params.emoji }],
+          }),
+        },
+      );
+      if (!response.ok) {
+        throw new Error(
+          `Telegram API setMessageReaction failed (${response.status}): ${await response.text()}`,
+        );
+      }
+    } catch (error) {
+      this.logger.warn('Failed to set Telegram reaction', {
+        error: error as Error,
+      });
+    }
+  }
+
   async emitRunResponse(
     triggerName: string,
     sessionKey: string,

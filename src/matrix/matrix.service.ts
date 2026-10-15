@@ -148,6 +148,22 @@ export class MatrixService implements OnModuleDestroy {
     );
   }
 
+  /** React to a message (e.g. to acknowledge it). Logs and gives up on failure. */
+  async react(
+    botName: string,
+    roomId: string,
+    eventId: string,
+    key: string,
+  ): Promise<void> {
+    try {
+      await this.requireClient(botName).sendReaction(roomId, eventId, key);
+    } catch (error) {
+      this.logger.warn('Failed to send Matrix reaction', {
+        error: error as Error,
+      });
+    }
+  }
+
   /** Speak `text` as a voice message. Logs and gives up on failure. */
   async sendVoiceNote(target: MatrixTarget, text: string): Promise<void> {
     if (!this.ttsService.isAvailable()) return;

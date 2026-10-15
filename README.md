@@ -323,7 +323,8 @@ inline shell expression. It does **not** apply to Linear or Telegram triggers.
 Telegram triggers route inbound bot messages by `bot_name` and sender `user_id`.
 Each accepted chat (and each topic in a threaded chat) keeps a persistent agent
 session that never expires. Send `/reset` or press the "new session" button to
-start a fresh one.
+start a fresh one. A message sent while the chat's run is still working is
+steered into that run (see [Steering](#steering)) and marked with 👀.
 
 ```yaml
 triggers:
@@ -373,7 +374,9 @@ starts a session there with the thread's root message as context, and an
 explicitly quoted message is always included. Replies stream in by editing
 one message in place and render as markdown (tables included). Images and
 files are passed as local paths; voice messages are transcribed
-(`MISTRAL_API_KEY`).
+(`MISTRAL_API_KEY`). A message sent into a thread whose run is still working
+is steered into that run (see [Steering](#steering)) and marked with 👀; the
+reply then continues in a new message below it.
 
 Room commands: `!voice`, `!voice on`, `!voice off` toggle spoken replies for
 the room (`OPENAI_API_KEY`). There is no reset command — a new top-level
@@ -385,6 +388,17 @@ one, it posts a one-time notice explaining that (once per room and process).
 The `/sync` position is stored in `matrix_sync_state`, so messages sent while
 AgentQueue is down are answered after a restart. The very first sync, and the
 history of a newly joined room, are not replayed.
+
+#### Steering
+
+Runs of the same external session (a Matrix thread, a Telegram chat) never run
+in parallel. When a Matrix or Telegram message arrives while its session's run
+is working, it is not queued as a new run but delivered into the running pi
+session with `steer()`: the agent sees it after its current tool calls, before
+its next model request, and carries on with it. A message that lands just as
+the agent finishes still gets a turn in the same run. If no run is accepting
+input, the message starts a new run as usual. Steering lives in memory, so it
+covers only runs in the current process.
 
 #### Linear Triggers
 

@@ -6,6 +6,7 @@ import {
   assistantToolCall,
   messageUpdate,
   toolResult,
+  userText,
 } from '../callbacks/handlers/__tests__/pi-event.fixtures.js';
 
 describe('MatrixStreamingCallbackHandler', () => {
@@ -82,6 +83,35 @@ describe('MatrixStreamingCallbackHandler', () => {
     expect(matrixService.stopTyping).toHaveBeenCalledWith(
       'matrix:assistant:!r:hs:$root',
     );
+  });
+
+  it('continues the reply in a new message after a steered user message', async () => {
+    handler.onEvent(userText('the prompt'));
+    handler.onEvent(assistantText('working on it'));
+    handler.onEvent(userText('use the work calendar'));
+    handler.onEvent(assistantText('switched calendars'));
+    await handler.finalize();
+
+    const bodies = sendMessage.mock.calls.map(
+      (call) => (call[1] as Record<string, unknown>)['body'] as string,
+    );
+    expect(bodies).toEqual(['working on it', 'switched calendars']);
+    for (const call of sendMessage.mock.calls) {
+      expect(
+        (call[1] as Record<string, unknown>)['m.relates_to'],
+      ).toMatchObject({ rel_type: 'm.thread' });
+    }
+  });
+
+  it('posts no fallback when the reply ended right after a steer', async () => {
+    handler.onEvent(assistantText('done'));
+    handler.onEvent(userText('thanks'));
+    await handler.finalize();
+
+    const bodies = sendMessage.mock.calls.map(
+      (call) => (call[1] as Record<string, unknown>)['body'] as string,
+    );
+    expect(bodies).toEqual(['done']);
   });
 
   it('sends a fallback when the run produced no text', async () => {
