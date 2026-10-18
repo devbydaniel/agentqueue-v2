@@ -291,6 +291,18 @@ triggers:
 
 Template variables for cron: `{{triggerName}}`, `{{schedule}}`, `{{date}}`, `{{cwd}}`.
 
+#### Pausing a trigger
+
+Any trigger type accepts `paused: true`. A paused trigger stays in the config
+but is not registered: cron schedules don't fire, bots don't listen, and
+webhooks for it are ignored. Remove the line (or set `paused: false`) and restart to resume.
+
+```yaml
+  - name: daily-review
+    paused: true
+    schedule: "0 8 * * *"
+```
+
 ### Before hooks
 
 Cron and GitHub triggers support an optional `before` field that runs a shell

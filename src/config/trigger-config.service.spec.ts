@@ -151,6 +151,40 @@ describe('TriggerConfigService', () => {
     expect(service.getCronTriggers()).toEqual([]);
   });
 
+  it('should skip triggers with paused: true', () => {
+    mockConfigFile({
+      triggers: [
+        {
+          name: 'active',
+          schedule: '0 8 * * *',
+          cwd: '/tmp/assistant',
+          prompt: 'Run task',
+          paused: false,
+        },
+        {
+          name: 'paused-cron',
+          schedule: '0 9 * * *',
+          cwd: '/tmp/assistant',
+          prompt: 'Run task',
+          paused: true,
+        },
+        {
+          name: 'paused-bot',
+          type: 'telegram',
+          bot_name: 'daniel',
+          bot_token: 'token',
+          user_id: '123',
+          cwd: '/tmp/assistant',
+          paused: true,
+        },
+      ],
+    });
+
+    service = createService();
+    expect(service.getCronTriggers().map((t) => t.name)).toEqual(['active']);
+    expect(service.getTelegramTriggers()).toEqual([]);
+  });
+
   it('should preserve optional fields', () => {
     mockConfigFile({
       triggers: [

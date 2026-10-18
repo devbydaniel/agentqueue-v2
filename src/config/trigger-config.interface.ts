@@ -6,6 +6,8 @@ export interface CronTrigger {
   before?: string;
   append_system_prompt?: string;
   timeout_ms?: number;
+  /** When true, the trigger is not registered. */
+  paused?: boolean;
 }
 
 export type LinearEventType = 'assigned' | 'mentioned';
@@ -19,6 +21,8 @@ export interface LinearTrigger {
   api_key: string;
   append_system_prompt?: string;
   timeout_ms?: number;
+  /** When true, the trigger is not registered. */
+  paused?: boolean;
 }
 
 export interface TelegramTrigger {
@@ -31,6 +35,8 @@ export interface TelegramTrigger {
   chat_id?: string;
   append_system_prompt?: string;
   timeout_ms?: number;
+  /** When true, the trigger is not registered. */
+  paused?: boolean;
 }
 
 export interface SlackTrigger {
@@ -49,6 +55,8 @@ export interface SlackTrigger {
   channel_id?: string;
   append_system_prompt?: string;
   timeout_ms?: number;
+  /** When true, the trigger is not registered. */
+  paused?: boolean;
 }
 
 export interface MatrixTrigger {
@@ -64,6 +72,8 @@ export interface MatrixTrigger {
   room_id?: string;
   append_system_prompt?: string;
   timeout_ms?: number;
+  /** When true, the trigger is not registered. */
+  paused?: boolean;
 }
 
 export interface WebhookFilter {
@@ -84,6 +94,8 @@ export interface GithubTrigger {
   before?: string;
   append_system_prompt?: string;
   timeout_ms?: number;
+  /** When true, the trigger is not registered. */
+  paused?: boolean;
 }
 
 export interface TriggersFile {
