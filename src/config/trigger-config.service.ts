@@ -145,6 +145,20 @@ export class TriggerConfigService implements OnModuleInit {
     return path.join(os.homedir(), '.agentqueue', 'triggers.yaml');
   }
 
+  /**
+   * Drops entries with `paused: true` so no trigger type registers them.
+   * Pausing keeps the entry in the config, unlike commenting it out.
+   */
+  private dropPausedTriggers(
+    raw: Record<string, unknown>[],
+  ): Record<string, unknown>[] {
+    return raw.filter((trigger) => {
+      if (trigger.paused !== true) return true;
+      this.logger.log(`Skipping paused trigger "${String(trigger.name)}"`);
+      return false;
+    });
+  }
+
   private loadTriggers(): LoadedTriggers {
     const configPath = this.getConfigPath();
 
@@ -162,7 +176,9 @@ export class TriggerConfigService implements OnModuleInit {
       const parsed = yaml.load(content) as TriggersFile | null;
       if (!parsed?.triggers) return { ...EMPTY_TRIGGERS };
 
-      const raw = parsed.triggers as unknown as Record<string, unknown>[];
+      const raw = this.dropPausedTriggers(
+        parsed.triggers as unknown as Record<string, unknown>[],
+      );
       const result: LoadedTriggers = {
         cron: parseCronTriggers(raw, this.logger),
         linear: parseLinearTriggers(raw, this.logger),
