@@ -11,13 +11,17 @@ interface SpawnContext {
 }
 
 interface CapturedLoaderOptions {
-  cwd: string;
-  agentDir: string;
   appendSystemPromptOverride: (base: string[]) => string[];
   extensionFactories: {
     name: string;
     factory: (api: { registerTool: jest.Mock }) => void;
   }[];
+}
+
+interface CapturedServicesOptions {
+  cwd: string;
+  agentDir: string;
+  resourceLoaderOptions: CapturedLoaderOptions;
 }
 
 interface CapturedBashOptions {
@@ -35,21 +39,33 @@ interface BindOptions {
 
 const AGENT_DIR = '/home/user/.pi/agent';
 
-const mockReload = jest.fn();
 const mockBindExtensions = jest.fn();
 const mockEmit = jest.fn();
 const mockDispose = jest.fn();
-const mockCreateAgentSession = jest.fn();
+const mockCreateAgentSessionServices = jest.fn();
+const mockCreateAgentSessionFromServices = jest.fn();
 const mockFindById = jest.fn();
 const mockOpen = jest.fn();
 const mockCreate = jest.fn();
 const mockCreateBashToolDefinition = jest.fn();
-let capturedLoaderOptions: CapturedLoaderOptions | undefined;
+let capturedServicesOptions: CapturedServicesOptions | undefined;
 
-const mockLoader = { reload: mockReload };
+const mockServices = { diagnostics: [] as { type: string; message: string }[] };
+
+const mockSetModel = jest.fn();
+const mockGetModel = jest.fn();
+const mockGetDefaultProvider = jest.fn();
+const mockGetDefaultModel = jest.fn();
 
 const mockSession = {
   bindExtensions: mockBindExtensions,
+  setModel: mockSetModel,
+  model: undefined as { provider: string; id: string } | undefined,
+  modelRuntime: { getModel: mockGetModel },
+  settingsManager: {
+    getDefaultProvider: mockGetDefaultProvider,
+    getDefaultModel: mockGetDefaultModel,
+  },
   extensionRunner: { emit: mockEmit },
   dispose: mockDispose,
 };
@@ -58,11 +74,8 @@ jest.mock(
   '@earendil-works/pi-coding-agent',
   () => ({
     getAgentDir: () => AGENT_DIR,
-    DefaultResourceLoader: jest.fn((options: CapturedLoaderOptions) => {
-      capturedLoaderOptions = options;
-      return mockLoader;
-    }),
-    createAgentSession: mockCreateAgentSession,
+    createAgentSessionServices: mockCreateAgentSessionServices,
+    createAgentSessionFromServices: mockCreateAgentSessionFromServices,
     SessionManager: {
       findById: mockFindById,
       open: mockOpen,
@@ -78,12 +91,25 @@ describe('PiSessionFactory', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
-    capturedLoaderOptions = undefined;
+    capturedServicesOptions = undefined;
+    mockServices.diagnostics = [];
+    mockSession.model = { provider: 'claude-bridge', id: 'claude-opus-5-5' };
+    mockGetDefaultProvider.mockReturnValue('claude-bridge');
+    mockGetDefaultModel.mockReturnValue('claude-opus-5-5');
+    mockGetModel.mockReturnValue(undefined);
+    mockSetModel.mockResolvedValue(undefined);
 
-    mockReload.mockResolvedValue(undefined);
+    mockCreateAgentSessionServices.mockImplementation(
+      (options: CapturedServicesOptions) => {
+        capturedServicesOptions = options;
+        return Promise.resolve(mockServices);
+      },
+    );
     mockBindExtensions.mockResolvedValue(undefined);
     mockEmit.mockResolvedValue(undefined);
-    mockCreateAgentSession.mockResolvedValue({ session: mockSession });
+    mockCreateAgentSessionFromServices.mockResolvedValue({
+      session: mockSession,
+    });
     mockFindById.mockReturnValue(undefined);
     mockOpen.mockReturnValue({ kind: 'opened' });
     mockCreate.mockReturnValue({ kind: 'created' });
@@ -103,34 +129,43 @@ describe('PiSessionFactory', () => {
   });
 
   const loaderOptions = (): CapturedLoaderOptions => {
-    if (!capturedLoaderOptions) throw new Error('loader not constructed');
-    return capturedLoaderOptions;
+    if (!capturedServicesOptions) throw new Error('services not created');
+    return capturedServicesOptions.resourceLoaderOptions;
   };
 
   describe('create', () => {
-    it('should pass cwd and agentDir to the resource loader and session', async () => {
+    it('should create services for cwd and agentDir and build the session from them', async () => {
       const session = await factory.create({ cwd: '/tmp/repo' });
 
       expect(session).toBe(mockSession);
-      expect(loaderOptions()).toMatchObject({
+      expect(capturedServicesOptions).toMatchObject({
         cwd: '/tmp/repo',
         agentDir: AGENT_DIR,
       });
-      expect(mockCreateAgentSession).toHaveBeenCalledWith(
-        expect.objectContaining({
-          cwd: '/tmp/repo',
-          agentDir: AGENT_DIR,
-          resourceLoader: mockLoader,
-        }),
+      expect(mockCreateAgentSessionFromServices).toHaveBeenCalledWith(
+        expect.objectContaining({ services: mockServices }),
       );
     });
 
-    it('should reload the resource loader before creating the session', async () => {
+    it('should create services before the session so extension providers are registered first', async () => {
       await factory.create({ cwd: '/tmp/repo' });
 
-      expect(mockReload).toHaveBeenCalledTimes(1);
-      expect(mockReload.mock.invocationCallOrder[0]).toBeLessThan(
-        mockCreateAgentSession.mock.invocationCallOrder[0],
+      expect(
+        mockCreateAgentSessionServices.mock.invocationCallOrder[0],
+      ).toBeLessThan(
+        mockCreateAgentSessionFromServices.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('should still create the session when pi reports diagnostics or a model fallback', async () => {
+      mockServices.diagnostics = [{ type: 'error', message: 'bad extension' }];
+      mockCreateAgentSessionFromServices.mockResolvedValue({
+        session: mockSession,
+        modelFallbackMessage: 'No models available',
+      });
+
+      await expect(factory.create({ cwd: '/tmp/repo' })).resolves.toBe(
+        mockSession,
       );
     });
 
@@ -148,6 +183,50 @@ describe('PiSessionFactory', () => {
           error: 'boom',
         }),
       ).not.toThrow();
+    });
+  });
+
+  describe('default model', () => {
+    const bridgeModel = { provider: 'claude-bridge', id: 'claude-opus-5-5' };
+
+    it('should switch to the settings default when pi fell back to another provider', async () => {
+      mockSession.model = { provider: 'openai', id: 'gpt-5.5' };
+      mockGetModel.mockReturnValue(bridgeModel);
+
+      await factory.create({ cwd: '/tmp/repo' });
+
+      expect(mockGetModel).toHaveBeenCalledWith(
+        'claude-bridge',
+        'claude-opus-5-5',
+      );
+      expect(mockSetModel).toHaveBeenCalledWith(bridgeModel);
+      expect(mockBindExtensions.mock.invocationCallOrder[0]).toBeLessThan(
+        mockSetModel.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('should leave the model alone when it already is the settings default', async () => {
+      await factory.create({ cwd: '/tmp/repo' });
+
+      expect(mockSetModel).not.toHaveBeenCalled();
+    });
+
+    it('should keep the current model when the default is not registered', async () => {
+      mockSession.model = { provider: 'openai', id: 'gpt-5.5' };
+
+      await expect(factory.create({ cwd: '/tmp/repo' })).resolves.toBe(
+        mockSession,
+      );
+      expect(mockSetModel).not.toHaveBeenCalled();
+    });
+
+    it('should do nothing without a settings default', async () => {
+      mockGetDefaultProvider.mockReturnValue(undefined);
+
+      await factory.create({ cwd: '/tmp/repo' });
+
+      expect(mockGetModel).not.toHaveBeenCalled();
+      expect(mockSetModel).not.toHaveBeenCalled();
     });
   });
 
@@ -273,7 +352,7 @@ describe('PiSessionFactory', () => {
       expect(mockFindById).toHaveBeenCalledWith('/tmp/repo', 'prev-456');
       expect(mockOpen).toHaveBeenCalledWith('/tmp/sessions/prev.jsonl');
       expect(mockCreate).not.toHaveBeenCalled();
-      expect(mockCreateAgentSession).toHaveBeenCalledWith(
+      expect(mockCreateAgentSessionFromServices).toHaveBeenCalledWith(
         expect.objectContaining({ sessionManager: { kind: 'opened' } }),
       );
     });
@@ -284,7 +363,7 @@ describe('PiSessionFactory', () => {
       expect(mockFindById).toHaveBeenCalledWith('/tmp/repo', 'missing');
       expect(mockOpen).not.toHaveBeenCalled();
       expect(mockCreate).toHaveBeenCalledWith('/tmp/repo');
-      expect(mockCreateAgentSession).toHaveBeenCalledWith(
+      expect(mockCreateAgentSessionFromServices).toHaveBeenCalledWith(
         expect.objectContaining({ sessionManager: { kind: 'created' } }),
       );
     });

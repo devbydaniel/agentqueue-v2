@@ -33,32 +33,42 @@ export class PiSessionFactory {
     const pi = await loadPi();
     const agentDir = pi.getAgentDir();
 
-    const resourceLoader = new pi.DefaultResourceLoader({
+    // The services path registers extension-provided model providers (e.g.
+    // claude-bridge) before the session resolves the default model; plain
+    // createAgentSession resolves it first and silently falls back to another
+    // provider.
+    const services = await pi.createAgentSessionServices({
       cwd: options.cwd,
       agentDir,
-      appendSystemPromptOverride: (base) => [
-        ...base,
-        ...this.collectSystemPromptParts(
-          options.additionalSystemPrompts,
-          options.runId,
-        ),
-      ],
-      extensionFactories: options.runId
-        ? [this.runIdBashExtension(pi, options.cwd, options.runId)]
-        : [],
+      resourceLoaderOptions: {
+        appendSystemPromptOverride: (base) => [
+          ...base,
+          ...this.collectSystemPromptParts(
+            options.additionalSystemPrompts,
+            options.runId,
+          ),
+        ],
+        extensionFactories: options.runId
+          ? [this.runIdBashExtension(pi, options.cwd, options.runId)]
+          : [],
+      },
     });
-    await resourceLoader.reload();
+    for (const diagnostic of services.diagnostics) {
+      this.logger.warn(`pi services ${diagnostic.type}: ${diagnostic.message}`);
+    }
 
-    const { session } = await pi.createAgentSession({
-      cwd: options.cwd,
-      agentDir,
-      resourceLoader,
-      sessionManager: this.openSessionManager(
-        pi,
-        options.cwd,
-        options.resumeSessionId,
-      ),
-    });
+    const { session, modelFallbackMessage } =
+      await pi.createAgentSessionFromServices({
+        services,
+        sessionManager: this.openSessionManager(
+          pi,
+          options.cwd,
+          options.resumeSessionId,
+        ),
+      });
+    if (modelFallbackMessage) {
+      this.logger.warn(`pi model fallback: ${modelFallbackMessage}`);
+    }
 
     // Emits session_start so extensions (phoenix, subagent) initialise.
     await session.bindExtensions({
@@ -69,8 +79,33 @@ export class PiSessionFactory {
           error: error.error,
         }),
     });
+    await this.applyDefaultModel(session);
 
     return session;
+  }
+
+  /**
+   * Re-applies the settings default model once extensions are bound.
+   * pi-claude-bridge registers its provider at load only in the first session
+   * of a process; later sessions get it at session_start, after pi picked the
+   * initial model and fell back to another provider. Runs never choose their
+   * own model, so the default is always the intended one.
+   */
+  private async applyDefaultModel(session: AgentSession): Promise<void> {
+    const provider = session.settingsManager.getDefaultProvider();
+    const modelId = session.settingsManager.getDefaultModel();
+    if (!provider || !modelId) return;
+    const current = session.model;
+    if (current?.provider === provider && current.id === modelId) return;
+
+    const model = session.modelRuntime.getModel(provider, modelId);
+    if (!model) {
+      this.logger.warn(
+        `Default model ${provider}/${modelId} not found — keeping ${current?.provider}/${current?.id}`,
+      );
+      return;
+    }
+    await session.setModel(model);
   }
 
   /**
