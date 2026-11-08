@@ -3,6 +3,7 @@ import type {
   AgentSession,
   ExtensionAPI,
   SessionManager,
+  SettingsManager,
 } from '@earendil-works/pi-coding-agent' with { 'resolution-mode': 'import' };
 
 // pi is ESM-only; this CommonJS build loads it with a dynamic import.
@@ -42,6 +43,7 @@ export class PiSessionFactory {
     const services = await pi.createAgentSessionServices({
       cwd: options.cwd,
       agentDir,
+      settingsManager: this.createSettingsManager(pi, options.cwd, agentDir),
       resourceLoaderOptions: {
         appendSystemPromptOverride: (base) => [
           ...base,
@@ -127,6 +129,23 @@ export class PiSessionFactory {
     } finally {
       session.dispose();
     }
+  }
+
+  /**
+   * SDK sessions count as trusted unless told otherwise; only pi's CLI
+   * resolves `defaultProjectTrust`. Honour "never", so a host can keep a
+   * checkout's `.agents/skills` and `.pi/` resources out of its runs (subagent
+   * children inherit the decision). "always" and "ask" stay trusted: an
+   * unattended run cannot ask.
+   */
+  private createSettingsManager(
+    pi: PiSdk,
+    cwd: string,
+    agentDir: string,
+  ): SettingsManager {
+    const settings = pi.SettingsManager.create(cwd, agentDir);
+    if (settings.getDefaultProjectTrust() !== 'never') return settings;
+    return pi.SettingsManager.create(cwd, agentDir, { projectTrusted: false });
   }
 
   private openSessionManager(

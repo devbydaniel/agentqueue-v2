@@ -21,6 +21,7 @@ interface CapturedLoaderOptions {
 interface CapturedServicesOptions {
   cwd: string;
   agentDir: string;
+  settingsManager: { trusted: boolean };
   resourceLoaderOptions: CapturedLoaderOptions;
 }
 
@@ -48,6 +49,17 @@ const mockFindById = jest.fn();
 const mockOpen = jest.fn();
 const mockCreate = jest.fn();
 const mockCreateBashToolDefinition = jest.fn();
+const mockGetDefaultProjectTrust = jest.fn();
+const mockCreateSettingsManager = jest.fn(
+  (
+    _cwd: string,
+    _agentDir: string,
+    options?: { projectTrusted?: boolean },
+  ) => ({
+    trusted: options?.projectTrusted ?? true,
+    getDefaultProjectTrust: mockGetDefaultProjectTrust,
+  }),
+);
 let capturedServicesOptions: CapturedServicesOptions | undefined;
 
 const mockServices = { diagnostics: [] as { type: string; message: string }[] };
@@ -82,6 +94,7 @@ jest.mock(
       create: mockCreate,
     },
     createBashToolDefinition: mockCreateBashToolDefinition,
+    SettingsManager: { create: mockCreateSettingsManager },
   }),
   { virtual: true },
 );
@@ -98,6 +111,7 @@ describe('PiSessionFactory', () => {
     mockGetDefaultModel.mockReturnValue('claude-opus-5-5');
     mockGetModel.mockReturnValue(undefined);
     mockSetModel.mockResolvedValue(undefined);
+    mockGetDefaultProjectTrust.mockReturnValue('always');
 
     mockCreateAgentSessionServices.mockImplementation(
       (options: CapturedServicesOptions) => {
@@ -134,6 +148,30 @@ describe('PiSessionFactory', () => {
   };
 
   describe('create', () => {
+    it.each(['always', 'ask'])(
+      'should trust the project when defaultProjectTrust is %s',
+      async (trust) => {
+        mockGetDefaultProjectTrust.mockReturnValue(trust);
+
+        await factory.create({ cwd: '/tmp/repo' });
+
+        expect(capturedServicesOptions?.settingsManager.trusted).toBe(true);
+      },
+    );
+
+    it('should not trust the project when defaultProjectTrust is never', async () => {
+      mockGetDefaultProjectTrust.mockReturnValue('never');
+
+      await factory.create({ cwd: '/tmp/repo' });
+
+      expect(capturedServicesOptions?.settingsManager.trusted).toBe(false);
+      expect(mockCreateSettingsManager).toHaveBeenLastCalledWith(
+        '/tmp/repo',
+        AGENT_DIR,
+        { projectTrusted: false },
+      );
+    });
+
     it('should create services for cwd and agentDir and build the session from them', async () => {
       const session = await factory.create({ cwd: '/tmp/repo' });
 
