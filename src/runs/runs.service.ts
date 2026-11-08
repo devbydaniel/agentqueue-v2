@@ -16,6 +16,8 @@ import type { RunEventPagination } from './run-event.repository.js';
 import type { Run } from '../database/runs.schema.js';
 import type { RunEvent } from '../database/run-events.schema.js';
 import { RUNS_QUEUE_NAME } from './runs.constants.js';
+import { jobExpireInSeconds } from './run-timeout.js';
+import { AppConfigService } from '../config/app-config.service.js';
 import { ensureDirectoryExists } from '../common/utils/cwd-path.js';
 
 export interface EnqueueRunCommand {
@@ -60,6 +62,7 @@ export class RunsService {
     private readonly runRepository: RunRepository,
     private readonly runEventRepository: RunEventRepository,
     @Inject(BOSS) private readonly boss: Boss,
+    private readonly appConfigService: AppConfigService,
   ) {}
 
   /**
@@ -137,14 +140,20 @@ export class RunsService {
   }
 
   /**
+   * The job expires only after the run's own timeout (see run-timeout.ts), so
+   * pg-boss never fails a long run while it is still working.
+   *
    * Runs sharing an external session resume the same SDK session, so they are
    * grouped and the worker runs at most one per group at a time — otherwise a
    * follow-up message sent mid-run forks the conversation.
    */
   private buildJobOptions(command: EnqueueRunCommand): SendOptions {
+    const expireInSeconds = jobExpireInSeconds(
+      command.timeoutMs ?? this.appConfigService.runTimeoutMs,
+    );
     return command.externalSessionId
-      ? { group: { id: command.externalSessionId } }
-      : {};
+      ? { expireInSeconds, group: { id: command.externalSessionId } }
+      : { expireInSeconds };
   }
 
   async getRun(id: string): Promise<Run> {

@@ -8,6 +8,7 @@ import { RunProcessorService } from './run-processor.service.js';
 import { RunRepository } from './run.repository.js';
 import { RunEventRepository } from './run-event.repository.js';
 import { BOSS } from '../queue/queue.tokens.js';
+import { AppConfigService } from '../config/app-config.service.js';
 import type { Run } from '../database/runs.schema.js';
 
 describe('RunsService', () => {
@@ -82,6 +83,10 @@ describe('RunsService', () => {
           provide: BOSS,
           useValue: mockBoss,
         },
+        {
+          provide: AppConfigService,
+          useValue: { runTimeoutMs: 30 * 60 * 1000 },
+        },
       ],
     }).compile();
 
@@ -127,7 +132,7 @@ describe('RunsService', () => {
       expect(mockBoss.send).toHaveBeenCalledWith(
         'runs',
         { runId: 'run-abc' },
-        {},
+        { expireInSeconds: 30 * 60 + 15 * 60 },
       );
 
       expect(runRepository.markWaitingQueueJob).toHaveBeenCalledWith(
@@ -169,7 +174,40 @@ describe('RunsService', () => {
       expect(mockBoss.send).toHaveBeenCalledWith(
         'runs',
         { runId: 'run-abc' },
-        { group: { id: 'telegram:daniel:42:main' } },
+        {
+          expireInSeconds: 30 * 60 + 15 * 60,
+          group: { id: 'telegram:daniel:42:main' },
+        },
+      );
+    });
+
+    it("should expire the job only after the run's own timeout", async () => {
+      await service.enqueue({
+        source: 'linear',
+        cwd: tmpDir,
+        prompt: 'orchestrate overnight',
+        timeoutMs: 20 * 60 * 60 * 1000,
+      });
+
+      expect(mockBoss.send).toHaveBeenCalledWith(
+        'runs',
+        { runId: 'run-abc' },
+        { expireInSeconds: 20 * 60 * 60 + 15 * 60 },
+      );
+    });
+
+    it('should keep the job expiry under the queue maximum for longer timeouts', async () => {
+      await service.enqueue({
+        source: 'linear',
+        cwd: tmpDir,
+        prompt: 'too long',
+        timeoutMs: 48 * 60 * 60 * 1000,
+      });
+
+      expect(mockBoss.send).toHaveBeenCalledWith(
+        'runs',
+        { runId: 'run-abc' },
+        { expireInSeconds: 23 * 60 * 60 + 15 * 60 },
       );
     });
 

@@ -7,6 +7,7 @@ import {
   type ExternalSessionProvider,
 } from './external-session.repository.js';
 import { RunCompletionNotifier } from './run-completion.notifier.js';
+import { capRunTimeoutMs, MAX_RUN_TIMEOUT_MS } from './run-timeout.js';
 
 export interface TerminalErrorContext {
   isTimeout: boolean;
@@ -48,7 +49,15 @@ export class RunLifecycleService {
   }
 
   resolveTimeoutMs(run: Run): number {
-    return run.timeoutMs ?? this.appConfigService.runTimeoutMs;
+    const timeoutMs = run.timeoutMs ?? this.appConfigService.runTimeoutMs;
+    if (timeoutMs > MAX_RUN_TIMEOUT_MS) {
+      this.logger.warn('Run timeout exceeds the maximum, capping it', {
+        runId: run.id,
+        timeoutMs,
+        maxTimeoutMs: MAX_RUN_TIMEOUT_MS,
+      });
+    }
+    return capRunTimeoutMs(timeoutMs);
   }
 
   async resolveResumeSessionId(
