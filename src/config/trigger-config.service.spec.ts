@@ -235,6 +235,52 @@ describe('TriggerConfigService', () => {
     expect(triggers[0].api_key).toBe('lin_api_abc');
   });
 
+  it('should load a linear trigger with OAuth client credentials', () => {
+    mockConfigFile({
+      triggers: [
+        {
+          name: 'ayc-dev',
+          type: 'linear',
+          cwd: '/tmp/my-repo',
+          signing_secret: 'secret123',
+          client_id: 'client-id',
+          client_secret: 'client-secret',
+        },
+      ],
+    });
+
+    service = createService();
+    const [trigger] = service.getLinearTriggers();
+
+    expect(trigger.client_id).toBe('client-id');
+    expect(trigger.client_secret).toBe('client-secret');
+    expect(trigger.api_key).toBeUndefined();
+  });
+
+  it.each([
+    [
+      'both api_key and client credentials',
+      { api_key: 'k', client_id: 'id', client_secret: 's' },
+    ],
+    ['client_id without client_secret', { client_id: 'id' }],
+    ['no credentials', {}],
+  ])('should reject a linear trigger with %s', (_label, credentials) => {
+    mockConfigFile({
+      triggers: [
+        {
+          name: 'ayc-dev',
+          type: 'linear',
+          cwd: '/tmp/my-repo',
+          signing_secret: 'secret123',
+          ...credentials,
+        },
+      ],
+    });
+
+    service = createService();
+    expect(service.getLinearTriggers()).toEqual([]);
+  });
+
   it('should load multiple linear triggers', () => {
     mockConfigFile({
       triggers: [

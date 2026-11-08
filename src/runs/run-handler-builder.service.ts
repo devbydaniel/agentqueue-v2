@@ -105,6 +105,12 @@ export class RunHandlerBuilder {
     return handlers;
   }
 
+  /** Extra env for the run's shell, specific to the channel it came from. */
+  async buildEnvForRun(run: BuildableRun): Promise<Record<string, string>> {
+    if (run.source !== 'linear' || !run.triggerName) return {};
+    return this.linearFactory.envForRun(run.triggerName);
+  }
+
   wrapWithTraceContext<T>(
     traceContext: TraceContext,
     fn: () => Promise<T>,

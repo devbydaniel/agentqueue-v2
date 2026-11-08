@@ -245,11 +245,4 @@ describe('LinearWebhookParserService', () => {
       });
     });
   });
-
-  describe('createLinearClient', () => {
-    it('should return a LinearClient instance', () => {
-      const client = service.createLinearClient('test-api-key');
-      expect(client).toBeDefined();
-    });
-  });
 });

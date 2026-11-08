@@ -12,7 +12,7 @@ const VALID_LINEAR_EVENT_TYPES: ReadonlySet<string> = new Set<string>([
   'mentioned',
 ]);
 
-const REQUIRED = ['name', 'cwd', 'signing_secret', 'api_key'] as const;
+const REQUIRED = ['name', 'cwd', 'signing_secret'] as const;
 
 const hasValidOn = (
   trigger: Record<string, unknown>,
@@ -27,6 +27,23 @@ const hasValidOn = (
   return false;
 };
 
+// Exactly one credential: a static api_key, or an OAuth app's client_id and
+// client_secret for client-credentials tokens.
+const hasValidCredentials = (
+  trigger: Record<string, unknown>,
+  logger: Logger,
+): boolean => {
+  const hasApiKey = Boolean(trigger['api_key']);
+  const hasClientId = Boolean(trigger['client_id']);
+  const hasClientSecret = Boolean(trigger['client_secret']);
+  if (hasApiKey && !hasClientId && !hasClientSecret) return true;
+  if (!hasApiKey && hasClientId && hasClientSecret) return true;
+  logger.warn(
+    `Linear trigger "${trigger['name'] as string}" needs either api_key or both client_id and client_secret.`,
+  );
+  return false;
+};
+
 const validate = (
   trigger: Record<string, unknown>,
   logger: Logger,
@@ -34,6 +51,7 @@ const validate = (
   if (!hasRequiredFields(trigger, REQUIRED, logger, 'Linear trigger')) {
     return false;
   }
+  if (!hasValidCredentials(trigger, logger)) return false;
   if (!hasValidOn(trigger, logger)) return false;
   return validateCwd(
     trigger['cwd'] as string,
@@ -49,7 +67,15 @@ const mapEntry = (entry: Record<string, unknown>): LinearTrigger => ({
   ...(entry['on'] ? { on: entry['on'] as LinearEventType } : {}),
   cwd: normalizeCwd(entry['cwd'] as string, 'linear trigger cwd'),
   signing_secret: interpolateEnvVars(entry['signing_secret'] as string),
-  api_key: interpolateEnvVars(entry['api_key'] as string),
+  ...(entry['api_key']
+    ? { api_key: interpolateEnvVars(entry['api_key'] as string) }
+    : {}),
+  ...(entry['client_id']
+    ? {
+        client_id: interpolateEnvVars(entry['client_id'] as string),
+        client_secret: interpolateEnvVars(entry['client_secret'] as string),
+      }
+    : {}),
   ...(entry['append_system_prompt']
     ? { append_system_prompt: entry['append_system_prompt'] as string }
     : {}),
@@ -67,10 +93,12 @@ const inconsistentGroupReason = (
     group.some(
       (t) =>
         t.signing_secret !== first.signing_secret ||
-        t.api_key !== first.api_key,
+        t.api_key !== first.api_key ||
+        t.client_id !== first.client_id ||
+        t.client_secret !== first.client_secret,
     )
   ) {
-    return 'inconsistent signing_secret/api_key';
+    return 'inconsistent signing_secret/credentials';
   }
   if (group.some((t) => t.on === undefined)) {
     return 'trigger without "on" cannot coexist with siblings';

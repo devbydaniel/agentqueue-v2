@@ -1,6 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { LinearClient } from '@linear/sdk';
 import type { LinearEventType } from '../config/trigger-config.interface.js';
 
 export interface LinearWebhookPayload {
@@ -77,10 +76,6 @@ export class LinearWebhookParserService {
       commentId,
       sessionType,
     };
-  }
-
-  createLinearClient(apiKey: string): LinearClient {
-    return new LinearClient({ apiKey });
   }
 
   private validateTypeAndAction(payload: Record<string, unknown>): void {
