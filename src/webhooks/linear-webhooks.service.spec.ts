@@ -10,6 +10,7 @@ import type { LinearWebhookParserService } from './linear-webhook-parser.service
 import type { TriggerConfigService } from '../config/trigger-config.service.js';
 import type { RunsService } from '../runs/runs.service.js';
 import type { LinearTrigger } from '../config/trigger-config.interface.js';
+import type { LinearAuthService } from '../linear/linear-auth.service.js';
 
 /** Flush pending microtasks so async fire-and-forget chains complete. */
 async function flush(): Promise<void> {
@@ -27,12 +28,10 @@ describe('LinearWebhooksService', () => {
   let parserService: jest.Mocked<
     Pick<
       LinearWebhookParserService,
-      | 'verifySignature'
-      | 'verifyTimestamp'
-      | 'parsePayload'
-      | 'createLinearClient'
+      'verifySignature' | 'verifyTimestamp' | 'parsePayload'
     >
   >;
+  let linearAuthService: jest.Mocked<Pick<LinearAuthService, 'activityClient'>>;
   let runsService: jest.Mocked<
     Pick<
       RunsService,
@@ -101,8 +100,11 @@ describe('LinearWebhooksService', () => {
       verifySignature: jest.fn().mockReturnValue(true),
       verifyTimestamp: jest.fn().mockReturnValue(true),
       parsePayload: jest.fn().mockReturnValue(makeCreatedPayload()),
-      createLinearClient: jest.fn().mockReturnValue({
-        createAgentActivity: jest.fn(),
+    };
+
+    linearAuthService = {
+      activityClient: jest.fn().mockReturnValue({
+        createAgentActivity: jest.fn().mockResolvedValue(undefined),
       }),
     };
 
@@ -118,6 +120,7 @@ describe('LinearWebhooksService', () => {
       triggerConfigService as unknown as TriggerConfigService,
       parserService as unknown as LinearWebhookParserService,
       runsService as unknown as RunsService,
+      linearAuthService as unknown as LinearAuthService,
     );
   });
 
@@ -356,7 +359,7 @@ describe('LinearWebhooksService', () => {
       await flush();
 
       expect(runsService.abortSession).toHaveBeenCalledWith('session-1');
-      expect(parserService.createLinearClient).toHaveBeenCalledWith('api-key');
+      expect(linearAuthService.activityClient).toHaveBeenCalledWith(trigger);
       expect(runsService.enqueue).not.toHaveBeenCalled();
     });
   });

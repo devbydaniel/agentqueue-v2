@@ -2,7 +2,6 @@ import { Injectable, Logger } from '@nestjs/common';
 import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent' with {
   'resolution-mode': 'import',
 };
-import { LinearClient } from '@linear/sdk';
 import type { RunEventHandler } from '../run-event-handler.interface.js';
 import {
   assistantMessageOf,
@@ -11,6 +10,10 @@ import {
   type AssistantMessage,
 } from '../pi-messages.js';
 import { TriggerConfigService } from '../../config/trigger-config.service.js';
+import {
+  LinearAuthService,
+  type LinearActivityClient,
+} from '../../linear/linear-auth.service.js';
 
 const MAX_BODY_LENGTH = 10_000;
 
@@ -33,7 +36,7 @@ export class LinearCallbackHandler implements RunEventHandler {
 
   constructor(
     private readonly agentSessionId: string,
-    private readonly linearClient: LinearClient,
+    private readonly linearClient: LinearActivityClient,
   ) {}
 
   /** Returns the last assistant message captured during the run. */
@@ -157,7 +160,10 @@ export class LinearCallbackHandler implements RunEventHandler {
 
 @Injectable()
 export class LinearCallbackHandlerFactory {
-  constructor(private readonly triggerConfigService: TriggerConfigService) {}
+  constructor(
+    private readonly triggerConfigService: TriggerConfigService,
+    private readonly linearAuthService: LinearAuthService,
+  ) {}
 
   createForRun(
     triggerName: string,
@@ -167,7 +173,22 @@ export class LinearCallbackHandlerFactory {
       this.triggerConfigService.getLinearTriggerByKey(triggerName);
     if (!linearConfig) return undefined;
 
-    const linearClient = new LinearClient({ apiKey: linearConfig.api_key });
-    return new LinearCallbackHandler(agentSessionId, linearClient);
+    return new LinearCallbackHandler(
+      agentSessionId,
+      this.linearAuthService.activityClient(linearConfig),
+    );
+  }
+
+  /**
+   * Env for the run's shell: the trigger's Linear token as LINEAR_API_KEY, so
+   * the agent's `linear` CLI acts as the same Linear app that was triggered.
+   */
+  async envForRun(triggerName: string): Promise<Record<string, string>> {
+    const linearConfig =
+      this.triggerConfigService.getLinearTriggerByKey(triggerName);
+    if (!linearConfig) return {};
+    return {
+      LINEAR_API_KEY: await this.linearAuthService.getApiKey(linearConfig),
+    };
   }
 }

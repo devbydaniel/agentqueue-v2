@@ -10,6 +10,7 @@ import type { LinearTrigger } from '../config/trigger-config.interface.js';
 import { RunsService } from '../runs/runs.service.js';
 import { LinearCallbackHandler } from '../callbacks/handlers/linear.callback-handler.js';
 import { LinearWebhookParserService } from './linear-webhook-parser.service.js';
+import { LinearAuthService } from '../linear/linear-auth.service.js';
 import { ensureDirectoryExists } from '../common/utils/cwd-path.js';
 
 export interface HandleLinearWebhookParams {
@@ -43,6 +44,7 @@ export class LinearWebhooksService {
     private readonly triggerConfigService: TriggerConfigService,
     private readonly linearWebhookParserService: LinearWebhookParserService,
     private readonly runsService: RunsService,
+    private readonly linearAuthService: LinearAuthService,
   ) {}
 
   handleWebhook(params: HandleLinearWebhookParams): void {
@@ -119,12 +121,9 @@ export class LinearWebhooksService {
     this.logger.log('Received stop signal, aborting session', {
       agentSessionId,
     });
-    const linearClient = this.linearWebhookParserService.createLinearClient(
-      trigger.api_key,
-    );
     const linearHandler = new LinearCallbackHandler(
       agentSessionId,
-      linearClient,
+      this.linearAuthService.activityClient(trigger),
     );
 
     try {

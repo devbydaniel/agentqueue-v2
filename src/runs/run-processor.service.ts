@@ -32,6 +32,8 @@ export interface RunSessionParams {
   runId?: string;
   /** System prompt snippet to append after the base system prompt */
   appendSystemPrompt?: string;
+  /** Extra env vars for the session's shell commands */
+  env?: Record<string, string>;
   /** AbortController for per-run timeout + cancellation */
   abortController?: AbortController;
   /** Trace-level attributes applied for the duration of the run */
@@ -99,6 +101,7 @@ export class RunProcessorService {
     );
 
     try {
+      const env = await this.handlerBuilder.buildEnvForRun(run);
       const result = await this.runSession({
         cwd: run.cwd,
         prompt: run.prompt,
@@ -106,6 +109,7 @@ export class RunProcessorService {
         externalSessionId: run.externalSessionId ?? undefined,
         runId,
         appendSystemPrompt: run.appendSystemPrompt ?? undefined,
+        env,
         additionalHandlers: bundle.additionalHandlers,
         abortController,
         traceContext: bundle.traceContext,
@@ -207,6 +211,7 @@ export class RunProcessorService {
         ? [params.appendSystemPrompt]
         : undefined,
       resumeSessionId: params.resumeSessionId,
+      env: params.env,
     });
   }
 

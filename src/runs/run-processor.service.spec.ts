@@ -91,7 +91,7 @@ describe('RunProcessorService', () => {
   let runCompletionNotifier: { notify: jest.Mock };
   let runEventAppend: jest.Mock;
   let telegramService: { emitRunResponse: jest.Mock; emitRunError: jest.Mock };
-  let linearFactory: { createForRun: jest.Mock };
+  let linearFactory: { createForRun: jest.Mock; envForRun: jest.Mock };
   let slackFactory: { createForRun: jest.Mock };
   let matrixFactory: { createForRun: jest.Mock };
   let tracingFactory: { createForRun: jest.Mock; wrapWithContext: jest.Mock };
@@ -150,7 +150,10 @@ describe('RunProcessorService', () => {
       emitRunResponse: jest.fn().mockResolvedValue(undefined),
       emitRunError: jest.fn().mockResolvedValue(undefined),
     };
-    linearFactory = { createForRun: jest.fn() };
+    linearFactory = {
+      createForRun: jest.fn(),
+      envForRun: jest.fn().mockResolvedValue({}),
+    };
     slackFactory = { createForRun: jest.fn() };
     matrixFactory = { createForRun: jest.fn() };
     tracingFactory = {
@@ -232,6 +235,7 @@ describe('RunProcessorService', () => {
         runId: 'run-123',
         additionalSystemPrompts: ['extra'],
         resumeSessionId: undefined,
+        env: {},
       });
       expect(session.prompt).toHaveBeenCalledWith('do something');
       expect(factory.close).toHaveBeenCalledWith(session);
@@ -403,6 +407,30 @@ describe('RunProcessorService', () => {
       );
       expect(linear.onEvent).toHaveBeenCalledTimes(2);
       expect(linear.emitResponse).toHaveBeenCalledWith('Done.');
+    });
+
+    it("passes the Linear trigger's token to the session shell", async () => {
+      linearFactory.envForRun.mockResolvedValue({ LINEAR_API_KEY: 'tok' });
+      givenRun(linearRun);
+
+      await service.processRun('run-123');
+
+      expect(linearFactory.envForRun).toHaveBeenCalledWith('my-agent');
+      expect(factory.create).toHaveBeenCalledWith(
+        expect.objectContaining({ env: { LINEAR_API_KEY: 'tok' } }),
+      );
+    });
+
+    it('fails the run when the Linear token cannot be obtained', async () => {
+      linearFactory.envForRun.mockRejectedValue(new Error('token denied'));
+      givenRun(linearRun);
+
+      await expect(service.processRun('run-123')).rejects.toThrow(
+        'token denied',
+      );
+
+      expect(factory.create).not.toHaveBeenCalled();
+      expect(saved.at(-1)?.status).toBe('errored');
     });
 
     it('emits the error to Linear on failure', async () => {

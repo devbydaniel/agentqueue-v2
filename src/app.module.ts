@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AuthModule } from './auth/auth.module.js';
 import { HealthModule } from './health/health.module.js';
 import { ConfigModule } from './config/config.module.js';
+import { LinearModule } from './linear/linear.module.js';
 import { DatabaseModule } from './database/database.module.js';
 import { QueueModule } from './queue/queue.module.js';
 import { RunsModule } from './runs/runs.module.js';
@@ -16,6 +17,7 @@ import { MatrixListenerModule } from './matrix/matrix-listener.module.js';
   imports: [
     AuthModule,
     ConfigModule,
+    LinearModule,
     DatabaseModule,
     QueueModule,
     HealthModule,

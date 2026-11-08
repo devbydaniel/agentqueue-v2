@@ -17,6 +17,8 @@ export interface CreatePiSessionOptions {
   additionalSystemPrompts?: string[];
   /** pi session ID to resume */
   resumeSessionId?: string;
+  /** Extra env vars for the session's shell commands (needs runId) */
+  env?: Record<string, string>;
 }
 
 /**
@@ -49,7 +51,7 @@ export class PiSessionFactory {
           ),
         ],
         extensionFactories: options.runId
-          ? [this.runIdBashExtension(pi, options.cwd, options.runId)]
+          ? [this.runBashExtension(pi, options.cwd, options.runId, options.env)]
           : [],
       },
     });
@@ -142,11 +144,15 @@ export class PiSessionFactory {
     return pi.SessionManager.create(cwd);
   }
 
-  /** Replaces the built-in bash tool with one that exports AGENTQUEUE_RUN_ID. */
-  private runIdBashExtension(
+  /**
+   * Replaces the built-in bash tool with one that exports AGENTQUEUE_RUN_ID
+   * and the run's extra env.
+   */
+  private runBashExtension(
     pi: PiSdk,
     cwd: string,
     runId: string,
+    env: Record<string, string> = {},
   ): { name: string; factory: (api: ExtensionAPI) => void } {
     return {
       name: 'agentqueue-run-id',
@@ -155,7 +161,7 @@ export class PiSessionFactory {
           pi.createBashToolDefinition(cwd, {
             spawnHook: (ctx) => ({
               ...ctx,
-              env: { ...ctx.env, AGENTQUEUE_RUN_ID: runId },
+              env: { ...ctx.env, ...env, AGENTQUEUE_RUN_ID: runId },
             }),
           }),
         );

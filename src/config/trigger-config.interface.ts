@@ -18,7 +18,14 @@ export interface LinearTrigger {
   on?: LinearEventType;
   cwd: string;
   signing_secret: string;
-  api_key: string;
+  /** Static Linear API key. Set either this or client_id + client_secret. */
+  api_key?: string;
+  /**
+   * Linear OAuth app credentials. agentqueue requests client-credentials
+   * tokens (app actor, 30 days) itself and renews them before they expire.
+   */
+  client_id?: string;
+  client_secret?: string;
   append_system_prompt?: string;
   timeout_ms?: number;
   /** When true, the trigger is not registered. */

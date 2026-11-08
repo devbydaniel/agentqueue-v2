@@ -422,11 +422,16 @@ triggers:
     type: linear
     cwd: ~/dev/my-repo
     signing_secret: ${LINEAR_SIGNING_SECRET}
-    api_key: ${LINEAR_API_KEY}
-    prepend_system_prompt: "You are working in {{cwd}}."
+    client_id: ${LINEAR_CLIENT_ID}
+    client_secret: ${LINEAR_CLIENT_SECRET}
+    append_system_prompt: "You are working in {{cwd}}."
 ```
 
 The `${VAR}` syntax interpolates from environment variables. The webhook URL is `POST /webhooks/linear/<name>`.
+
+Credentials are either the Linear OAuth app's `client_id` and `client_secret`, or a static `api_key`. With client credentials, AgentQueue requests app-actor tokens itself (enable *Client credentials* on the app in Linear), caches them per app, renews them two days before they expire, and requests a new one if Linear rejects the cached token. Linear expires every OAuth token, so a static `api_key` only suits personal API keys.
+
+The run's shell gets the trigger's token as `LINEAR_API_KEY`, so the agent's `linear` CLI acts as the same Linear app. Subagent processes don't inherit it.
 
 For Linear-triggered runs, AgentQueue stores the incoming Linear `agentSessionId` as an internal `externalSessionId` so follow-up webhook events can resume or abort the same underlying agent session.
 
