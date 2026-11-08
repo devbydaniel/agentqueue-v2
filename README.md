@@ -488,7 +488,7 @@ All GitHub triggers share a single endpoint: `POST /webhooks/github`. When a web
 
 ## Robustness
 
-- **Per-run timeout:** Each run has a configurable timeout (default: 30 minutes via `RUN_TIMEOUT_MS`). Per-trigger overrides are supported via `timeout_ms` in `triggers.yaml`. When a run times out, it is marked `timed_out`.
+- **Per-run timeout:** Each run has a configurable timeout (default: 30 minutes via `RUN_TIMEOUT_MS`). Per-trigger overrides are supported via `timeout_ms` in `triggers.yaml`. When a run times out, it is marked `timed_out`. Timeouts are capped at 23 hours: pg-boss fails jobs that stay active past their expiry and allows at most 24 hours, so each job expires 15 minutes after its run's timeout and a long run is never failed by the queue.
 - **Startup recovery:** On boot, any `runs` rows left in `running` status (from a previous crash) are automatically marked `interrupted`. They appear in the dashboard for manual review.
 - **Graceful shutdown:** On `SIGTERM`, the queue worker aborts all in-flight sessions before the process exits.
 
