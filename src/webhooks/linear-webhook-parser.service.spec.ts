@@ -199,36 +199,74 @@ describe('LinearWebhookParserService', () => {
         expect(result.sessionType).toBeUndefined();
       });
 
-      it('should set eventType to "mentioned" when commentId is present', () => {
+      it('should set eventType to "assigned" for an assignment session with a comment thread', () => {
+        const result = service.parsePayload({
+          action: 'created',
+          type: 'AgentSessionEvent',
+          agentSession: {
+            id: 'session-2',
+            promptContext:
+              '<issue identifier="AYC-1">…</issue>\n<user-request>\nWork on AYC-1\n</user-request>',
+            issueId: 'issue-1',
+            commentId: 'comment-1',
+            type: 'commentThread',
+            sourceMetadata: null,
+          },
+        });
+
+        expect(result.eventType).toBe('assigned');
+        expect(result.commentId).toBe('comment-1');
+        expect(result.sessionType).toBe('commentThread');
+      });
+
+      it('should set eventType to "mentioned" when the session comes from a comment', () => {
+        const result = service.parsePayload({
+          action: 'created',
+          type: 'AgentSessionEvent',
+          agentSession: {
+            id: 'session-3',
+            promptContext: 'Look at this',
+            issueId: 'issue-1',
+            commentId: 'comment-1',
+            type: 'commentThread',
+            sourceMetadata: {
+              type: 'comment',
+              agentSessionMetadata: { sourceCommentId: 'comment-1' },
+            },
+          },
+        });
+
+        expect(result.eventType).toBe('mentioned');
+      });
+
+      it('should set eventType to "mentioned" when sourceCommentId is set', () => {
         const result = service.parsePayload({
           action: 'created',
           type: 'AgentSession',
           data: {
-            id: 'session-2',
+            id: 'session-4',
             promptContext: 'Look at this',
-            issueId: 'issue-1',
+            commentId: 'comment-2',
+            sourceCommentId: 'comment-1',
+          },
+        });
+
+        expect(result.eventType).toBe('mentioned');
+      });
+
+      it('should set eventType to "mentioned" when the prompt context has a directive thread', () => {
+        const result = service.parsePayload({
+          action: 'created',
+          type: 'AgentSession',
+          data: {
+            id: 'session-5',
+            promptContext:
+              '<issue identifier="AYC-1"></issue>\n<primary-directive-thread comment-id="comment-1"><comment>@aycdev help</comment></primary-directive-thread>',
             commentId: 'comment-1',
           },
         });
 
         expect(result.eventType).toBe('mentioned');
-        expect(result.commentId).toBe('comment-1');
-      });
-
-      it('should set eventType to "mentioned" when session type is commentThread', () => {
-        const result = service.parsePayload({
-          action: 'created',
-          type: 'AgentSession',
-          data: {
-            id: 'session-3',
-            promptContext: 'Check this thread',
-            issueId: 'issue-1',
-            type: 'commentThread',
-          },
-        });
-
-        expect(result.eventType).toBe('mentioned');
-        expect(result.sessionType).toBe('commentThread');
       });
 
       it('should not set eventType for prompted action', () => {

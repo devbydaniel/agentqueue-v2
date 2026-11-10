@@ -9,7 +9,7 @@ export interface LinearWebhookPayload {
   agentActivityBody?: string;
   issueId?: string;
   signal?: string;
-  /** Only set for action: "created". Derived from commentId / session type. */
+  /** Only set for action: "created". See `deriveEventType`. */
   eventType?: LinearEventType;
   commentId?: string;
   sessionType?: string;
@@ -57,18 +57,17 @@ export class LinearWebhookParserService {
 
     const commentId = data['commentId'] as string | undefined;
     const sessionType = data['type'] as string | undefined;
+    const promptContext = data['promptContext'] as string | undefined;
 
-    // Derive eventType for "created" actions based on session structure
-    let eventType: LinearEventType | undefined;
-    if (action === 'created') {
-      eventType =
-        commentId || sessionType === 'commentThread' ? 'mentioned' : 'assigned';
-    }
+    const eventType =
+      action === 'created'
+        ? this.deriveEventType(data, promptContext)
+        : undefined;
 
     return {
       action,
       agentSessionId: data['id'] as string,
-      promptContext: data['promptContext'] as string | undefined,
+      promptContext,
       agentActivityBody: data['agentActivityBody'] as string | undefined,
       issueId: data['issueId'] as string | undefined,
       signal,
@@ -76,6 +75,27 @@ export class LinearWebhookParserService {
       commentId,
       sessionType,
     };
+  }
+
+  /**
+   * Every session has a comment thread (`commentId`, type `commentThread`),
+   * assigned ones included, so neither tells the two apart. A session started
+   * by a mention has comment source metadata, and its prompt context carries
+   * the mentioning comment as `<primary-directive-thread>`.
+   */
+  private deriveEventType(
+    data: Record<string, unknown>,
+    promptContext: string | undefined,
+  ): LinearEventType {
+    const sourceMetadata = data['sourceMetadata'] as
+      | Record<string, unknown>
+      | null
+      | undefined;
+    const fromComment =
+      sourceMetadata?.['type'] === 'comment' ||
+      Boolean(data['sourceCommentId']) ||
+      Boolean(promptContext?.includes('<primary-directive-thread'));
+    return fromComment ? 'mentioned' : 'assigned';
   }
 
   private validateTypeAndAction(payload: Record<string, unknown>): void {
