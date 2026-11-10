@@ -183,6 +183,29 @@ describe('LinearWebhookParserService', () => {
     });
 
     describe('eventType derivation', () => {
+      // Linear attaches a thread root comment to every session and its
+      // session `type` enum has the single value "commentThread", so neither
+      // tells a delegation from a mention. Only a mention carries
+      // sourceMetadata with the comment the agent was mentioned in.
+      it('should set eventType to "assigned" for a delegated session that has a thread comment', () => {
+        const result = service.parsePayload({
+          action: 'created',
+          type: 'AgentSession',
+          data: {
+            id: 'session-1',
+            promptContext: 'Fix the bug',
+            issueId: 'issue-1',
+            commentId: 'thread-root-comment',
+            type: 'commentThread',
+          },
+        });
+
+        expect(result.eventType).toBe('assigned');
+        expect(result.commentId).toBe('thread-root-comment');
+        expect(result.sessionType).toBe('commentThread');
+        expect(result.sourceCommentId).toBeUndefined();
+      });
+
       it('should set eventType to "assigned" for created payload without commentId', () => {
         const result = service.parsePayload({
           action: 'created',
@@ -195,11 +218,9 @@ describe('LinearWebhookParserService', () => {
         });
 
         expect(result.eventType).toBe('assigned');
-        expect(result.commentId).toBeUndefined();
-        expect(result.sessionType).toBeUndefined();
       });
 
-      it('should set eventType to "mentioned" when commentId is present', () => {
+      it('should set eventType to "mentioned" when sourceMetadata names the mentioning comment', () => {
         const result = service.parsePayload({
           action: 'created',
           type: 'AgentSession',
@@ -207,15 +228,20 @@ describe('LinearWebhookParserService', () => {
             id: 'session-2',
             promptContext: 'Look at this',
             issueId: 'issue-1',
-            commentId: 'comment-1',
+            commentId: 'thread-root-comment',
+            type: 'commentThread',
+            sourceMetadata: {
+              type: 'comment',
+              agentSessionMetadata: { sourceCommentId: 'comment-1' },
+            },
           },
         });
 
         expect(result.eventType).toBe('mentioned');
-        expect(result.commentId).toBe('comment-1');
+        expect(result.sourceCommentId).toBe('comment-1');
       });
 
-      it('should set eventType to "mentioned" when session type is commentThread', () => {
+      it('should set eventType to "mentioned" when sourceMetadata has type "comment" without an id', () => {
         const result = service.parsePayload({
           action: 'created',
           type: 'AgentSession',
@@ -223,12 +249,27 @@ describe('LinearWebhookParserService', () => {
             id: 'session-3',
             promptContext: 'Check this thread',
             issueId: 'issue-1',
-            type: 'commentThread',
+            sourceMetadata: { type: 'comment' },
           },
         });
 
         expect(result.eventType).toBe('mentioned');
-        expect(result.sessionType).toBe('commentThread');
+        expect(result.sourceCommentId).toBeUndefined();
+      });
+
+      it('should ignore sourceMetadata of another type', () => {
+        const result = service.parsePayload({
+          action: 'created',
+          type: 'AgentSession',
+          data: {
+            id: 'session-4',
+            promptContext: 'Fix the bug',
+            issueId: 'issue-1',
+            sourceMetadata: { type: 'slack' },
+          },
+        });
+
+        expect(result.eventType).toBe('assigned');
       });
 
       it('should not set eventType for prompted action', () => {

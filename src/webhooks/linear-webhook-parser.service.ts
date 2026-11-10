@@ -9,10 +9,12 @@ export interface LinearWebhookPayload {
   agentActivityBody?: string;
   issueId?: string;
   signal?: string;
-  /** Only set for action: "created". Derived from commentId / session type. */
+  /** Only set for action: "created". Derived from sourceMetadata. */
   eventType?: LinearEventType;
   commentId?: string;
   sessionType?: string;
+  /** The comment the agent was mentioned in; only set for mention-created sessions. */
+  sourceCommentId?: string;
 }
 
 @Injectable()
@@ -57,12 +59,11 @@ export class LinearWebhookParserService {
 
     const commentId = data['commentId'] as string | undefined;
     const sessionType = data['type'] as string | undefined;
+    const sourceCommentId = this.extractSourceCommentId(data);
 
-    // Derive eventType for "created" actions based on session structure
     let eventType: LinearEventType | undefined;
     if (action === 'created') {
-      eventType =
-        commentId || sessionType === 'commentThread' ? 'mentioned' : 'assigned';
+      eventType = this.isMentionSource(data) ? 'mentioned' : 'assigned';
     }
 
     return {
@@ -75,7 +76,33 @@ export class LinearWebhookParserService {
       eventType,
       commentId,
       sessionType,
+      sourceCommentId,
     };
+  }
+
+  // Linear attaches a thread root comment (`commentId`) to every session,
+  // delegations included, and `type` is a deprecated enum whose only value is
+  // "commentThread". Neither tells a delegation from a mention. A session
+  // created by mentioning the agent carries sourceMetadata of type "comment"
+  // with the mentioning comment; a delegated one carries no sourceMetadata.
+  private isMentionSource(data: Record<string, unknown>): boolean {
+    const sourceMetadata = data['sourceMetadata'] as
+      | Record<string, unknown>
+      | undefined;
+    return sourceMetadata?.['type'] === 'comment';
+  }
+
+  private extractSourceCommentId(
+    data: Record<string, unknown>,
+  ): string | undefined {
+    const sourceMetadata = data['sourceMetadata'] as
+      | Record<string, unknown>
+      | undefined;
+    const sessionMetadata = sourceMetadata?.['agentSessionMetadata'] as
+      | Record<string, unknown>
+      | undefined;
+    const id = sessionMetadata?.['sourceCommentId'];
+    return typeof id === 'string' ? id : undefined;
   }
 
   private validateTypeAndAction(payload: Record<string, unknown>): void {
