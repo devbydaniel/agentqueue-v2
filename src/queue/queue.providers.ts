@@ -15,9 +15,16 @@ import { BOSS } from './queue.tokens.js';
 export const bossProvider: Provider = {
   provide: BOSS,
   useFactory: (config: AppConfigService): PgBoss => {
-    return new PgBoss({
+    const boss = new PgBoss({
       connectionString: config.databaseUrl,
     });
+    // Without a listener, an emitted error crashes the process. pg-boss
+    // reconnects on its next query, so logging is enough.
+    const logger = new Logger('PgBoss');
+    boss.on('error', (error) => {
+      logger.error('pg-boss error', { error });
+    });
+    return boss;
   },
   inject: [AppConfigService],
 };

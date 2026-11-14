@@ -13,6 +13,9 @@ export function getTestDb(): PgPool {
       );
     }
     pool = new pg.Pool({ connectionString });
+    // Global teardown stops the container while this pool still holds idle
+    // clients; their termination error would otherwise crash the run.
+    pool.on('error', () => {});
     db = pool;
   }
   return db;
