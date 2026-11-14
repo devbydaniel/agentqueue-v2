@@ -13,7 +13,15 @@ export const databaseProviders: Provider[] = [
   {
     provide: PG_POOL,
     useFactory: (config: AppConfigService): pg.Pool => {
-      return new pg.Pool({ connectionString: config.databaseUrl });
+      const pool = new pg.Pool({ connectionString: config.databaseUrl });
+      // An idle client that loses its connection emits on the pool, and an
+      // unhandled error crashes the process. The pool drops the client and
+      // connects a new one on the next query.
+      const logger = new Logger('PgPool');
+      pool.on('error', (error) => {
+        logger.error('Idle database client error', { error });
+      });
+      return pool;
     },
     inject: [AppConfigService],
   },
