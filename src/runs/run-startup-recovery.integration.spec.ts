@@ -2,19 +2,25 @@
 import { getTestDb, truncateAll } from '../../test/integration/db.js';
 import { RunRepository } from './run.repository.js';
 import { RunStartupRecoveryService } from './run-startup-recovery.service.js';
+import type { LinearCallbackHandlerFactory } from '../callbacks/handlers/linear.callback-handler.js';
 
 describe('RunStartupRecoveryService (integration)', () => {
   let runRepo: RunRepository;
   let recoveryService: RunStartupRecoveryService;
+  const emitError = jest.fn().mockResolvedValue(undefined);
+  const createForRun = jest.fn().mockReturnValue({ emitError });
 
   beforeAll(() => {
     const db = getTestDb();
     runRepo = new RunRepository(db);
-    recoveryService = new RunStartupRecoveryService(runRepo);
+    recoveryService = new RunStartupRecoveryService(runRepo, {
+      createForRun,
+    } as unknown as LinearCallbackHandlerFactory);
   });
 
   beforeEach(async () => {
     await truncateAll();
+    jest.clearAllMocks();
   });
 
   it('should mark running run rows as interrupted on init', async () => {
@@ -61,6 +67,29 @@ describe('RunStartupRecoveryService (integration)', () => {
 
     const unchanged = await runRepo.findById(succeededRun.id);
     expect(unchanged!.status).toBe('succeeded');
+  });
+
+  it('should report an interrupted Linear run to its agent session', async () => {
+    const linearRun = await runRepo.create({
+      source: 'linear',
+      triggerName: 'ayc-dev:assigned',
+      externalSessionId: 'agent-session-1',
+      cwd: '/tmp/test-repo',
+      prompt: 'abandoned linear run',
+    });
+    linearRun.status = 'running';
+    await runRepo.save(linearRun);
+
+    await recoveryService.onModuleInit();
+    recoveryService.onApplicationBootstrap();
+
+    expect(createForRun).toHaveBeenCalledWith(
+      'ayc-dev:assigned',
+      'agent-session-1',
+    );
+    expect(emitError).toHaveBeenCalledWith(
+      'Process restarted while run was in progress',
+    );
   });
 
   it('should handle no abandoned runs gracefully', async () => {
