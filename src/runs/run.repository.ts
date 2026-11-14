@@ -31,6 +31,11 @@ export interface CreateRunCommand {
   timeoutMs?: number;
 }
 
+export type InterruptedRun = Pick<
+  Run,
+  'id' | 'source' | 'triggerName' | 'externalSessionId' | 'errorMessage'
+>;
+
 function mapRunRow(row: Record<string, unknown>): Run {
   const mapped = mapRow<Record<string, unknown>>(row);
   return {
@@ -178,7 +183,7 @@ export class RunRepository {
     );
   }
 
-  async markRunningAsInterrupted(): Promise<{ id: string }[]> {
+  async markRunningAsInterrupted(): Promise<InterruptedRun[]> {
     const result = await this.pool.query(
       `UPDATE runs
       SET
@@ -187,11 +192,13 @@ export class RunRepository {
         completed_at = $1,
         updated_at = $1
       WHERE status = 'running'
-      RETURNING id`,
+      RETURNING id, source, trigger_name, external_session_id, error_message`,
       [new Date()],
     );
 
-    return result.rows as { id: string }[];
+    return (result.rows as Record<string, unknown>[]).map((row) =>
+      mapRunRow(row),
+    );
   }
 
   async findTriggerNameByExternalSessionId(
