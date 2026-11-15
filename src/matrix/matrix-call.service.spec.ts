@@ -12,7 +12,11 @@ import { livekitIdentity } from './matrix-rtc.js';
 import type { MatrixService } from './matrix.service.js';
 import { MatrixActiveCallsService } from './matrix-active-calls.service.js';
 import type { MatrixCallSessionService } from './matrix-call-session.service.js';
-import { CALL_GREETING, MatrixCallService } from './matrix-call.service.js';
+import {
+  CALL_GREETING,
+  ECHO_TAIL_MS,
+  MatrixCallService,
+} from './matrix-call.service.js';
 import { MatrixCallMedia, type CallMediaEvents } from './matrix-call-media.js';
 
 interface FakeMedia {
@@ -20,6 +24,7 @@ interface FakeMedia {
   connect: jest.Mock;
   play: jest.Mock;
   close: jest.Mock;
+  playoutRemainingMs: number;
 }
 const medias: FakeMedia[] = [];
 
@@ -76,6 +81,7 @@ describe('MatrixCallService', () => {
           connect: jest.fn().mockResolvedValue(undefined),
           play: jest.fn().mockResolvedValue(undefined),
           close: jest.fn().mockResolvedValue(undefined),
+          playoutRemainingMs: 0,
         };
         medias.push(media);
         return media;
@@ -227,6 +233,46 @@ describe('MatrixCallService', () => {
       sampleRate: 16_000,
     });
     expect(medias[0].play).toHaveBeenCalled();
+  });
+
+  describe('while the bot speaks', () => {
+    const frame = (level: number) => new Int16Array(160).fill(level);
+    const speakTurn = (events: CallMediaEvents) => {
+      for (let i = 0; i < 50; i++) events.onCallerFrame(frame(4_000));
+      for (let i = 0; i < 80; i++) events.onCallerFrame(frame(0));
+    };
+
+    afterEach(() => jest.useRealTimers());
+
+    it('ignores the caller audio, which is mostly the echo of the bot', async () => {
+      service.handleSync('assistant', membership(JOIN));
+      await settle();
+      medias[0].playoutRemainingMs = 2_000;
+      speakTurn(medias[0].events);
+      await settle();
+
+      expect(sessionService.handleTurn).not.toHaveBeenCalled();
+    });
+
+    it('keeps ignoring it for the echo tail, then listens again', async () => {
+      service.handleSync('assistant', membership(JOIN));
+      await settle();
+      jest.useFakeTimers({ now: 1_000_000, doNotFake: ['setImmediate'] });
+      const media = medias[0];
+      media.playoutRemainingMs = 1_000;
+      media.events.onCallerFrame(frame(0));
+      media.playoutRemainingMs = 0;
+
+      jest.setSystemTime(1_000_000 + 1_000 + ECHO_TAIL_MS - 1);
+      speakTurn(media.events);
+      await settle();
+      expect(sessionService.handleTurn).not.toHaveBeenCalled();
+
+      jest.setSystemTime(1_000_000 + 1_000 + ECHO_TAIL_MS);
+      speakTurn(media.events);
+      await settle();
+      expect(sessionService.handleTurn).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('ends the call when LiveKit disconnects', async () => {
