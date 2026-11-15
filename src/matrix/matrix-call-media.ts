@@ -88,6 +88,11 @@ export class MatrixCallMedia {
     }
   }
 
+  /** Milliseconds of the bot's audio still waiting to be played out. */
+  get playoutRemainingMs(): number {
+    return this.source?.queuedDuration ?? 0;
+  }
+
   /** Leave the SFU and release the native resources. Never throws. */
   async close(): Promise<void> {
     if (this.closed) return;

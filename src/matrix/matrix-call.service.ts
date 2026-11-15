@@ -27,6 +27,13 @@ export const CALL_GREETING = 'Hi, ich höre.';
 const ENCRYPTED_CALL_NOTICE =
   "I can't take calls in an end-to-end encrypted room — I would only hear " +
   'silence. Call me in an unencrypted room.';
+/**
+ * How long after the bot's audio has played out the caller's audio is still
+ * ignored: the phone's speaker can leak the bot's voice back into its mic,
+ * and transcription turns that echo (or the noise around it) into phantom
+ * turns. Covers the network and the client's jitter buffer.
+ */
+export const ECHO_TAIL_MS = 600;
 const NO_SPEECH_NOTICE =
   "I can't take calls: speech needs OPENAI_API_KEY and MISTRAL_API_KEY.";
 
@@ -49,6 +56,8 @@ interface Call extends CallContext {
   turns: Promise<void>;
   heardCaller: boolean;
   greetingPending: boolean;
+  /** Until when the bot's own audio is expected to be heard on the caller's side. */
+  botAudibleUntil: number;
   /** When the caller's last turn ended, until the reply's first audio. */
   turnEndedAt?: number;
 }
@@ -164,6 +173,7 @@ export class MatrixCallService implements OnModuleDestroy {
       turns: Promise.resolve(),
       heardCaller: false,
       greetingPending: true,
+      botAudibleUntil: 0,
     };
     this.calls.set(roomId, call);
     this.logger.log('Caller joined the call; joining', callLogIds(call));
@@ -262,6 +272,13 @@ export class MatrixCallService implements OnModuleDestroy {
 
   private onCallerFrame(call: Call, samples: Int16Array): void {
     if (call.ended) return;
+    // Half duplex: while the bot speaks, the caller's audio is mostly its
+    // echo. There is no barge-in, so nothing said over the bot is lost that
+    // the MVP would act on.
+    if (this.botIsAudible(call)) {
+      call.detector.reset();
+      return;
+    }
     const utterance = call.detector.push(samples);
     if (!call.heardCaller && call.detector.inTurn) {
       call.heardCaller = true;
@@ -287,6 +304,13 @@ export class MatrixCallService implements OnModuleDestroy {
           ...callLogIds(call),
         });
       });
+  }
+
+  private botIsAudible(call: Call): boolean {
+    const now = Date.now();
+    const remaining = call.media.playoutRemainingMs;
+    if (remaining > 0) call.botAudibleUntil = now + remaining;
+    return now < call.botAudibleUntil + ECHO_TAIL_MS;
   }
 
   /** Logs the latency that matters: from the end of a turn to the first reply audio. */
