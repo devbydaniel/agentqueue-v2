@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import type { TriggerConfigService } from '../config/trigger-config.service.js';
 import type { MatrixTrigger } from '../config/trigger-config.interface.js';
 import type { OpenaiTtsService } from '../speech/openai-tts.service.js';
@@ -7,6 +8,7 @@ import {
   type MatrixEvent,
   type SyncResponse,
 } from './matrix-client.js';
+import { livekitIdentity } from './matrix-rtc.js';
 import type { MatrixService } from './matrix.service.js';
 import { MatrixActiveCallsService } from './matrix-active-calls.service.js';
 import type { MatrixCallSessionService } from './matrix-call-session.service.js';
@@ -234,5 +236,53 @@ describe('MatrixCallService', () => {
     await settle();
     expect(medias[0].close).toHaveBeenCalled();
     expect(client.updateDelayedEvent).toHaveBeenCalledWith('delay', 'send');
+  });
+  describe('caller audio track', () => {
+    let log: jest.SpyInstance;
+    const danielIdentity = livekitIdentity(DANIEL, `${DANIEL}:PHONE`);
+
+    beforeEach(() => {
+      log = jest.spyOn(Logger.prototype, 'log');
+    });
+
+    afterEach(() => log.mockRestore());
+
+    const trackLog = () =>
+      log.mock.calls.find(
+        ([message]) => message === 'Caller audio track subscribed',
+      )?.[1] as Record<string, unknown> | undefined;
+
+    it('logs that the identity matched the caller membership', async () => {
+      service.handleSync(
+        'assistant',
+        membership({ ...JOIN, membershipID: `${DANIEL}:PHONE` }),
+      );
+      await settle();
+      medias[0].events.onCallerTrack(danielIdentity);
+
+      expect(trackLog()).toMatchObject({
+        identity: danielIdentity,
+        expectedIdentities: [danielIdentity],
+        identityMatched: true,
+      });
+    });
+
+    it('logs a mismatch but still listens to the track', async () => {
+      service.handleSync('assistant', membership(JOIN));
+      await settle();
+      const { events } = medias[0];
+      events.onCallerTrack('some-other-hash');
+      for (let i = 0; i < 50; i++)
+        events.onCallerFrame(new Int16Array(160).fill(4_000));
+      for (let i = 0; i < 80; i++) events.onCallerFrame(new Int16Array(160));
+      await settle();
+
+      expect(trackLog()).toMatchObject({
+        identity: 'some-other-hash',
+        expectedIdentities: [danielIdentity],
+        identityMatched: false,
+      });
+      expect(sessionService.handleTurn).toHaveBeenCalledTimes(1);
+    });
   });
 });

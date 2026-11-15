@@ -21,7 +21,7 @@ const PLAYBACK_FRAME_SAMPLES = (PLAYBACK_SAMPLE_RATE * 20) / 1000;
 const TRACK_NAME = 'assistant-voice';
 
 export interface CallMediaEvents {
-  /** The caller's audio track was subscribed; frames follow. */
+  /** A remote participant's audio track was subscribed; its frames follow. */
   onCallerTrack(identity: string): void;
   /** One frame (10 ms) of the caller's audio, mono at CALLER_SAMPLE_RATE. */
   onCallerFrame(samples: Int16Array): void;
@@ -45,8 +45,6 @@ export class MatrixCallMedia {
   constructor(
     private readonly callId: string,
     private readonly events: CallMediaEvents,
-    /** LiveKit identities that belong to the caller. */
-    private readonly isCaller: (identity: string) => boolean,
   ) {}
 
   async connect(url: string, jwt: string): Promise<void> {
@@ -112,16 +110,9 @@ export class MatrixCallMedia {
     participant: RemoteParticipant,
   ): void {
     if (track.kind !== rtc.TrackKind.KIND_AUDIO) return;
-    if (!this.isCaller(participant.identity)) {
-      this.logger.warn(
-        'Ignoring audio from a participant that is not the caller',
-        {
-          callId: this.callId,
-          identity: participant.identity,
-        },
-      );
-      return;
-    }
+    // The call room holds only the caller and the bot, so any other
+    // participant's audio is the caller's; the identity is only logged.
+    if (participant.identity === this.room?.localParticipant?.identity) return;
     // The caller may republish (e.g. switching to a headset): follow the latest track.
     void this.callerReader?.cancel().catch(() => undefined);
     const stream = new rtc.AudioStream(track, {

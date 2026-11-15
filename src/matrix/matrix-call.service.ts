@@ -31,7 +31,11 @@ const NO_SPEECH_NOTICE =
   "I can't take calls: speech needs OPENAI_API_KEY and MISTRAL_API_KEY.";
 
 interface Call extends CallContext {
-  /** LiveKit identities of the caller's devices in the call. */
+  /**
+   * LiveKit identities expected for the caller's devices. Only logged against
+   * the subscribed track, not enforced: the call room holds just the caller
+   * and the bot, and a mismatch must not leave the bot deaf.
+   */
   callerIdentities: Set<string>;
   startedAt: number;
   /** Resolves once joining finished or gave up; cleanup waits for it. */
@@ -146,20 +150,12 @@ export class MatrixCallService implements OnModuleDestroy {
       startedAt: Date.now(),
       starting: Promise.resolve(),
       ended: false,
-      media: new MatrixCallMedia(
-        id,
-        {
-          onCallerTrack: (identity) =>
-            this.logger.log('Caller audio track subscribed', {
-              ...callLogIds(call),
-              identity,
-            }),
-          onCallerFrame: (samples) => this.onCallerFrame(call, samples),
-          onDisconnected: (reason) =>
-            void this.endCall(roomId, `LiveKit disconnected (${reason})`),
-        },
-        (identity) => call.callerIdentities.has(identity),
-      ),
+      media: new MatrixCallMedia(id, {
+        onCallerTrack: (identity) => this.onCallerTrack(call, identity),
+        onCallerFrame: (samples) => this.onCallerFrame(call, samples),
+        onDisconnected: (reason) =>
+          void this.endCall(roomId, `LiveKit disconnected (${reason})`),
+      }),
       speaker: new MatrixCallSpeaker(id, this.ttsService, {
         play: (samples) => call.media.play(samples),
         onSpeechOut: () => this.onSpeechOut(call),
@@ -253,6 +249,15 @@ export class MatrixCallService implements OnModuleDestroy {
   /** Whether the call ended meanwhile (a method, so checks across awaits aren't narrowed away). */
   private hungUp(call: Call): boolean {
     return call.ended;
+  }
+
+  private onCallerTrack(call: Call, identity: string): void {
+    this.logger.log('Caller audio track subscribed', {
+      ...callLogIds(call),
+      identity,
+      expectedIdentities: [...call.callerIdentities],
+      identityMatched: call.callerIdentities.has(identity),
+    });
   }
 
   private onCallerFrame(call: Call, samples: Int16Array): void {
