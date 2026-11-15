@@ -87,4 +87,44 @@ describe('OpenaiTtsService', () => {
       );
     });
   });
+  describe('streamPcm', () => {
+    const streamOf = (...chunks: number[][]): ReadableStream<Uint8Array> =>
+      new ReadableStream({
+        start(controller) {
+          for (const chunk of chunks) controller.enqueue(new Uint8Array(chunk));
+          controller.close();
+        },
+      });
+
+    it('requests raw PCM and yields whole samples across odd chunk splits', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        body: streamOf([1, 2, 3], [4, 5], [6]),
+      });
+      const chunks: number[][] = [];
+      for await (const chunk of service.streamPcm('Hallo')) {
+        chunks.push([...chunk]);
+      }
+
+      expect(chunks).toEqual([
+        [1, 2],
+        [3, 4],
+        [5, 6],
+      ]);
+      const body = JSON.parse(
+        (fetchMock.mock.calls[0][1] as { body: string }).body,
+      ) as { response_format: string };
+      expect(body.response_format).toBe('pcm');
+    });
+
+    it('passes the abort signal to the request', async () => {
+      const controller = new AbortController();
+      fetchMock.mockResolvedValueOnce({ ok: true, body: streamOf() });
+      await service.streamPcm('Hallo', controller.signal).next();
+
+      expect(fetchMock.mock.calls[0][1]).toMatchObject({
+        signal: controller.signal,
+      });
+    });
+  });
 });

@@ -1,7 +1,7 @@
 import { Injectable, Logger, type OnModuleDestroy } from '@nestjs/common';
 import { TriggerConfigService } from '../config/trigger-config.service.js';
 import { ExternalSessionRepository } from '../runs/external-session.repository.js';
-import { OpenaiTtsService } from './openai-tts.service.js';
+import { OpenaiTtsService } from '../speech/openai-tts.service.js';
 import { TelegramChatSettingsRepository } from './telegram-chat-settings.repository.js';
 
 const TELEGRAM_API_BASE_URL = 'https://api.telegram.org';

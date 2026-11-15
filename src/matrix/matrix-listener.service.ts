@@ -13,6 +13,7 @@ import {
   type MatrixIngestBatch,
 } from './matrix-ingest.service.js';
 import { parseInboundMessage } from './matrix-content.js';
+import { MatrixCallService } from './matrix-call.service.js';
 
 const MIN_BACKOFF_MS = 2_000;
 const ENCRYPTED_ROOM_NOTICE =
@@ -46,6 +47,7 @@ export class MatrixListenerService
     private readonly matrixService: MatrixService,
     private readonly syncStateRepository: MatrixSyncStateRepository,
     private readonly ingestService: MatrixIngestService,
+    private readonly callService: MatrixCallService,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -88,8 +90,9 @@ export class MatrixListenerService
     while (!this.stopped) {
       try {
         if (!connected) {
-          const userId = await client.whoami();
-          this.matrixService.registerUserId(botName, userId);
+          const { user_id: userId, device_id: deviceId } =
+            await client.whoami();
+          this.matrixService.registerUserId(botName, userId, deviceId);
           since = await this.syncStateRepository.getNextBatch(botName);
           since ??= await this.initialSync(botName, client);
           connected = true;
@@ -133,6 +136,7 @@ export class MatrixListenerService
   ): Promise<void> {
     await this.joinInvitedRooms(botName, client, response);
     await this.warnAboutEncryptedRooms(botName, response);
+    this.followCalls(botName, response);
     for (const batch of this.collectBatches(botName, response)) {
       // Ingest downloads/transcribes media; don't hold up the sync loop.
       void this.ingestService.ingest(batch).catch((error: unknown) => {
@@ -140,6 +144,17 @@ export class MatrixListenerService
           error: error as Error,
           roomId: batch.roomId,
         });
+      });
+    }
+  }
+
+  /** A call that fails to start must not stop the sync loop. */
+  private followCalls(botName: string, response: SyncResponse): void {
+    try {
+      this.callService.handleSync(botName, response);
+    } catch (error) {
+      this.logger.error('Matrix call handling failed', {
+        error: error as Error,
       });
     }
   }

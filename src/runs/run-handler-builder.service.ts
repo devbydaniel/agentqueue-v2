@@ -17,6 +17,10 @@ import {
   MatrixStreamingCallbackHandler,
   MatrixStreamingCallbackHandlerFactory,
 } from '../matrix/matrix-streaming.callback-handler.js';
+import {
+  MatrixCallCallbackHandler,
+  MatrixCallCallbackHandlerFactory,
+} from '../matrix/matrix-call.callback-handler.js';
 import { TracingEnrichmentHandlerFactory } from '../callbacks/handlers/tracing-enrichment.callback-handler.js';
 import { RunEventCallbackHandler } from '../callbacks/handlers/run-event.callback-handler.js';
 import { RunEventRepository } from './run-event.repository.js';
@@ -26,6 +30,8 @@ interface SourceHandlers {
   assistantMessageHandler: AssistantMessageCallbackHandler | undefined;
   slackStreamingHandler: SlackStreamingCallbackHandler | undefined;
   matrixStreamingHandler: MatrixStreamingCallbackHandler | undefined;
+  /** Speaks the reply into the session's live call, if one is in progress. */
+  matrixCallHandler: MatrixCallCallbackHandler | undefined;
 }
 
 export interface RunHandlerBundle extends SourceHandlers {
@@ -46,6 +52,7 @@ export class RunHandlerBuilder {
     private readonly linearFactory: LinearCallbackHandlerFactory,
     private readonly slackStreamingFactory: SlackStreamingCallbackHandlerFactory,
     private readonly matrixStreamingFactory: MatrixStreamingCallbackHandlerFactory,
+    private readonly matrixCallFactory: MatrixCallCallbackHandlerFactory,
     private readonly tracingFactory: TracingEnrichmentHandlerFactory,
     private readonly runEventRepository: RunEventRepository,
   ) {}
@@ -72,6 +79,7 @@ export class RunHandlerBuilder {
       assistantMessageHandler: undefined,
       slackStreamingHandler: undefined,
       matrixStreamingHandler: undefined,
+      matrixCallHandler: undefined,
     };
     const { externalSessionId, triggerName } = run;
     if (!externalSessionId || !triggerName) return handlers;
@@ -100,6 +108,8 @@ export class RunHandlerBuilder {
             triggerName,
             externalSessionId,
           );
+        handlers.matrixCallHandler =
+          this.matrixCallFactory.createForRun(externalSessionId);
         break;
     }
     return handlers;

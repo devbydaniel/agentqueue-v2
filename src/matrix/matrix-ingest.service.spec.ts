@@ -8,7 +8,7 @@ import type { RunsService } from '../runs/runs.service.js';
 import type { ExternalSessionRepository } from '../runs/external-session.repository.js';
 import type { MatrixService } from './matrix.service.js';
 import type { MatrixMediaService } from './matrix-media.service.js';
-import type { VoxtralTranscriptionService } from '../telegram/voxtral-transcription.service.js';
+import type { VoxtralTranscriptionService } from '../speech/voxtral-transcription.service.js';
 
 const ROOM = '!room:hs';
 const TOP_LEVEL_KEY = `matrix:assistant:${ROOM}:$e1`;

@@ -4,6 +4,7 @@ import type { TriggerConfigService } from '../config/trigger-config.service.js';
 import type { MatrixService } from './matrix.service.js';
 import type { MatrixSyncStateRepository } from './matrix-sync-state.repository.js';
 import type { MatrixIngestService } from './matrix-ingest.service.js';
+import type { MatrixCallService } from './matrix-call.service.js';
 
 function message(
   id: string,
@@ -74,6 +75,7 @@ describe('MatrixListenerService', () => {
       matrixService as unknown as MatrixService,
       {} as MatrixSyncStateRepository,
       ingest as unknown as MatrixIngestService,
+      { handleSync: jest.fn() } as unknown as MatrixCallService,
     );
     // handleSync is the unit under test; the long-poll loop around it is I/O.
     handleSync = (response) =>

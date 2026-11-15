@@ -18,6 +18,7 @@ import { RunSourceNotifier } from './run-source-notifier.service.js';
 import { LinearCallbackHandlerFactory } from '../callbacks/handlers/linear.callback-handler.js';
 import { SlackStreamingCallbackHandlerFactory } from '../slack/slack-streaming.callback-handler.js';
 import { MatrixStreamingCallbackHandlerFactory } from '../matrix/matrix-streaming.callback-handler.js';
+import { MatrixCallCallbackHandlerFactory } from '../matrix/matrix-call.callback-handler.js';
 import { TracingEnrichmentHandlerFactory } from '../callbacks/handlers/tracing-enrichment.callback-handler.js';
 import { TelegramService } from '../telegram/telegram.service.js';
 import {
@@ -193,6 +194,10 @@ describe('RunProcessorService', () => {
         {
           provide: MatrixStreamingCallbackHandlerFactory,
           useValue: matrixFactory,
+        },
+        {
+          provide: MatrixCallCallbackHandlerFactory,
+          useValue: { createForRun: jest.fn() },
         },
         { provide: TracingEnrichmentHandlerFactory, useValue: tracingFactory },
         { provide: TelegramService, useValue: telegramService },

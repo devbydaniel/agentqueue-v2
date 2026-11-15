@@ -401,6 +401,37 @@ The `/sync` position is stored in `matrix_sync_state`, so messages sent while
 AgentQueue is down are answered after a restart. The very first sync, and the
 history of a newly joined room, are not replayed.
 
+#### Matrix Calls
+
+With `call_room_id` set, the bot takes MatrixRTC calls (Element Call, as
+embedded in Element X) from `user_id` in that room. It joins when the user
+joins the call and leaves when the user hangs up:
+
+```yaml
+  - name: matrix-daniel
+    type: matrix
+    # ... as above, plus:
+    call_room_id: "!call:matrix.example.org"   # unencrypted room
+    livekit_url: wss://livekit.example.org     # as advertised to clients
+    livekit_internal_url: ws://livekit.livekit.svc.cluster.local:7880  # optional
+```
+
+`livekit_url` must match the URL the LiveKit JWT service (lk-jwt-service,
+proxied by the homeserver at `/_matrix/client/v1/rtc/livekit/get_token`) is
+configured with; the bot connects to `livekit_internal_url` (default:
+`livekit_url`). Each call is one session, in the thread of a `📞 Call` message
+the bot posts when it joins, so the conversation can carry on by text there.
+The bot greets, then treats a pause of 700 ms as the end of the user's turn: a
+short tone confirms it, the turn is transcribed (`MISTRAL_API_KEY`) and posted
+to the thread, and handed to the agent — steered into the running run, or as a
+new run with a voice-specific system prompt. The reply is spoken sentence by
+sentence as it streams (`OPENAI_API_KEY`). The user cannot interrupt it.
+
+Calls in end-to-end encrypted rooms are refused with a notice. The bot's call
+membership is removed by the homeserver within 18 s if AgentQueue dies (MSC4140
+delayed events). Audio uses `@livekit/rtc-node`, whose native module is built
+for glibc only; it is loaded when a call starts.
+
 #### Steering
 
 Runs of the same external session (a Matrix thread, a Telegram chat) never run
@@ -516,7 +547,7 @@ src/
 ├── config/                           # Env + trigger config
 ├── database/                         # Row types, raw pg wiring, SQL migrations
 ├── flows/                            # Multi-step flow orchestration
-├── matrix/                           # Matrix client, /sync listener, ingest, streaming replies
+├── matrix/                           # Matrix client, /sync listener, ingest, streaming replies, calls
 ├── queue/                            # pg-boss integration
 ├── runs/                             # Run API, persistence, processor, queue worker
 │   ├── runs.controller.ts
@@ -528,6 +559,7 @@ src/
 │   ├── pi-session.factory.ts
 │   ├── external-session.repository.ts
 │   └── dto/
+├── speech/                           # TTS (OpenAI), transcription (Voxtral), PCM/turn/sentence helpers
 ├── telegram/                         # Telegram API client + response delivery
 ├── triggers/                         # Cron scheduler
 └── webhooks/                         # Linear, GitHub, and Telegram webhook entrypoints/services

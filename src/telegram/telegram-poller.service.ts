@@ -9,7 +9,7 @@ import { TriggerConfigService } from '../config/trigger-config.service.js';
 import type { TelegramTrigger } from '../config/trigger-config.interface.js';
 import { TelegramIngestService } from './telegram-ingest.service.js';
 import { TelegramMediaService } from './telegram-media.service.js';
-import { VoxtralTranscriptionService } from './voxtral-transcription.service.js';
+import { VoxtralTranscriptionService } from '../speech/voxtral-transcription.service.js';
 import {
   TelegramBatcherService,
   type BatchContents,
