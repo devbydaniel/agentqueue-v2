@@ -1,17 +1,26 @@
 import { randomUUID } from 'node:crypto';
 
+/** MatrixRTC call membership state event (MSC4143, as Element Call writes it). */
+export const CALL_MEMBER_EVENT_TYPE = 'org.matrix.msc3401.call.member';
+
 /** Long-poll window for /sync; Synapse holds the request open this long. */
 export const SYNC_TIMEOUT_MS = 30_000;
 
-// Only room messages and membership matter to the bot; everything else is
-// filtered server-side to keep sync responses small.
+// Only room messages, membership and call membership matter to the bot;
+// everything else is filtered server-side to keep sync responses small.
 const SYNC_FILTER = JSON.stringify({
   presence: { types: [] },
   account_data: { types: [] },
   room: {
-    state: { types: ['m.room.member'], lazy_load_members: true },
+    state: {
+      types: ['m.room.member', CALL_MEMBER_EVENT_TYPE],
+      lazy_load_members: true,
+    },
     // m.room.encrypted only to tell users the bot can't read encrypted rooms.
-    timeline: { types: ['m.room.message', 'm.room.encrypted'], limit: 50 },
+    timeline: {
+      types: ['m.room.message', 'm.room.encrypted', CALL_MEMBER_EVENT_TYPE],
+      limit: 50,
+    },
     ephemeral: { types: [] },
     account_data: { types: [] },
   },
@@ -27,6 +36,8 @@ export interface MatrixEvent {
 }
 
 interface SyncRoom {
+  /** State between the previous sync and the start of `timeline`. */
+  state?: { events?: MatrixEvent[] };
   timeline?: { events?: MatrixEvent[] };
 }
 
@@ -41,6 +52,25 @@ export interface SyncResponse {
     invite?: Record<string, InvitedRoom>;
   };
 }
+
+/** Body of the MSC4195 `rtc/livekit/get_token` request. */
+export interface LivekitTokenRequest {
+  url: string;
+  room_id: string;
+  slot_id: string;
+  member_id: string;
+}
+
+export interface WhoAmI {
+  user_id: string;
+  device_id?: string;
+}
+
+/** Ways to settle a scheduled MSC4140 delayed event. */
+export type DelayedEventAction = 'restart' | 'cancel' | 'send';
+
+const DELAYED_EVENTS_PREFIX =
+  '/_matrix/client/unstable/org.matrix.msc4140/delayed_events';
 
 export interface DownloadedMedia {
   data: Buffer;
@@ -60,7 +90,8 @@ export class MatrixApiError extends Error {
 /**
  * Minimal Matrix client-server API client for an unencrypted bot account.
  * Covers exactly what the connector needs: sync, send/edit, typing, media,
- * room account data. No E2EE — the homeserver is tailnet-only.
+ * room account data, and for calls: state and delayed events, LiveKit tokens.
+ * No E2EE — the homeserver is tailnet-only.
  */
 export class MatrixClient {
   constructor(
@@ -68,12 +99,8 @@ export class MatrixClient {
     private readonly accessToken: string,
   ) {}
 
-  async whoami(): Promise<string> {
-    const body = await this.request<{ user_id: string }>(
-      'GET',
-      '/_matrix/client/v3/account/whoami',
-    );
-    return body.user_id;
+  whoami(): Promise<WhoAmI> {
+    return this.request<WhoAmI>('GET', '/_matrix/client/v3/account/whoami');
   }
 
   sync(since: string | undefined, signal: AbortSignal): Promise<SyncResponse> {
@@ -139,6 +166,69 @@ export class MatrixClient {
       `/_matrix/client/v3/rooms/${enc(roomId)}/typing/${enc(userId)}`,
       typing ? { typing: true, timeout: timeoutMs } : { typing: false },
     );
+  }
+
+  async sendStateEvent(
+    roomId: string,
+    type: string,
+    stateKey: string,
+    content: Record<string, unknown>,
+  ): Promise<void> {
+    await this.request('PUT', this.statePath(roomId, type, stateKey), content);
+  }
+
+  /**
+   * Schedule a state event that the homeserver sends after `delayMs` unless
+   * restarted or cancelled first (MSC4140). Returns the delay id.
+   */
+  async sendDelayedStateEvent(
+    roomId: string,
+    type: string,
+    stateKey: string,
+    content: Record<string, unknown>,
+    delayMs: number,
+  ): Promise<string> {
+    const body = await this.request<{ delay_id: string }>(
+      'PUT',
+      `${this.statePath(roomId, type, stateKey)}?org.matrix.msc4140.delay=${delayMs}`,
+      content,
+    );
+    return body.delay_id;
+  }
+
+  async updateDelayedEvent(
+    delayId: string,
+    action: DelayedEventAction,
+  ): Promise<void> {
+    await this.request(
+      'POST',
+      `${DELAYED_EVENTS_PREFIX}/${enc(delayId)}/${action}`,
+      {},
+    );
+  }
+
+  /** Whether the room has end-to-end encryption turned on. */
+  async isRoomEncrypted(roomId: string): Promise<boolean> {
+    try {
+      await this.request(
+        'GET',
+        this.statePath(roomId, 'm.room.encryption', ''),
+      );
+      return true;
+    } catch (error) {
+      if (error instanceof MatrixApiError && error.status === 404) return false;
+      throw error;
+    }
+  }
+
+  /** A LiveKit JWT for a MatrixRTC slot, via the homeserver (MSC4195). */
+  async getLivekitToken(request: LivekitTokenRequest): Promise<string> {
+    const body = await this.request<{ jwt: string }>(
+      'POST',
+      '/_matrix/client/v1/rtc/livekit/get_token',
+      request,
+    );
+    return body.jwt;
   }
 
   getEvent(roomId: string, eventId: string): Promise<MatrixEvent> {
@@ -226,6 +316,10 @@ export class MatrixClient {
       );
     }
     return body.content_uri;
+  }
+
+  private statePath(roomId: string, type: string, stateKey: string): string {
+    return `/_matrix/client/v3/rooms/${enc(roomId)}/state/${enc(type)}/${enc(stateKey)}`;
   }
 
   private authHeaders(): Record<string, string> {

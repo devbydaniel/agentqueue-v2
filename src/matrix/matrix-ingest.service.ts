@@ -334,23 +334,30 @@ export class MatrixIngestService {
     }
   }
 
+  /** The trigger's own `append_system_prompt`, with its placeholders filled in. */
+  triggerSystemPrompt(
+    trigger: MatrixTrigger,
+    roomId: string,
+    cwd: string,
+  ): string | undefined {
+    if (!trigger.append_system_prompt) return undefined;
+    return interpolateTemplate(trigger.append_system_prompt, {
+      botName: trigger.bot_name,
+      userId: trigger.user_id,
+      roomId,
+      triggerName: trigger.name,
+      cwd,
+    });
+  }
+
   private buildSystemPrompt(
     trigger: MatrixTrigger,
     batch: MatrixIngestBatch,
     cwd: string,
     voiceEnabled: boolean,
   ): string {
-    const triggerAppend = trigger.append_system_prompt
-      ? interpolateTemplate(trigger.append_system_prompt, {
-          botName: batch.botName,
-          userId: trigger.user_id,
-          roomId: batch.roomId,
-          triggerName: trigger.name,
-          cwd,
-        })
-      : undefined;
     return [
-      triggerAppend,
+      this.triggerSystemPrompt(trigger, batch.roomId, cwd),
       MATRIX_SYSTEM_PROMPT,
       voiceEnabled ? VOICE_SYSTEM_PROMPT : undefined,
     ]

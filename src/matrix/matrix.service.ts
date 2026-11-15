@@ -35,6 +35,7 @@ export class MatrixService implements OnModuleDestroy {
   private readonly logger = new Logger(MatrixService.name);
   private readonly clients = new Map<string, MatrixClient>();
   private readonly userIds = new Map<string, string>();
+  private readonly deviceIds = new Map<string, string>();
   private readonly typingTimers = new Map<string, NodeJS.Timeout>();
 
   constructor(
@@ -62,12 +63,18 @@ export class MatrixService implements OnModuleDestroy {
     return client;
   }
 
-  registerUserId(botName: string, userId: string): void {
+  registerUserId(botName: string, userId: string, deviceId?: string): void {
     this.userIds.set(botName, userId);
+    if (deviceId) this.deviceIds.set(botName, deviceId);
   }
 
   getUserId(botName: string): string | undefined {
     return this.userIds.get(botName);
+  }
+
+  /** Device of the bot's access token; calls are joined as this device. */
+  getDeviceId(botName: string): string | undefined {
+    return this.deviceIds.get(botName);
   }
 
   startTyping(sessionKey: string): void {

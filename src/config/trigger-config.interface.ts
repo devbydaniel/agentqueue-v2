@@ -79,6 +79,15 @@ export interface MatrixTrigger {
   room_id?: string;
   append_system_prompt?: string;
   timeout_ms?: number;
+  /** Room in which the bot answers MatrixRTC (Element Call) calls from `user_id`. */
+  call_room_id?: string;
+  /**
+   * LiveKit SFU URL as advertised to clients (`wss://…`); sent to the JWT
+   * service and written into the bot's call membership. Set with call_room_id.
+   */
+  livekit_url?: string;
+  /** SFU URL the bot itself connects to (e.g. in-cluster `ws://…`); defaults to livekit_url. */
+  livekit_internal_url?: string;
   /** When true, the trigger is not registered. */
   paused?: boolean;
 }
