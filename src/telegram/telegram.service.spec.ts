@@ -2,7 +2,7 @@
 import { TelegramService } from './telegram.service.js';
 import type { TriggerConfigService } from '../config/trigger-config.service.js';
 import type { ExternalSessionRepository } from '../runs/external-session.repository.js';
-import type { OpenaiTtsService } from './openai-tts.service.js';
+import type { OpenaiTtsService } from '../speech/openai-tts.service.js';
 import type { TelegramChatSettingsRepository } from './telegram-chat-settings.repository.js';
 
 const TEXT_KEYBOARD = {

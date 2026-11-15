@@ -13,7 +13,7 @@ import {
   VOICE_ON_BUTTON,
 } from './telegram.service.js';
 import { TelegramChatSettingsRepository } from './telegram-chat-settings.repository.js';
-import { OpenaiTtsService } from './openai-tts.service.js';
+import { OpenaiTtsService } from '../speech/openai-tts.service.js';
 import { ensureDirectoryExists } from '../common/utils/cwd-path.js';
 
 export const VOICE_SYSTEM_PROMPT = `

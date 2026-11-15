@@ -1,6 +1,6 @@
 import { Injectable, Logger, type OnModuleDestroy } from '@nestjs/common';
 import { TriggerConfigService } from '../config/trigger-config.service.js';
-import { OpenaiTtsService } from '../telegram/openai-tts.service.js';
+import { OpenaiTtsService } from '../speech/openai-tts.service.js';
 import { MatrixClient } from './matrix-client.js';
 import {
   inThread,

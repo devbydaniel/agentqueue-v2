@@ -6,7 +6,7 @@ import {
 } from '../config/trigger-config.interface.js';
 import { RunsService } from '../runs/runs.service.js';
 import { ExternalSessionRepository } from '../runs/external-session.repository.js';
-import { VoxtralTranscriptionService } from '../telegram/voxtral-transcription.service.js';
+import { VoxtralTranscriptionService } from '../speech/voxtral-transcription.service.js';
 import { VOICE_SYSTEM_PROMPT } from '../telegram/telegram-ingest.service.js';
 import { ensureDirectoryExists } from '../common/utils/cwd-path.js';
 import { MatrixService, type MatrixTarget } from './matrix.service.js';
