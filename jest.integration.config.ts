@@ -10,7 +10,7 @@ const config: Config = {
   },
   testEnvironment: 'node',
   transformIgnorePatterns: [
-    'node_modules/(?!(pg-boss)/)',
+    'node_modules/(?!(pg-boss|serialize-error|non-error)/)',
   ],
   moduleNameMapper: {
     '^(\\.{1,2}/.*)\\.js$': '$1',

@@ -1,7 +1,7 @@
 import type { Logger } from '@nestjs/common';
 import type { CronTrigger } from '../trigger-config.interface.js';
 import { normalizeCwd } from '../../common/utils/cwd-path.js';
-import { hasRequiredFields, validateCwd } from './common.js';
+import { hasRequiredFields, optionalQueue, validateCwd } from './common.js';
 
 const REQUIRED = ['name', 'schedule', 'cwd', 'prompt'] as const;
 
@@ -30,6 +30,7 @@ const mapEntry = (entry: Record<string, unknown>): CronTrigger => ({
     ? { append_system_prompt: entry['append_system_prompt'] as string }
     : {}),
   ...(entry['timeout_ms'] ? { timeout_ms: entry['timeout_ms'] as number } : {}),
+  ...optionalQueue(entry),
 });
 
 export const parseCronTriggers = (

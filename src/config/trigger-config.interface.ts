@@ -6,6 +6,8 @@ export interface CronTrigger {
   before?: string;
   append_system_prompt?: string;
   timeout_ms?: number;
+  /** Queue defined under top-level `queues`; default: the `runs` queue. */
+  queue?: string;
   /** When true, the trigger is not registered. */
   paused?: boolean;
 }
@@ -28,6 +30,8 @@ export interface LinearTrigger {
   client_secret?: string;
   append_system_prompt?: string;
   timeout_ms?: number;
+  /** Queue defined under top-level `queues`; default: the `runs` queue. */
+  queue?: string;
   /** When true, the trigger is not registered. */
   paused?: boolean;
 }
@@ -42,6 +46,8 @@ export interface TelegramTrigger {
   chat_id?: string;
   append_system_prompt?: string;
   timeout_ms?: number;
+  /** Queue defined under top-level `queues`; default: the `runs` queue. */
+  queue?: string;
   /** When true, the trigger is not registered. */
   paused?: boolean;
 }
@@ -62,6 +68,8 @@ export interface SlackTrigger {
   channel_id?: string;
   append_system_prompt?: string;
   timeout_ms?: number;
+  /** Queue defined under top-level `queues`; default: the `runs` queue. */
+  queue?: string;
   /** When true, the trigger is not registered. */
   paused?: boolean;
 }
@@ -88,6 +96,8 @@ export interface MatrixTrigger {
   livekit_url?: string;
   /** SFU URL the bot itself connects to (e.g. in-cluster `ws://…`); defaults to livekit_url. */
   livekit_internal_url?: string;
+  /** Queue defined under top-level `queues`; default: the `runs` queue. */
+  queue?: string;
   /** When true, the trigger is not registered. */
   paused?: boolean;
 }
@@ -110,11 +120,20 @@ export interface GithubTrigger {
   before?: string;
   append_system_prompt?: string;
   timeout_ms?: number;
+  /** Queue defined under top-level `queues`; default: the `runs` queue. */
+  queue?: string;
   /** When true, the trigger is not registered. */
   paused?: boolean;
 }
 
+/** A named run queue with its own worker, from top-level `queues`. */
+export interface QueueConfig {
+  name: string;
+  concurrency: number;
+}
+
 export interface TriggersFile {
+  queues?: Record<string, { concurrency: number }>;
   triggers: (
     | CronTrigger
     | LinearTrigger

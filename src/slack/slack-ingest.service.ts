@@ -174,6 +174,7 @@ export class SlackIngestService {
         externalSessionId: sessionKey,
         appendSystemPrompt,
         timeoutMs: trigger.timeout_ms,
+        queue: trigger.queue,
       });
     } catch (error) {
       this.logger.error('Failed to enqueue Slack run', {

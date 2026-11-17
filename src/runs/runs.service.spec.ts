@@ -37,6 +37,7 @@ describe('RunsService', () => {
       appendSystemPrompt: null,
       timeoutMs: null,
       queueJobId: null,
+      queue: 'runs',
       createdAt: new Date(),
       updatedAt: new Date(),
       ...overrides,
@@ -211,6 +212,29 @@ describe('RunsService', () => {
       );
     });
 
+    it("should send the job to the trigger's queue", async () => {
+      (runRepository.create as jest.Mock).mockResolvedValueOnce(
+        makeRun({ queue: 'gate' }),
+      );
+
+      await service.enqueue({
+        source: 'github',
+        triggerName: 'pr-gate',
+        cwd: tmpDir,
+        prompt: 'gate PR 1',
+        queue: 'gate',
+      });
+
+      expect(runRepository.create).toHaveBeenCalledWith(
+        expect.objectContaining({ queue: 'gate' }),
+      );
+      expect(mockBoss.send).toHaveBeenCalledWith(
+        'gate',
+        { runId: 'run-abc' },
+        { expireInSeconds: 30 * 60 + 15 * 60 },
+      );
+    });
+
     it('should not call markWaitingQueueJob when boss.send returns null', async () => {
       mockBoss.send.mockResolvedValueOnce(null);
 
@@ -379,6 +403,34 @@ describe('RunsService', () => {
           completedAt: expect.any(Date),
         }),
       );
+    });
+
+    it("should cancel a waiting run's job in its own queue", async () => {
+      const run = makeRun({
+        status: 'waiting',
+        queueJobId: 'job-gate',
+        queue: 'gate',
+      });
+      (runRepository.findById as jest.Mock).mockResolvedValueOnce(run);
+
+      const result = await service.abortRun('run-abc');
+
+      expect(result).toEqual({ aborted: true });
+      expect(mockBoss.cancel).toHaveBeenCalledWith('gate', 'job-gate');
+      expect(runRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'aborted' }),
+      );
+    });
+
+    it('should stop a running run in a custom queue via processor', async () => {
+      const run = makeRun({ status: 'running', queue: 'gate' });
+      (runRepository.findById as jest.Mock).mockResolvedValueOnce(run);
+
+      const result = await service.abortRun('run-abc');
+
+      expect(result).toEqual({ aborted: true });
+      expect(runProcessorService.abortByRunId).toHaveBeenCalledWith('run-abc');
+      expect(mockBoss.cancel).not.toHaveBeenCalled();
     });
 
     it('should throw NotFoundException when run does not exist', async () => {

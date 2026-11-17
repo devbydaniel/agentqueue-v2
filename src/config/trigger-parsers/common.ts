@@ -35,3 +35,9 @@ export const validateCwd = (
     return false;
   }
 };
+
+/** The trigger's `queue`, if set. Unknown names are rejected by assertKnownQueues. */
+export const optionalQueue = (
+  entry: Record<string, unknown>,
+): { queue?: string } =>
+  typeof entry['queue'] === 'string' ? { queue: entry['queue'] } : {};

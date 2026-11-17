@@ -8,6 +8,7 @@ import type {
   GithubTrigger,
   LinearTrigger,
   MatrixTrigger,
+  QueueConfig,
   SlackTrigger,
   TelegramTrigger,
   TriggersFile,
@@ -21,6 +22,10 @@ import { parseGithubTriggers } from './trigger-parsers/github.parser.js';
 import { parseTelegramTriggers } from './trigger-parsers/telegram.parser.js';
 import { parseSlackTriggers } from './trigger-parsers/slack.parser.js';
 import { parseMatrixTriggers } from './trigger-parsers/matrix.parser.js';
+import {
+  assertKnownQueues,
+  parseQueues,
+} from './trigger-parsers/queues.parser.js';
 
 interface LoadedTriggers {
   cron: CronTrigger[];
@@ -29,6 +34,11 @@ interface LoadedTriggers {
   telegram: TelegramTrigger[];
   slack: SlackTrigger[];
   matrix: MatrixTrigger[];
+}
+
+interface LoadedConfig {
+  queues: QueueConfig[];
+  triggers: LoadedTriggers;
 }
 
 const EMPTY_TRIGGERS: LoadedTriggers = {
@@ -43,6 +53,7 @@ const EMPTY_TRIGGERS: LoadedTriggers = {
 @Injectable()
 export class TriggerConfigService implements OnModuleInit {
   private readonly logger = new Logger(TriggerConfigService.name);
+  private queues: QueueConfig[] = [];
 
   private cronTriggers: CronTrigger[] = [];
   private linearTriggers: LinearTrigger[] = [];
@@ -52,13 +63,19 @@ export class TriggerConfigService implements OnModuleInit {
   private matrixTriggers: MatrixTrigger[] = [];
 
   onModuleInit(): void {
-    const result = this.loadTriggers();
+    const { queues, triggers: result } = this.loadConfig();
+    this.queues = queues;
     this.cronTriggers = result.cron;
     this.linearTriggers = result.linear;
     this.githubTriggers = result.github;
     this.telegramTriggers = result.telegram;
     this.slackTriggers = result.slack;
     this.matrixTriggers = result.matrix;
+  }
+
+  /** Queues from top-level `queues`; the default `runs` queue is not listed. */
+  getQueues(): QueueConfig[] {
+    return this.queues;
   }
 
   getCronTriggers(): CronTrigger[] {
@@ -159,7 +176,7 @@ export class TriggerConfigService implements OnModuleInit {
     });
   }
 
-  private loadTriggers(): LoadedTriggers {
+  private loadConfig(): LoadedConfig {
     const configPath = this.getConfigPath();
 
     // eslint-disable-next-line security/detect-non-literal-fs-filename -- path is built from os.homedir(), not user input
@@ -167,18 +184,23 @@ export class TriggerConfigService implements OnModuleInit {
       this.logger.warn(
         `Triggers config not found at ${configPath}, no cron triggers will be registered`,
       );
-      return { ...EMPTY_TRIGGERS };
+      return { queues: [], triggers: { ...EMPTY_TRIGGERS } };
     }
 
     try {
       // eslint-disable-next-line security/detect-non-literal-fs-filename -- path is built from os.homedir(), not user input
       const content = readFileSync(configPath, 'utf-8');
       const parsed = yaml.load(content) as TriggersFile | null;
-      if (!parsed?.triggers) return { ...EMPTY_TRIGGERS };
+      if (!parsed?.triggers) {
+        return { queues: [], triggers: { ...EMPTY_TRIGGERS } };
+      }
 
       const raw = this.dropPausedTriggers(
         parsed.triggers as unknown as Record<string, unknown>[],
       );
+      const queues = parseQueues(parsed.queues);
+      assertKnownQueues(raw, queues);
+
       const result: LoadedTriggers = {
         cron: parseCronTriggers(raw, this.logger),
         linear: parseLinearTriggers(raw, this.logger),
@@ -197,12 +219,17 @@ export class TriggerConfigService implements OnModuleInit {
           );
         }
       }
-      return result;
+      for (const queue of queues) {
+        this.logger.log(
+          `Loaded queue "${queue.name}" (concurrency ${queue.concurrency}) from ${configPath}`,
+        );
+      }
+      return { queues, triggers: result };
     } catch (error) {
       this.logger.error(
         `Failed to load triggers config: ${error instanceof Error ? error.message : String(error)}`,
       );
-      return { ...EMPTY_TRIGGERS };
+      return { queues: [], triggers: { ...EMPTY_TRIGGERS } };
     }
   }
 }

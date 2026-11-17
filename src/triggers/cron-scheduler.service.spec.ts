@@ -152,6 +152,26 @@ describe('CronSchedulerService', () => {
       });
     });
 
+    it("should enqueue into the trigger's queue", async () => {
+      triggerConfigService.getCronTriggers.mockReturnValue([
+        makeTrigger({ queue: 'nightly' }),
+      ]);
+      (cron.validate as jest.Mock).mockReturnValue(true);
+
+      let tickHandler: () => Promise<void>;
+      (cron.schedule as jest.Mock).mockImplementation((_schedule, handler) => {
+        tickHandler = handler as () => Promise<void>;
+        return mockTask;
+      });
+
+      scheduler.onModuleInit();
+      await tickHandler!();
+
+      expect(runsService.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({ queue: 'nightly' }),
+      );
+    });
+
     it('should swallow enqueue errors (logged, not thrown)', async () => {
       triggerConfigService.getCronTriggers.mockReturnValue([makeTrigger()]);
       (cron.validate as jest.Mock).mockReturnValue(true);

@@ -8,6 +8,7 @@ import {
   type Run,
   type NewRun,
 } from '../database/runs.schema.js';
+import { RUNS_QUEUE_NAME } from './runs.constants.js';
 
 export interface ListRunsFilters {
   status?: string;
@@ -29,6 +30,7 @@ export interface CreateRunCommand {
   externalSessionId?: string;
   appendSystemPrompt?: string;
   timeoutMs?: number;
+  queue?: string;
 }
 
 function mapRunRow(row: Record<string, unknown>): Run {
@@ -56,6 +58,7 @@ export class RunRepository {
       externalSessionId: command.externalSessionId,
       appendSystemPrompt: command.appendSystemPrompt,
       timeoutMs: command.timeoutMs,
+      queue: command.queue,
     };
     const result = await this.pool.query(
       `INSERT INTO runs (
@@ -67,8 +70,9 @@ export class RunRepository {
         prompt_preview,
         external_session_id,
         append_system_prompt,
-        timeout_ms
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+        timeout_ms,
+        queue
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
       RETURNING *`,
       [
         newRun.source,
@@ -80,6 +84,7 @@ export class RunRepository {
         newRun.externalSessionId ?? null,
         newRun.appendSystemPrompt ?? null,
         newRun.timeoutMs ?? null,
+        newRun.queue ?? RUNS_QUEUE_NAME,
       ],
     );
     const row = mapRunRow(result.rows[0] as Record<string, unknown>);

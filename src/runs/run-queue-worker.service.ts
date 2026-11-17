@@ -8,6 +8,8 @@ import {
 import { BOSS } from '../queue/queue.tokens.js';
 import type { Boss } from '../queue/queue.tokens.js';
 import { AppConfigService } from '../config/app-config.service.js';
+import { TriggerConfigService } from '../config/trigger-config.service.js';
+import type { QueueConfig } from '../config/trigger-config.interface.js';
 import { RunProcessorService } from './run-processor.service.js';
 import { ActiveSessionTrackerService } from './active-session-tracker.service.js';
 import { RUNS_QUEUE_NAME } from './runs.constants.js';
@@ -21,16 +23,32 @@ export class RunQueueWorkerService
   constructor(
     @Inject(BOSS) private readonly boss: Boss,
     private readonly appConfigService: AppConfigService,
+    private readonly triggerConfigService: TriggerConfigService,
     private readonly runProcessorService: RunProcessorService,
     private readonly activeSessionTracker: ActiveSessionTrackerService,
   ) {}
 
   async onModuleInit(): Promise<void> {
-    await this.boss.createQueue(RUNS_QUEUE_NAME);
-    await this.boss.work(
-      RUNS_QUEUE_NAME,
+    // The default queue, then one worker per queue from triggers.yaml, each
+    // with its own concurrency so a busy queue can't starve another.
+    const queues: QueueConfig[] = [
       {
-        localConcurrency: this.appConfigService.queueConcurrency,
+        name: RUNS_QUEUE_NAME,
+        concurrency: this.appConfigService.queueConcurrency,
+      },
+      ...this.triggerConfigService.getQueues(),
+    ];
+    for (const queue of queues) {
+      await this.registerWorker(queue);
+    }
+  }
+
+  private async registerWorker(queue: QueueConfig): Promise<void> {
+    await this.boss.createQueue(queue.name);
+    await this.boss.work(
+      queue.name,
+      {
+        localConcurrency: queue.concurrency,
         // One run per external session at a time (see RunsService.enqueue).
         // The in-memory variant is deliberate: pg-boss's DB-tracked
         // groupConcurrency races when several local workers fetch at once and
@@ -43,6 +61,7 @@ export class RunQueueWorkerService
           const runId = (job.data as { runId: string }).runId;
           this.logger.log('Processing run from queue', {
             runId,
+            queue: queue.name,
             jobId: job.id,
           });
           try {
@@ -63,8 +82,8 @@ export class RunQueueWorkerService
     );
 
     this.logger.log('Registered queue worker', {
-      queue: RUNS_QUEUE_NAME,
-      concurrency: this.appConfigService.queueConcurrency,
+      queue: queue.name,
+      concurrency: queue.concurrency,
     });
   }
 

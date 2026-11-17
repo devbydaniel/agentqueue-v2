@@ -137,6 +137,7 @@ export class MatrixCallSessionService {
           .filter(Boolean)
           .join('\n\n'),
         timeoutMs: trigger.timeout_ms,
+        queue: trigger.queue,
       });
       this.logger.log('Run enqueued', { ...callLogIds(call), runId });
     } catch (error) {

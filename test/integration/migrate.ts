@@ -15,10 +15,13 @@ function extractUpSql(content: string): string {
   return content.slice(upIndex, downIndex === -1 ? undefined : downIndex).trim();
 }
 
-export async function applyMigrations(pool: pg.Pool): Promise<void> {
+export async function applyMigrations(
+  pool: pg.Pool,
+  include: (file: string) => boolean = () => true,
+): Promise<void> {
   const migrationsDir = path.resolve(__dirname, '../../src/database/migrations');
   const files = readdirSync(migrationsDir)
-    .filter((file) => file.endsWith('.sql'))
+    .filter((file) => file.endsWith('.sql') && include(file))
     .sort();
 
   for (const file of files) {
