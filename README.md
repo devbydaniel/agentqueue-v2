@@ -98,7 +98,7 @@ In production, set the `DATABASE_URL` environment variable.
 | `LANGFUSE_PUBLIC_KEY` | No | Langfuse public key |
 | `LANGFUSE_BASE_URL` | No | Langfuse API URL |
 | `DATABASE_URL` | No* | Postgres connection string (default: local dev; **required** in production) |
-| `QUEUE_CONCURRENCY` | No | Max concurrent queue jobs per worker (default: `5`) |
+| `QUEUE_CONCURRENCY` | No | Max concurrent runs in the default `runs` queue (default: `5`); other queues are set in `triggers.yaml` |
 | `QUEUE_RETRY_LIMIT` | No | Max retry attempts for failed queue jobs (default: `3`) |
 | `RUN_TIMEOUT_MS` | No | Default per-run timeout in milliseconds (default: `1800000` / 30 min) |
 | `LINEAR_SIGNING_SECRET` | No | Referenced via `${VAR}` in trigger config |
@@ -302,6 +302,45 @@ webhooks for it are ignored. Remove the line (or set `paused: false`) and restar
     paused: true
     schedule: "0 8 * * *"
 ```
+
+#### Queues
+
+Runs wait in the `runs` queue, which works on `QUEUE_CONCURRENCY` runs at a
+time. A trigger can run in a queue of its own instead, so its runs don't wait
+behind (or block) everything else. Define the queue at the top level and name
+it with `queue` on any trigger type:
+
+```yaml
+queues:
+  gate:
+    concurrency: 2
+
+triggers:
+  - name: pr-gate
+    type: github
+    queue: gate
+    events: [issue_comment]
+    cwd: ~/dev/my-repo
+    prompt: "Gate PR #{{issue.number}}"
+```
+
+- Each queue has its own worker with its own `concurrency` (an integer of at
+  least 1). Runs of the same external session (a Matrix thread, a Telegram
+  chat, a Linear agent session) still run one at a time within a queue.
+- A trigger without `queue` uses `runs`. `queue: runs` is allowed; defining
+  `runs` under `queues` is not, use `QUEUE_CONCURRENCY`.
+- Follow-up messages of a session go to the queue of the trigger that handles
+  them, which for Linear is the trigger that created the session.
+- Runs from `POST /runs` (including spawned child runs) and flow steps always
+  use `runs`.
+- A trigger that names an undefined queue, or an invalid `queues` entry, fails
+  loading the whole config: the error is logged (`Failed to load triggers
+  config: Trigger "pr-gate" names undefined queue "gaet"; …`) and no trigger
+  is registered. There is no fallback to `runs`.
+- Every run records its queue (`queue` on `GET /runs/:id`); aborting a waiting
+  run cancels its job in that queue. Runs created before queues existed count
+  as `runs`.
+- Queues are read at startup; restart after changing them.
 
 ### Before hooks
 

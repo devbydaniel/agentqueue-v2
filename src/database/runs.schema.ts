@@ -37,6 +37,8 @@ export interface Run {
   appendSystemPrompt: string | null;
   timeoutMs: number | null;
   queueJobId: string | null;
+  /** pg-boss queue the run was sent to; `runs` unless its trigger names one. */
+  queue: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -57,6 +59,7 @@ export interface NewRun {
   appendSystemPrompt?: string | null;
   timeoutMs?: number | null;
   queueJobId?: string | null;
+  queue?: string;
   createdAt?: Date;
   updatedAt?: Date;
 }

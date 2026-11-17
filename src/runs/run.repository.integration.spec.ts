@@ -49,6 +49,19 @@ describe('RunRepository (integration)', () => {
       expect(run.updatedAt).toBeInstanceOf(Date);
     });
 
+    it('should record the default queue when none is given', async () => {
+      const run = await repo.create(baseCommand);
+
+      expect(run.queue).toBe('runs');
+      expect((await repo.findById(run.id))!.queue).toBe('runs');
+    });
+
+    it('should record the queue the run is sent to', async () => {
+      const run = await repo.create({ ...baseCommand, queue: 'gate' });
+
+      expect((await repo.findById(run.id))!.queue).toBe('gate');
+    });
+
     it('should set optional fields when provided', async () => {
       const run = await repo.create({
         ...baseCommand,

@@ -249,6 +249,7 @@ export class LinearWebhooksService {
         externalSessionId: payload.agentSessionId,
         appendSystemPrompt,
         timeoutMs: trigger.timeout_ms,
+        queue: trigger.queue,
       })
       .catch((error: unknown) => {
         this.logger.error('Failed to enqueue Linear agent run', {

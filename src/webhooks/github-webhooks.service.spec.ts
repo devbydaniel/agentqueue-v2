@@ -284,6 +284,24 @@ describe('GithubWebhooksService', () => {
       );
     });
 
+    it("should dispatch the run to the trigger's queue", async () => {
+      (triggerConfigService.getGithubTriggers as jest.Mock).mockReturnValue([
+        { ...makePrReviewTrigger(), queue: 'gate' },
+      ]);
+
+      service.handleWebhook({
+        rawBody: validRawBody,
+        signatureHeader: validSignature,
+        eventType: 'pull_request_review',
+        body: payload,
+      });
+      await flush();
+
+      expect(runsService.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({ queue: 'gate' }),
+      );
+    });
+
     it('should skip when resolved cwd is not a usable directory', async () => {
       fs.rmSync(path.join(tmpDir, 'my-repo'), { recursive: true, force: true });
 

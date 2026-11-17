@@ -321,6 +321,33 @@ describe('LinearWebhooksService', () => {
       );
     });
 
+    it("should resume the session in the original trigger's queue", async () => {
+      const assignedTrigger = makeTrigger({ on: 'assigned', queue: 'dev' });
+      const mentionedTrigger = makeTrigger({ on: 'mentioned' });
+      triggerConfigService.getLinearTriggersByName.mockReturnValue([
+        mentionedTrigger,
+        assignedTrigger,
+      ]);
+      parserService.parsePayload.mockReturnValue(makePromptedPayload());
+      runsService.findTriggerNameByExternalSessionId.mockResolvedValue(
+        'coding-agent:assigned',
+      );
+      triggerConfigService.getLinearTriggerByKey.mockReturnValue(
+        assignedTrigger,
+      );
+
+      service.handleWebhook(makeParams());
+      await flush();
+
+      expect(runsService.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          triggerName: 'coding-agent:assigned',
+          externalSessionId: 'session-1',
+          queue: 'dev',
+        }),
+      );
+    });
+
     it('should fall back to first trigger when original trigger not found in DB', async () => {
       const firstTrigger = makeTrigger({ on: 'assigned' });
       const secondTrigger = makeTrigger({ on: 'mentioned' });

@@ -4,7 +4,7 @@ import {
   type SlackTrigger,
 } from '../trigger-config.interface.js';
 import { normalizeCwd } from '../../common/utils/cwd-path.js';
-import { hasRequiredFields, validateCwd } from './common.js';
+import { hasRequiredFields, optionalQueue, validateCwd } from './common.js';
 
 const REQUIRED = [
   'name',
@@ -63,6 +63,7 @@ const mapEntry = (entry: Record<string, unknown>): SlackTrigger => {
     ...(entry['timeout_ms']
       ? { timeout_ms: entry['timeout_ms'] as number }
       : {}),
+    ...optionalQueue(entry),
   };
 };
 

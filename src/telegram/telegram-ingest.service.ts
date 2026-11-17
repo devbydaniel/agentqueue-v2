@@ -288,6 +288,7 @@ export class TelegramIngestService {
         externalSessionId: sessionKey,
         appendSystemPrompt,
         timeoutMs: trigger.timeout_ms,
+        queue: trigger.queue,
       })
       .catch((error: unknown) => {
         this.logger.error('Failed to enqueue Telegram run', {

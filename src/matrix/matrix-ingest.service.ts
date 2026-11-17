@@ -172,6 +172,7 @@ export class MatrixIngestService {
           voiceEnabled,
         ),
         timeoutMs: trigger.timeout_ms,
+        queue: trigger.queue,
       });
     } catch (error) {
       this.logger.error('Failed to enqueue Matrix run', {

@@ -38,6 +38,8 @@ export interface EnqueueRunCommand {
   externalSessionId?: string;
   appendSystemPrompt?: string;
   timeoutMs?: number;
+  /** The trigger's queue; runs without one go to the default `runs` queue. */
+  queue?: string;
 }
 
 export interface EnqueueRunResult {
@@ -94,6 +96,7 @@ export class RunsService {
     this.logger.log('Enqueueing run', {
       cwd: command.cwd,
       source: command.source,
+      queue: command.queue ?? RUNS_QUEUE_NAME,
     });
 
     const cwd = ensureDirectoryExists(command.cwd);
@@ -107,6 +110,7 @@ export class RunsService {
       externalSessionId: command.externalSessionId,
       appendSystemPrompt: command.appendSystemPrompt,
       timeoutMs: command.timeoutMs,
+      queue: command.queue,
     };
 
     const run = await this.runRepository.create(createCommand);
@@ -114,7 +118,7 @@ export class RunsService {
     let jobId: string | null;
     try {
       jobId = await this.boss.send(
-        RUNS_QUEUE_NAME,
+        run.queue,
         { runId: run.id },
         this.buildJobOptions(command),
       );
@@ -133,6 +137,7 @@ export class RunsService {
 
     this.logger.log('Run enqueued', {
       runId: run.id,
+      queue: run.queue,
       queueJobId: jobId,
     });
 
@@ -145,7 +150,8 @@ export class RunsService {
    *
    * Runs sharing an external session resume the same SDK session, so they are
    * grouped and the worker runs at most one per group at a time — otherwise a
-   * follow-up message sent mid-run forks the conversation.
+   * follow-up message sent mid-run forks the conversation. Grouping applies
+   * within a queue; a session's runs come from its trigger, so they share one.
    */
   private buildJobOptions(command: EnqueueRunCommand): SendOptions {
     const expireInSeconds = jobExpireInSeconds(
@@ -205,7 +211,7 @@ export class RunsService {
     if (run.status === 'waiting') {
       // Cancel the pg-boss job if it exists
       if (run.queueJobId) {
-        await this.boss.cancel(RUNS_QUEUE_NAME, run.queueJobId);
+        await this.boss.cancel(run.queue, run.queueJobId);
       }
       run.status = 'aborted';
       run.completedAt = new Date();
